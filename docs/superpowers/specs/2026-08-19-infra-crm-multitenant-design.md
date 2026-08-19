@@ -1,7 +1,7 @@
 # Infraestrutura — CRM Hortifruti (SaaS multi-tenant)
 
 **Data:** 2026-08-19
-**Status:** Aprovado — pendente definição de stack da aplicação
+**Status:** Aprovado
 **Escopo:** Infraestrutura, banco de dados, backup e disponibilidade. Não cobre funcionalidades do CRM nem design de interface.
 
 ---
@@ -89,6 +89,32 @@ Além disso, integrar Supabase Auth com multi-tenancy por subdomínio e RLS exig
 **Proibido:** gerar PDF no servidor com Chromium headless (Puppeteer/Playwright). Cada instância consome 300-500MB de RAM; dois relatórios simultâneos derrubam uma VPS de 4GB. Se surgir necessidade de PDF como arquivo, usar biblioteca de geração direta.
 
 **Atenção:** se algum cliente usar impressora térmica de cupom (ESC/POS), o layout precisa de CSS com largura de 80mm. Não impacta infraestrutura.
+
+### D7 — Stack: React SPA + Hono
+
+| Camada | Escolha |
+|---|---|
+| Front | Vite + React, build estático no Cloudflare Pages |
+| API | Hono nos Cloudflare Workers |
+| Banco | Conexão PostgreSQL direta via Supavisor (pooler do Supabase) |
+
+**Rationale:** Hono roda tanto em Cloudflare Workers quanto em Node. Migrar do estágio 0 para o estágio 1 vira trocar o adaptador (`hono/cloudflare-workers` → `@hono/node-server`) e escrever um Dockerfile, sem reescrever rotas. Isso é o que sustenta D4: a estratégia inteira depende de a saída ser barata.
+
+Separar front estático de API também mantém o front portátil — no estágio 1 ele passa a ser servido pelo Caddy sem alteração.
+
+#### Três armadilhas da conexão em ambiente serverless
+
+**1. Porta 6543 (transaction mode), não 5432.** Workers são efêmeros e cada requisição pode usar uma conexão diferente. Session mode esgota o pool.
+
+**2. Prepared statements desligados.** Transaction pooling não os suporta. Com `postgres.js`: `postgres(url, { prepare: false })`. O sintoma de esquecer é traiçoeiro — erros intermitentes de *prepared statement already exists* que só aparecem sob concorrência, ou seja, em produção e não em desenvolvimento.
+
+**3. `SET LOCAL`, jamais `SET`.** Já citado na seção 3, mas em transaction pooling o erro deixa de ser teórico: a conexão volta ao pool ainda carregando o `app.tenant_id` da requisição anterior, e a próxima requisição a reusar aquela conexão enxerga os dados de outro cliente. **É o caminho mais curto para vazamento de dados entre tenants nesta arquitetura.**
+
+#### Migrations
+
+Arquivos `.sql` numerados, aplicados por script próprio. **Sem ORM com formato de migration proprietário** — a spec exige que o schema seja restaurável em qualquer PostgreSQL, e isso inclui as políticas de RLS.
+
+ORM é opcional para queries. Se usar, Drizzle (SQL previsível, roda em Workers); Prisma tem atrito significativo em Workers.
 
 ---
 
@@ -346,11 +372,11 @@ O que torna o risco gerenciável com **um** cliente: contato direto com o dono d
 
 | # | Decisão | Impacto |
 |---|---|---|
-| P1 | **Stack da aplicação** (Node/Next, Laravel, Python…) | Não altera nada nesta spec. Define o container do estágio 1, a estratégia de pooling e o formato das migrations. **Bloqueia o plano de implementação.** |
-| P2 | Domínio a registrar | Define os subdomínios por tenant |
-| P3 | Escopo do PWA offline | Requisito de produto, entra no roadmap da aplicação |
+| P1 | Domínio a registrar | Define os subdomínios por tenant |
+| P2 | Escopo do PWA offline | Requisito de produto — entra no roadmap da aplicação, não nesta spec |
+| P3 | Avaliar Cloudflare Hyperdrive no lugar do Supavisor | Simplificaria o pooling a partir dos Workers. Confirmar disponibilidade e limites no plano gratuito antes de adotar; o desenho atual não depende disso |
 
-Sobre P1: dado que o front vai para Cloudflare Pages e o design virá do Claude Design (HTML/React), a escolha natural é **SPA React + API em Cloudflare Workers**, ou **Next.js** via `next-on-pages`. Ambas são compatíveis com o desenho acima; a segunda tem mais atrito no Cloudflare e migra melhor para VPS depois.
+Stack da aplicação: definida em **D7** (React SPA + Hono).
 
 ---
 

@@ -113,6 +113,11 @@ describe('autorizacao', () => {
 })
 
 describe('mass assignment', () => {
+  // O JSON de resposta nao expõe mais `tenant_id` (Task 10, fix round 1 —
+  // identificador interno que nao precisa vazar). A protecao contra mass
+  // assignment continua existindo — so nao da mais pra confirmar lendo o
+  // corpo da resposta, entao confere direto no banco via pool `admin`
+  // (bypassa RLS) que o tenant_id gravado foi o da sessao, nao o forjado.
   it('POST ignora tenant_id e id enviados no corpo', async () => {
     const res = await pedir('/api/clientes', comoAdmin({
       ...json({
@@ -123,8 +128,10 @@ describe('mass assignment', () => {
     }))
     expect(res.status).toBe(201)
     const corpo = await res.json()
-    expect(corpo.tenant_id).toBe(tenantId)
     expect(corpo.id).not.toBe('00000000-0000-0000-0000-000000000000')
+
+    const [linha] = await admin`select tenant_id from clientes where id = ${corpo.id}`
+    expect(linha.tenant_id).toBe(tenantId)
   })
 
   it('PUT ignora tenant_id enviado no corpo', async () => {
@@ -139,7 +146,37 @@ describe('mass assignment', () => {
     expect(resPut.status).toBe(200)
     const atualizado = await resPut.json()
     expect(atualizado.status).toBe('inadimplente')
-    expect(atualizado.tenant_id).toBe(tenantId)
+
+    const [linha] = await admin`select tenant_id from clientes where id = ${criado.id}`
+    expect(linha.tenant_id).toBe(tenantId)
+  })
+})
+
+describe('paraJson nao expõe tenant_id', () => {
+  it('POST, GET /:id, GET / e PUT nunca incluem tenant_id (mas mantêm criado_em/alterado_em)', async () => {
+    const resPost = await pedir('/api/clientes', comoAdmin(json({ nome: 'Cliente Sem Tenant Id' })))
+    expect(resPost.status).toBe(201)
+    const criado = await resPost.json()
+    expect(criado).not.toHaveProperty('tenant_id')
+    expect(criado).toHaveProperty('criado_em')
+    expect(criado).toHaveProperty('alterado_em')
+
+    const resGetId = await pedir(`/api/clientes/${criado.id}`, comoAdmin())
+    expect(await resGetId.json()).not.toHaveProperty('tenant_id')
+
+    const resGetLista = await pedir('/api/clientes', comoAdmin())
+    const lista = await resGetLista.json()
+    expect(lista.length).toBeGreaterThan(0)
+    for (const c of lista) expect(c).not.toHaveProperty('tenant_id')
+
+    const resPut = await pedir(`/api/clientes/${criado.id}`, comoAdmin({
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ obs: 'x' }),
+    }))
+    const atualizado = await resPut.json()
+    expect(atualizado).not.toHaveProperty('tenant_id')
+    expect(atualizado).toHaveProperty('alterado_em')
   })
 })
 
@@ -208,6 +245,34 @@ describe('codigos de status dos handlers', () => {
     const res = await pedir('/api/clientes', comoAdmin(json({ resp: 'sem nome' })))
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ erro: 'nome e obrigatorio' })
+  })
+
+  it('POST com limite negativo -> 400', async () => {
+    const res = await pedir('/api/clientes', comoAdmin(json({ nome: 'Limite Ruim', limite: -100 })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'limite nao pode ser negativo' })
+  })
+
+  it('POST com prazo negativo -> 400', async () => {
+    const res = await pedir('/api/clientes', comoAdmin(json({ nome: 'Prazo Ruim', prazo: -1 })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'prazo nao pode ser negativo' })
+  })
+
+  it('PUT com limite negativo -> 400, sem alterar o cliente', async () => {
+    const resPost = await pedir('/api/clientes', comoAdmin(json({ nome: 'Cliente Limite Ok', limite: 500 })))
+    const criado = await resPost.json()
+
+    const res = await pedir(`/api/clientes/${criado.id}`, comoAdmin({
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ limite: -1 }),
+    }))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'limite nao pode ser negativo' })
+
+    const resGet = await pedir(`/api/clientes/${criado.id}`, comoAdmin())
+    expect((await resGet.json()).limite).toBe(500)
   })
 
   it('POST com nome duplicado no mesmo tenant -> 409', async () => {

@@ -77,6 +77,60 @@ describe('ModalCliente — validação de nome', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Informe o nome.')
     expect(mockPost).not.toHaveBeenCalled()
   })
+
+  it('form tem noValidate — quem bloqueia o submit e a validacao em JS, nao o navegador', () => {
+    render(<ModalCliente cliente={null} onSalvo={() => {}} onFechar={() => {}} />)
+    // getByRole('dialog') e a propria div do overlay (ver componente); o
+    // <form> e seu unico filho direto — buscamos por tag porque `form` nao
+    // tem role/nome acessivel proprio quando ja esta dentro de um dialog.
+    const form = screen.getByRole('dialog').querySelector('form')
+    expect(form).toHaveAttribute('novalidate')
+  })
+
+  it('campo nome mantem required (semantica de acessibilidade, aria-required)', () => {
+    render(<ModalCliente cliente={null} onSalvo={() => {}} onFechar={() => {}} />)
+    expect(screen.getByLabelText(/nome do estabelecimento/i)).toBeRequired()
+  })
+})
+
+describe('ModalCliente — validação de limite/prazo não-negativos', () => {
+  it('limite negativo: mostra erro inline no campo, nao chama a API', () => {
+    render(<ModalCliente cliente={null} onSalvo={() => {}} onFechar={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/nome do estabelecimento/i), { target: { value: 'Mercado X' } })
+    fireEvent.change(screen.getByLabelText(/limite de cr[eé]dito/i), { target: { value: '-500' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    expect(screen.getByText('Limite não pode ser negativo.')).toBeInTheDocument()
+    expect(mockPost).not.toHaveBeenCalled()
+  })
+
+  it('prazo negativo: mostra erro inline no campo, nao chama a API', () => {
+    render(<ModalCliente cliente={null} onSalvo={() => {}} onFechar={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/nome do estabelecimento/i), { target: { value: 'Mercado Y' } })
+    fireEvent.change(screen.getByLabelText(/prazo de pagamento/i), { target: { value: '-7' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    expect(screen.getByText('Prazo não pode ser negativo.')).toBeInTheDocument()
+    expect(mockPost).not.toHaveBeenCalled()
+  })
+
+  it('limite e prazo negativos ao mesmo tempo: mostra os dois erros', () => {
+    render(<ModalCliente cliente={null} onSalvo={() => {}} onFechar={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/nome do estabelecimento/i), { target: { value: 'Mercado Z' } })
+    fireEvent.change(screen.getByLabelText(/limite de cr[eé]dito/i), { target: { value: '-1' } })
+    fireEvent.change(screen.getByLabelText(/prazo de pagamento/i), { target: { value: '-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    expect(screen.getByText('Limite não pode ser negativo.')).toBeInTheDocument()
+    expect(screen.getByText('Prazo não pode ser negativo.')).toBeInTheDocument()
+    expect(mockPost).not.toHaveBeenCalled()
+  })
+
+  it('valores validos (inclusive zero) nao disparam erro nenhum', async () => {
+    mockPost.mockResolvedValue({ ...clienteExistente, id: 'ok-1', nome: 'Mercado Ok', limite: 0, prazo: 0 })
+    render(<ModalCliente cliente={null} onSalvo={() => {}} onFechar={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/nome do estabelecimento/i), { target: { value: 'Mercado Ok' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    expect(screen.queryByText(/n[aã]o pode ser negativo/i)).not.toBeInTheDocument()
+  })
 })
 
 describe('ModalCliente — envio', () => {

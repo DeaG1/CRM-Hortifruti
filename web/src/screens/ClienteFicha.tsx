@@ -108,8 +108,12 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
       </div>
 
       {confirmandoExclusao && (
-        <div className="ficha-confirma" role="alertdialog" aria-label="Confirmar exclusão">
-          <p className="ficha-confirma-texto">
+        // `region` (nao `alertdialog`): alertdialog pressupoe um dialogo modal
+        // com focus trap — isto e um painel inline, sem foco roubado nem
+        // Escape pra fechar. `role="alert"` no texto garante que a confirmacao
+        // seja anunciada quando aparece, sem prometer semantica que a UI nao tem.
+        <div className="ficha-confirma" role="region" aria-label="Confirmar exclusão">
+          <p className="ficha-confirma-texto" role="alert">
             Excluir <strong>{cliente.nome}</strong>? O cadastro será apagado definitivamente — não é
             possível desfazer.
           </p>

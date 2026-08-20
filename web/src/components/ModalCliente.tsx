@@ -16,6 +16,8 @@ interface ModalClienteProps {
 export function ModalCliente({ cliente, onSalvo, onFechar, onSessaoExpirada }: ModalClienteProps) {
   const [rascunho, setRascunho] = useState<Rascunho>({ ...CLIENTE_NOVO, ...(cliente ?? {}) })
   const [erroNome, setErroNome] = useState('')
+  const [erroLimite, setErroLimite] = useState('')
+  const [erroPrazo, setErroPrazo] = useState('')
   const [erroGeral, setErroGeral] = useState('')
   const [salvando, setSalvando] = useState(false)
   const editando = Boolean(cliente?.id)
@@ -33,17 +35,34 @@ export function ModalCliente({ cliente, onSalvo, onFechar, onSessaoExpirada }: M
   async function salvar(e: FormEvent) {
     e.preventDefault()
     setErroNome('')
+    setErroLimite('')
+    setErroPrazo('')
     setErroGeral('')
     if (!rascunho.nome.trim()) {
       setErroNome('Informe o nome.')
       return
     }
+    // `min="0"` no input e so UX (o navegador nao bloqueia mais o submit —
+    // ver `noValidate` no form). Esta e a validacao que decide se o pedido
+    // sai; a API valida de novo (defesa em profundidade — Fix round 1).
+    const limiteNum = Number(rascunho.limite)
+    const prazoNum = Number(rascunho.prazo)
+    let temCampoInvalido = false
+    if (Number.isFinite(limiteNum) && limiteNum < 0) {
+      setErroLimite('Limite não pode ser negativo.')
+      temCampoInvalido = true
+    }
+    if (Number.isFinite(prazoNum) && prazoNum < 0) {
+      setErroPrazo('Prazo não pode ser negativo.')
+      temCampoInvalido = true
+    }
+    if (temCampoInvalido) return
     setSalvando(true)
     try {
       const corpo = {
         ...rascunho,
-        limite: Number(rascunho.limite) || 0,
-        prazo: Number(rascunho.prazo) || 0,
+        limite: limiteNum || 0,
+        prazo: prazoNum || 0,
       }
       const salvo = editando
         ? await api.put<Cliente>(`/api/clientes/${cliente!.id}`, corpo)
@@ -73,8 +92,14 @@ export function ModalCliente({ cliente, onSalvo, onFechar, onSessaoExpirada }: M
       onClick={onFechar}
     >
       {/* stopPropagation aqui e o que faz clicar no fundo fechar o modal sem
-          que clicar dentro dele feche tambem — closeModalBackdrop do protótipo. */}
-      <form className="modal-card" onClick={e => e.stopPropagation()} onSubmit={salvar}>
+          que clicar dentro dele feche tambem — closeModalBackdrop do protótipo.
+          noValidate desliga so a UI nativa de bloqueio do navegador (que
+          impediria o onSubmit de rodar e escondia a mensagem custom em
+          role="alert" atras de um tooltip nativo) — o `required` do campo
+          nome continua no DOM e continua mapeando pra aria-required="true"
+          na arvore de acessibilidade; so quem decide bloquear o submit agora
+          e a validacao em JS logo abaixo, nao o navegador. */}
+      <form className="modal-card" onClick={e => e.stopPropagation()} onSubmit={salvar} noValidate>
         <div className="modal-header">
           <span className="modal-header-dot" />
           <div className="modal-header-titulo">{editando ? 'Editar cliente' : 'Novo cliente'}</div>
@@ -90,6 +115,7 @@ export function ModalCliente({ cliente, onSalvo, onFechar, onSessaoExpirada }: M
                 {...campo('nome')}
                 placeholder="Ex.: Mercado Bom Preço"
                 autoFocus
+                required
               />
               {erroNome && <p className="modal-erro" role="alert">{erroNome}</p>}
             </div>
@@ -155,10 +181,12 @@ export function ModalCliente({ cliente, onSalvo, onFechar, onSessaoExpirada }: M
                 step="0.01"
                 {...campo('limite')}
               />
+              {erroLimite && <p className="modal-erro" role="alert">{erroLimite}</p>}
             </div>
             <div className="modal-campo">
               <label className="modal-rotulo" htmlFor="cliente-prazo">Prazo de pagamento (dias)</label>
               <input className="modal-input modal-input--mono" type="number" min="0" {...campo('prazo')} />
+              {erroPrazo && <p className="modal-erro" role="alert">{erroPrazo}</p>}
             </div>
 
             <div className="modal-campo">

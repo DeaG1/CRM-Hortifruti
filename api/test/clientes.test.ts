@@ -63,6 +63,20 @@ describe('clientes', () => {
     ).rejects.toThrow()
   })
 
+  it('rejeita limite negativo (clientes_limite_nao_negativo)', async () => {
+    await expect(
+      withTenant(sql, tenantA, tx => tx`
+        insert into clientes (tenant_id, nome, limite) values (${tenantA}, 'Limite Negativo', -100)`)
+    ).rejects.toThrow()
+  })
+
+  it('rejeita prazo negativo (clientes_prazo_nao_negativo)', async () => {
+    await expect(
+      withTenant(sql, tenantA, tx => tx`
+        insert into clientes (tenant_id, nome, prazo) values (${tenantA}, 'Prazo Negativo', -5)`)
+    ).rejects.toThrow()
+  })
+
   it('o driver devolve numeric como string — por isso paraJson existe', async () => {
     await withTenant(sql, tenantA, tx => tx`
       insert into clientes (tenant_id, nome, limite) values (${tenantA}, 'Com Limite', 6000)`)

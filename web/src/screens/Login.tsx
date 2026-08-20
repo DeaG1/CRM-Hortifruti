@@ -1,0 +1,105 @@
+import { useState, type FormEvent } from 'react'
+import { api, ErroApi } from '../api/client'
+import './Login.css'
+
+export function Login({ onEntrar }: { onEntrar: () => void }) {
+  const [slug, setSlug] = useState('')
+  const [email, setEmail] = useState('')
+  const [senha, setSenha] = useState('')
+  const [erro, setErro] = useState('')
+  const [enviando, setEnviando] = useState(false)
+
+  async function entrar(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setErro('')
+    setEnviando(true)
+    try {
+      await api.post('/api/login', { slug, email, senha })
+      onEntrar()
+    } catch (err) {
+      // Mensagem sempre generica: distinguir "hortifruti nao existe",
+      // "e-mail nao encontrado" e "senha errada" permitiria enumerar
+      // tenants e contas cadastradas so tentando logins.
+      setErro(
+        err instanceof ErroApi && err.status === 401
+          ? 'Credenciais inválidas.'
+          : 'Não foi possível entrar. Tente novamente.',
+      )
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <div className="login-pagina">
+      <div className="login-conteudo">
+        <div className="login-cabecalho">
+          <div className="login-logo">
+            <div className="login-logo-marca" />
+          </div>
+          <div className="login-marca">
+            <div className="login-marca-titulo">CRM</div>
+            <div className="login-marca-sub">Gestão da operação</div>
+          </div>
+        </div>
+
+        <form className="login-card" onSubmit={entrar}>
+          <h1 className="login-titulo">Entrar</h1>
+          <p className="login-subtitulo">Informe os dados de acesso do seu hortifrúti.</p>
+
+          <div className="login-campo">
+            <label className="login-rotulo" htmlFor="login-slug">Hortifrúti</label>
+            <input
+              id="login-slug"
+              className="login-input"
+              value={slug}
+              onChange={e => setSlug(e.target.value)}
+              placeholder="slug do hortifrúti"
+              autoComplete="organization"
+              disabled={enviando}
+              required
+            />
+          </div>
+
+          <div className="login-campo">
+            <label className="login-rotulo" htmlFor="login-email">E-mail</label>
+            <input
+              id="login-email"
+              className="login-input"
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="voce@hortifruti.com"
+              autoComplete="username"
+              disabled={enviando}
+              required
+            />
+          </div>
+
+          <div className="login-campo login-campo--ultimo">
+            <label className="login-rotulo" htmlFor="login-senha">Senha</label>
+            <input
+              id="login-senha"
+              className="login-input"
+              type="password"
+              value={senha}
+              onChange={e => setSenha(e.target.value)}
+              placeholder="••••••••"
+              autoComplete="current-password"
+              disabled={enviando}
+              required
+            />
+          </div>
+
+          {erro && (
+            <div className="login-erro" role="alert">{erro}</div>
+          )}
+
+          <button type="submit" className="login-botao" disabled={enviando}>
+            {enviando ? 'Entrando…' : 'Entrar no sistema'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}

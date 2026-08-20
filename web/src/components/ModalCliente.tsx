@@ -185,7 +185,11 @@ export function ModalCliente({ cliente, onSalvo, onFechar, onSessaoExpirada }: M
             </div>
             <div className="modal-campo">
               <label className="modal-rotulo" htmlFor="cliente-prazo">Prazo de pagamento (dias)</label>
-              <input className="modal-input modal-input--mono" type="number" min="0" {...campo('prazo')} />
+              {/* step="1": prazo e dias inteiros. Sem isto (e com noValidate
+                  desligando o bloqueio nativo do form) o navegador aceitava
+                  "1.5" no submit, que so ia falhar la na API (ver
+                  api/src/routes/clientes.ts, erroDeCampoInvalido). */}
+              <input className="modal-input modal-input--mono" type="number" min="0" step="1" {...campo('prazo')} />
               {erroPrazo && <p className="modal-erro" role="alert">{erroPrazo}</p>}
             </div>
 

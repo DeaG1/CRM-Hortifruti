@@ -112,6 +112,14 @@ describe('ModalCliente — validação de limite/prazo não-negativos', () => {
     expect(mockPost).not.toHaveBeenCalled()
   })
 
+  it('campo prazo tem step="1" — e dias inteiros, o navegador nao deve oferecer fracionario', () => {
+    // API real valida inteiro tambem (erroDeCampoInvalido em
+    // api/src/routes/clientes.ts) — step aqui e so a primeira camada, para
+    // o form noValidate nao deixar "1.5" passar despercebido pela UI.
+    render(<ModalCliente cliente={null} onSalvo={() => {}} onFechar={() => {}} />)
+    expect(screen.getByLabelText(/prazo de pagamento/i)).toHaveAttribute('step', '1')
+  })
+
   it('limite e prazo negativos ao mesmo tempo: mostra os dois erros', () => {
     render(<ModalCliente cliente={null} onSalvo={() => {}} onFechar={() => {}} />)
     fireEvent.change(screen.getByLabelText(/nome do estabelecimento/i), { target: { value: 'Mercado Z' } })

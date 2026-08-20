@@ -18,7 +18,18 @@ async function requisicao<T>(metodo: string, rota: string, corpo?: unknown): Pro
     body: corpo ? JSON.stringify(corpo) : undefined,
   })
   const texto = await resposta.text()
-  const dados = texto ? JSON.parse(texto) : null
+  // JSON.parse incondicional quebrava em silencio: um 500 com corpo texto
+  // puro ("Internal Server Error", o 500 padrao do runtime quando a API
+  // nao trata a excecao) lancava SyntaxError aqui dentro — antes de chegar
+  // ao `throw new ErroApi(...)` abaixo — entao o componente nunca recebia
+  // um ErroApi, so via a mensagem generica de catch. A API agora sempre
+  // devolve JSON em erro (app.onError em api/src/index.ts), mas o client
+  // nao pode depender disso: parse defensivo aqui, corpo nao-JSON vira
+  // `null` e o ErroApi sai do mesmo jeito, com o status HTTP correto.
+  let dados: unknown = null
+  if (texto) {
+    try { dados = JSON.parse(texto) } catch { dados = null }
+  }
   if (!resposta.ok) throw new ErroApi(resposta.status, dados)
   return dados as T
 }

@@ -63,13 +63,11 @@ export async function criarSessao(sql: Sql, usuarioId: string, tenantId: string)
 }
 
 export async function lerSessao(sql: Sql, token: string) {
-  // Sem tenant ainda — por isso consulta com o role admin do proprio pool
-  // usando join em tenants, e revalida o tenant logo em seguida.
+  // Sem tenant ainda — por isso passa pela funcao SECURITY DEFINER
+  // resolver_sessao() (migration 003), que recebe so o token e devolve
+  // no maximo uma linha, em vez de abrir a policy de sessoes.
   const [linha] = await sql<{ usuario_id: string; tenant_id: string; papel: string }[]>`
-    select s.usuario_id, s.tenant_id, u.papel
-    from sessoes s
-    join usuarios u on u.id = s.usuario_id
-    where s.token = ${token} and s.expira_em > now() and u.ativo = true`
+    select * from resolver_sessao(${token})`
   if (!linha) return null
   return { usuarioId: linha.usuario_id, tenantId: linha.tenant_id, papel: linha.papel }
 }

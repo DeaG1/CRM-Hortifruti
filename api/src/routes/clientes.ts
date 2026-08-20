@@ -21,6 +21,18 @@ function paraJson<T extends Record<string, unknown>>(linha: T) {
   return { ...linha, limite: Number(linha.limite ?? 0), prazo: Number(linha.prazo ?? 0) }
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Sem isto, um id malformado chega intacto ao `where id = $1` e o Postgres
+ * lanca "invalid input syntax for type uuid" tentando o cast — erro que
+ * sobe sem tratamento (500, corpo texto puro, quebra o contrato {erro}
+ * que toda outra resposta de erro respeita).
+ */
+function idValido(id: string): boolean {
+  return UUID_RE.test(id)
+}
+
 export const clientes = new Hono<{
   Bindings: { DATABASE_URL: string }
   Variables: Vars
@@ -35,8 +47,10 @@ clientes.get('/', async (c) => {
 })
 
 clientes.get('/:id', async (c) => {
+  const id = c.req.param('id')
+  if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
   const [linha] = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
-    tx`select * from clientes where id = ${c.req.param('id')}`)
+    tx`select * from clientes where id = ${id}`)
   return linha ? c.json(paraJson(linha)) : c.json({ erro: 'nao encontrado' }, 404)
 })
 
@@ -49,7 +63,9 @@ clientes.post('/', async (c) => {
       tx`insert into clientes ${tx({ ...dados, tenant_id: tenantId })} returning *`)
     return c.json(paraJson(linha), 201)
   } catch (err) {
-    if (String(err).includes('duplicate key')) {
+    // 23505 = unique_violation (SQLSTATE), nao substring de mensagem: o
+    // texto exato do Postgres pode mudar entre versoes/locale, o codigo nao.
+    if ((err as { code?: string }).code === '23505') {
       return c.json({ erro: 'ja existe um cliente com esse nome' }, 409)
     }
     throw err
@@ -57,16 +73,27 @@ clientes.post('/', async (c) => {
 })
 
 clientes.put('/:id', async (c) => {
+  const id = c.req.param('id')
+  if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
   const dados = sanear(await c.req.json())
   if (Object.keys(dados).length === 0) return c.json({ erro: 'nada a alterar' }, 400)
-  const [linha] = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
-    tx`update clientes set ${tx({ ...dados, alterado_em: new Date() })}
-       where id = ${c.req.param('id')} returning *`)
-  return linha ? c.json(paraJson(linha)) : c.json({ erro: 'nao encontrado' }, 404)
+  try {
+    const [linha] = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
+      tx`update clientes set ${tx({ ...dados, alterado_em: new Date() })}
+         where id = ${id} returning *`)
+    return linha ? c.json(paraJson(linha)) : c.json({ erro: 'nao encontrado' }, 404)
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') {
+      return c.json({ erro: 'ja existe um cliente com esse nome' }, 409)
+    }
+    throw err
+  }
 })
 
 clientes.delete('/:id', async (c) => {
+  const id = c.req.param('id')
+  if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
   const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
-    tx`delete from clientes where id = ${c.req.param('id')} returning id`)
+    tx`delete from clientes where id = ${id} returning id`)
   return linhas.length ? c.json({ ok: true }) : c.json({ erro: 'nao encontrado' }, 404)
 })

@@ -63,7 +63,7 @@ describe('clientes', () => {
     ).rejects.toThrow()
   })
 
-  it('devolve limite como numero, nao string', async () => {
+  it('o driver devolve numeric como string — por isso paraJson existe', async () => {
     await withTenant(sql, tenantA, tx => tx`
       insert into clientes (tenant_id, nome, limite) values (${tenantA}, 'Com Limite', 6000)`)
     const [linha] = await withTenant(sql, tenantA, tx => tx`

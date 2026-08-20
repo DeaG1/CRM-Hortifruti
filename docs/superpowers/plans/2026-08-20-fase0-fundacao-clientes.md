@@ -750,10 +750,20 @@ app.post('/api/login', async (c) => {
     // Falha generica de proposito: nao revelar se o tenant ou o email existe.
     if (!tenant) return c.json({ erro: 'credenciais invalidas' }, 401)
 
-    const [usuario] = await sql<{ id: string; senha_hash: string }[]>`
+    // Dentro de withTenant: `usuarios` tem RLS forcada. Fora dela, sem
+    // app.tenant_id definido, este select devolve zero linhas SEMPRE — nao
+    // apenas para o tenant errado — e o login nunca autenticaria ninguem.
+    const [usuario] = await withTenant(sql, tenant.id, tx => tx<{ id: string; senha_hash: string }[]>`
       select id, senha_hash from usuarios
-      where tenant_id = ${tenant.id} and email = ${email} and ativo = true`
-    if (!usuario) return c.json({ erro: 'credenciais invalidas' }, 401)
+      where tenant_id = ${tenant.id} and email = ${email} and ativo = true`)
+
+    // Verificacao dummy quando o usuario nao existe: sem ela, "usuario
+    // inexistente" responde em ~5ms e "senha errada" em ~200ms, e essa
+    // diferenca enumera contas cadastradas com um cronometro.
+    if (!usuario) {
+      await verificarSenha(senha, HASH_DUMMY)
+      return c.json({ erro: 'credenciais invalidas' }, 401)
+    }
     if (!await verificarSenha(senha, usuario.senha_hash)) {
       return c.json({ erro: 'credenciais invalidas' }, 401)
     }

@@ -4,6 +4,7 @@ import postgres from 'postgres'
 import { criarPool, withTenant } from './db'
 import { verificarSenha, criarSessao } from './auth'
 import { exigirSessao, COOKIE_SESSAO, type Vars } from './middleware/sessao'
+import { clientes } from './routes/clientes'
 
 type Env = { DATABASE_URL: string }
 
@@ -85,5 +86,7 @@ app.post('/api/logout', exigirSessao, async (c) => {
 
 app.get('/api/eu', exigirSessao, (c) =>
   c.json({ usuarioId: c.get('usuarioId'), papel: c.get('papel') }))
+
+app.route('/api/clientes', clientes)
 
 export default app

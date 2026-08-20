@@ -487,11 +487,12 @@ git commit -m "feat(api): withTenant com SET LOCAL e teste de isolamento entre t
 
 **Files:**
 - Create: `api/src/auth.ts`, `api/test/auth.test.ts`
-- Modify: `api/src/index.ts`
 
 **Interfaces:**
 - Consumes: `criarPool`, `withTenant` da Task 3
-- Produces: `hashSenha(senha: string): Promise<string>`, `verificarSenha(senha: string, hash: string): Promise<boolean>`, `criarSessao(sql, usuarioId, tenantId): Promise<string>`, `lerSessao(sql, token): Promise<{ usuarioId, tenantId, papel } | null>`; rotas `POST /api/login`, `POST /api/logout`, `GET /api/eu`
+- Produces: `hashSenha(senha: string): Promise<string>`, `verificarSenha(senha: string, hash: string): Promise<boolean>`, `criarSessao(sql, usuarioId, tenantId): Promise<string>`, `lerSessao(sql, token): Promise<{ usuarioId, tenantId, papel } | null>`
+
+As rotas `POST /api/login`, `POST /api/logout` e `GET /api/eu` **não** pertencem a esta task — são da Task 5, que monta `api/src/index.ts` depois de a resolução de sessão funcionar. Esta task entrega apenas o módulo `auth.ts` e seus testes.
 
 - [ ] **Step 1: Escrever o teste que falha**
 

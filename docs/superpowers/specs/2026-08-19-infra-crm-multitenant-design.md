@@ -154,15 +154,18 @@ alter table clientes enable row level security;
 alter table clientes force row level security;
 
 create policy tenant_isolation on clientes
-  using      (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  with check (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  using      (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
+  with check (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 ```
 
-Três detalhes que não podem ser omitidos:
+Quatro detalhes que não podem ser omitidos:
 
-- **`force row level security`** — sem isso, o dono da tabela ignora a política.
+- **`force row level security`** — sem isso, o dono da tabela ignora a política. Vale notar que um **superuser ignora RLS de qualquer forma**, com ou sem `force`: a barreira real é o role da aplicação não ser dono nem superuser. O `force` é defesa em profundidade.
 - **`with check`** — sem isso, o isolamento vale para leitura mas não impede gravar linha com `tenant_id` de outro tenant.
-- **`current_setting(..., true)`** — o segundo argumento faz retornar `NULL` em vez de erro quando a variável não está definida. Comparação com `NULL` é falsa, então **a ausência de tenant definido nega todo acesso** (fail-closed).
+- **`current_setting(..., true)`** — o segundo argumento faz retornar `NULL` em vez de erro quando a variável nunca foi definida.
+- **`nullif(..., '')`** — e este é o detalhe que só aparece em produção. Depois que uma transação toca um GUC customizado com `set_config(..., true)` e termina, o PostgreSQL **não** restaura a variável para "indefinida": ele a deixa como **string vazia**. Então `current_setting` devolve `''`, e `''::uuid` lança `invalid input syntax for type uuid`. Sem o `nullif`, toda query executada fora de `withTenant` numa conexão já reaproveitada do pool falha com erro. Não é vazamento — o acesso continua negado —, mas é uma quebra de disponibilidade que só se manifesta sob reuso de conexão, ou seja, em produção e não em desenvolvimento.
+
+Com o `nullif`, a comparação vira `tenant_id = NULL`, que é falsa, e **a ausência de tenant nega todo acesso** (fail-closed).
 
 ### Role da aplicação
 

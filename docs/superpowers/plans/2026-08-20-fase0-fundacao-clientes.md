@@ -23,6 +23,7 @@ Requisitos do projeto inteiro. Valem implicitamente para toda tarefa.
 - **`prepare: false`** no driver. Transaction pooling não suporta prepared statements.
 - **`SET LOCAL app.tenant_id`, jamais `SET`.** `SET` vaza o tenant para a próxima requisição que reusar a conexão do pool.
 - **Toda tabela com `tenant_id`** tem: `not null`, índice, `enable row level security`, `force row level security` e policy com `using` **e** `with check`.
+- **A policy usa `nullif(current_setting('app.tenant_id', true), '')::uuid`** — sempre com o `nullif`. Depois que uma transação toca o GUC via `set_config(..., true)` e termina, o PostgreSQL deixa a variável como **string vazia**, não indefinida; `''::uuid` lança `invalid input syntax for type uuid`. Sem o `nullif`, qualquer query fora de `withTenant` numa conexão reaproveitada do pool quebra — em produção, não em desenvolvimento. (Descoberto na Task 3; migration `002_rls_nullif_guard.sql`.)
 - **O role da aplicação não é superuser e não tem `BYPASSRLS`.**
 - **Migrations são arquivos `.sql` numerados.** Sem ORM com formato de migration proprietário — o schema precisa ser restaurável em qualquer PostgreSQL, incluindo as policies.
 - **Autenticação é própria.** Sem Auth0, Clerk ou Supabase Auth. (spec D5)
@@ -47,8 +48,9 @@ Motivo: se o tenant vier da URL, trocar o subdomínio vira um vetor de acesso a 
 package.json                            dependencia `postgres` para o runner de migrations
 db/
   migrations/001_tenants_usuarios.sql   tenants, usuarios, sessoes + RLS
-  migrations/002_policy_sessao.sql      funcao resolver_sessao (SECURITY DEFINER)
-  migrations/003_clientes.sql           clientes + RLS
+  migrations/002_rls_nullif_guard.sql   guard nullif nas policies (ver Global Constraints)
+  migrations/003_policy_sessao.sql      funcao resolver_sessao (SECURITY DEFINER)
+  migrations/004_clientes.sql           clientes + RLS
   migrate.mjs                           runner: aplica .sql em ordem, registra em schema_migrations
 api/
   src/index.ts                          app Hono, montagem de rotas
@@ -257,14 +259,14 @@ alter default privileges in schema public
 alter table usuarios enable row level security;
 alter table usuarios force row level security;
 create policy tenant_isolation on usuarios
-  using      (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  with check (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  using      (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
+  with check (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
 alter table sessoes enable row level security;
 alter table sessoes force row level security;
 create policy tenant_isolation on sessoes
-  using      (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  with check (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  using      (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
+  with check (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 ```
 
 `tenants` fica **sem** RLS de propósito: o login precisa resolver o tenant antes de haver tenant definido. É a única tabela nessa condição, e ela não guarda dado de negócio.
@@ -627,7 +629,7 @@ git commit -m "feat(api): hash PBKDF2 via WebCrypto e sessao por token opaco"
 Fecha o buraco deixado na Task 4: `lerSessao` precisa consultar antes de haver tenant.
 
 **Files:**
-- Create: `db/migrations/002_policy_sessao.sql`, `api/src/middleware/sessao.ts`
+- Create: `db/migrations/003_policy_sessao.sql`, `api/src/middleware/sessao.ts`
 - Modify: `api/src/index.ts`
 - Test: `api/test/sessao.test.ts`
 
@@ -637,7 +639,7 @@ Fecha o buraco deixado na Task 4: `lerSessao` precisa consultar antes de haver t
 
 - [ ] **Step 1: Migration com a função de resolução de sessão**
 
-`db/migrations/002_policy_sessao.sql`:
+`db/migrations/003_policy_sessao.sql`:
 
 ```sql
 -- Resolver a sessao exige ler antes de haver tenant definido.
@@ -802,7 +804,7 @@ Expected: `{"usuarioId":"...","papel":"admin"}`
 - [ ] **Step 6: Commit**
 
 ```bash
-git add db/migrations/002_policy_sessao.sql api/src
+git add db/migrations/003_policy_sessao.sql api/src
 git commit -m "feat(api): resolucao de sessao e middleware de tenant"
 ```
 
@@ -811,7 +813,7 @@ git commit -m "feat(api): resolucao de sessao e middleware de tenant"
 ## Task 6: Tabela e API de clientes
 
 **Files:**
-- Create: `db/migrations/003_clientes.sql`, `api/src/routes/clientes.ts`, `api/test/clientes.test.ts`
+- Create: `db/migrations/004_clientes.sql`, `api/src/routes/clientes.ts`, `api/test/clientes.test.ts`
 - Modify: `api/src/index.ts`
 
 **Interfaces:**
@@ -820,7 +822,7 @@ git commit -m "feat(api): resolucao de sessao e middleware de tenant"
 
 - [ ] **Step 1: Migration**
 
-`db/migrations/003_clientes.sql`:
+`db/migrations/004_clientes.sql`:
 
 ```sql
 create table clientes (
@@ -852,8 +854,8 @@ create unique index on clientes (tenant_id, lower(nome));
 alter table clientes enable row level security;
 alter table clientes force row level security;
 create policy tenant_isolation on clientes
-  using      (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  with check (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  using      (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
+  with check (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 ```
 
 `unique (tenant_id, lower(nome))` porque o design referencia cliente por nome em vários lugares — enquanto isso for verdade, nomes duplicados dentro do mesmo tenant corromperiam as agregações. Dois tenants diferentes podem ter clientes de mesmo nome sem conflito.
@@ -1050,7 +1052,7 @@ Expected: PASS — isolamento (4) + auth (4) + clientes (6)
 - [ ] **Step 8: Commit**
 
 ```bash
-git add db/migrations/003_clientes.sql api/src/routes/clientes.ts api/test/clientes.test.ts api/src/index.ts
+git add db/migrations/004_clientes.sql api/src/routes/clientes.ts api/test/clientes.test.ts api/src/index.ts
 git commit -m "feat(api): CRUD de clientes com isolamento por tenant"
 ```
 

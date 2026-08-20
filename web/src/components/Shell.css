@@ -1,0 +1,221 @@
+.shell {
+  display: flex;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  font-family: 'Public Sans', sans-serif;
+  color: #2a2a24;
+  background: #f6f4ec;
+}
+
+/* ---------- sidebar ---------- */
+
+.shell-sidebar {
+  width: 248px;
+  flex: 0 0 248px;
+  background: #21331f;
+  color: #e8ecdf;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.shell-marca {
+  padding: 24px 22px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.shell-marca-logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #7cb342;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 38px;
+}
+
+.shell-marca-logo-forma {
+  width: 16px;
+  height: 16px;
+  border-radius: 50% 0 50% 50%;
+  background: #21331f;
+  transform: rotate(45deg);
+}
+
+.shell-marca-titulo {
+  font-family: 'Archivo', sans-serif;
+  font-weight: 800;
+  font-size: 17px;
+  letter-spacing: -0.3px;
+  line-height: 1.1;
+}
+
+.shell-marca-sub {
+  font-size: 11px;
+  color: #9db088;
+  letter-spacing: 0.3px;
+  line-height: 1.1;
+}
+
+.shell-nav {
+  flex: 1;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+}
+
+.shell-nav-secao {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #6f8560;
+  padding: 8px 12px 4px;
+}
+
+.shell-navitem {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  cursor: pointer;
+  padding: 10px 12px;
+  border-radius: 9px;
+  font-family: 'Public Sans', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  background: transparent;
+  color: #bcc9ac;
+  transition: background 0.12s;
+}
+
+.shell-navitem:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.shell-navitem--ativo {
+  background: rgba(124, 179, 66, 0.18);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.shell-navitem-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.18);
+  flex: 0 0 7px;
+}
+
+.shell-navitem--ativo .shell-navitem-dot {
+  background: #7cb342;
+}
+
+.shell-navitem-label {
+  flex: 1;
+}
+
+.shell-perfil {
+  padding: 14px 16px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.shell-perfil-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #5a7d3a;
+  border: 2px solid #21331f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  flex: 0 0 30px;
+}
+
+.shell-perfil-nome {
+  font-weight: 600;
+  color: #e8ecdf;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.shell-perfil-sub {
+  color: #9db088;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.shell-sair-container {
+  padding: 0 16px 14px;
+}
+
+.shell-sair {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: #9db088;
+  border-radius: 8px;
+  padding: 7px 0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  transition: background 0.12s, color 0.12s;
+}
+
+.shell-sair:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #e8ecdf;
+}
+
+/* ---------- main ---------- */
+
+.shell-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.shell-header {
+  flex: 0 0 auto;
+  padding: 18px 30px;
+  background: #fbfaf4;
+  border-bottom: 1px solid #e6e2d4;
+}
+
+.shell-header-titulo {
+  font-family: 'Archivo', sans-serif;
+  font-weight: 700;
+  font-size: 21px;
+  letter-spacing: -0.4px;
+  color: #21331f;
+}
+
+.shell-header-sub {
+  font-size: 13px;
+  color: #8a8775;
+  margin-top: 1px;
+}
+
+.shell-conteudo {
+  flex: 1;
+  overflow-y: auto;
+  padding: 26px 30px 60px;
+  background: #f6f4ec;
+}

@@ -1,0 +1,188 @@
+.clientes-estado {
+  padding: 30px 4px;
+  font-size: 14px;
+  color: #5a584a;
+}
+
+.clientes-estado--erro {
+  color: #9a4a2e;
+  font-weight: 600;
+}
+
+.clientes-vazio {
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 13px;
+  padding: 40px 18px;
+  text-align: center;
+  max-width: 560px;
+}
+
+.clientes-vazio-titulo {
+  font-size: 14px;
+  font-weight: 600;
+  color: #4a4838;
+}
+
+.clientes-vazio-sub {
+  font-size: 12.5px;
+  color: #9a9784;
+  margin-top: 4px;
+}
+
+.clientes-lista {
+  max-width: 1280px;
+}
+
+/* ---------- filtros ---------- */
+
+.clientes-filtros {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.clientes-filtro {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 20px;
+  padding: 6px 13px;
+  font-size: 12.5px;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  color: #4a4838;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.clientes-filtro:hover {
+  background: #faf8f0;
+}
+
+.clientes-filtro--ativo {
+  border-color: #7cb342;
+  background: rgba(124, 179, 66, 0.1);
+}
+
+.clientes-filtro-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+}
+
+.clientes-filtro-contagem {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  color: #21331f;
+}
+
+/* ---------- tabela ---------- */
+
+.clientes-tabela {
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+.clientes-linha {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 0.9fr 0.9fr 0.7fr 0.8fr 0.9fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.clientes-linha--cabecalho {
+  padding: 12px 18px;
+  background: #f3f0e6;
+  border-bottom: 1px solid #e6e2d4;
+  font-size: 11px;
+  font-weight: 700;
+  color: #7c7a6a;
+  letter-spacing: 0.3px;
+}
+
+.clientes-linha--dados {
+  padding: 13px 18px;
+  border-bottom: 1px solid #f1eee2;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.clientes-linha--dados:last-child {
+  border-bottom: none;
+}
+
+.clientes-linha--dados:hover {
+  background: #faf8f0;
+}
+
+.clientes-col-num {
+  text-align: right;
+}
+
+.clientes-mono {
+  font-family: 'IBM Plex Mono', monospace;
+  color: #2a2a24;
+}
+
+.clientes-celula-nome {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.clientes-health-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 9px;
+}
+
+.clientes-nome-bloco {
+  min-width: 0;
+}
+
+.clientes-nome {
+  font-weight: 600;
+  color: #21331f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.clientes-nome-sub {
+  font-size: 11.5px;
+  color: #9a9784;
+}
+
+.clientes-rota {
+  color: #5a584a;
+}
+
+.clientes-freq {
+  font-size: 11px;
+  color: #9a9784;
+}
+
+.clientes-health-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.clientes-sem-filtro {
+  padding: 30px 18px;
+  text-align: center;
+  font-size: 13px;
+  color: #9a9784;
+}

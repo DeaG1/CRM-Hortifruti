@@ -50,16 +50,15 @@
   }
 }
 
+/*
+ * O scaffold do Vite limitava #root a 1126px, centralizado, com borda
+ * lateral e texto centralizado — pensado pra a landing page de exemplo.
+ * O shell da aplicacao (sidebar + area principal, Task 9) precisa ocupar a
+ * largura/altura reais do viewport; a versao antiga cortava a sidebar e
+ * deixava uma borda visivel em telas largas. Resetado para o minimo.
+ */
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
   min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
 }
 
 body {

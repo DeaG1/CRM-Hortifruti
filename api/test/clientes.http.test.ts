@@ -275,6 +275,116 @@ describe('codigos de status dos handlers', () => {
     expect((await resGet.json()).limite).toBe(500)
   })
 
+  it('POST com prazo fracionario -> 400, nunca 500 (campo "Prazo" no front e number sem step, form noValidate)', async () => {
+    // Cenario alcancavel pela UI: digitar "1.5" no campo de prazo. Sem esta
+    // validacao, o valor batia direto no `integer` do Postgres e estourava
+    // "invalid input syntax for type integer", nao coberto por
+    // respostaDeErroPg (23514) — 500 texto puro antes do app.onError,
+    // "erro interno" generico depois. Nenhum dos dois e tao claro quanto
+    // recusar o valor aqui, na borda da API.
+    const res = await pedir('/api/clientes', comoAdmin(json({ nome: 'Prazo Fracionario', prazo: 1.5 })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'prazo deve ser um numero inteiro de dias' })
+  })
+
+  it('PUT com prazo fracionario -> 400, sem alterar o cliente', async () => {
+    const resPost = await pedir('/api/clientes', comoAdmin(json({ nome: 'Cliente Prazo Ok', prazo: 14 })))
+    const criado = await resPost.json()
+    const res = await pedir(`/api/clientes/${criado.id}`, comoAdmin({
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prazo: 2.5 }),
+    }))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'prazo deve ser um numero inteiro de dias' })
+
+    const resGet = await pedir(`/api/clientes/${criado.id}`, comoAdmin())
+    expect((await resGet.json()).prazo).toBe(14)
+  })
+
+  it('POST com nome so espacos -> 400 (mesma regra de "ausente")', async () => {
+    // Verificado ao vivo antes da correcao: POST {"nome":"   "} respondia
+    // 201 — a checagem antiga (`if (!dados.nome)`) so testava truthy, e uma
+    // string de espacos e truthy.
+    const res = await pedir('/api/clientes', comoAdmin(json({ nome: '   ' })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'nome e obrigatorio' })
+  })
+
+  it('POST com nome com espacos nas bordas -> salva o nome ja trimado', async () => {
+    const res = await pedir('/api/clientes', comoAdmin(json({ nome: '  Mercado Trim  ' })))
+    expect(res.status).toBe(201)
+    expect((await res.json()).nome).toBe('Mercado Trim')
+  })
+
+  it('PUT com nome vazio -> 400 (antes: 200, gravava o registro com nome vazio)', async () => {
+    // Verificado ao vivo antes da correcao: PUT {"nome":""} respondia 200 e
+    // o registro ficava com nome vazio — o PUT nao validava nome nenhum.
+    const resPost = await pedir('/api/clientes', comoAdmin(json({ nome: 'Cliente Nome Ok' })))
+    const criado = await resPost.json()
+    const res = await pedir(`/api/clientes/${criado.id}`, comoAdmin({
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nome: '' }),
+    }))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'nome e obrigatorio' })
+
+    const resGet = await pedir(`/api/clientes/${criado.id}`, comoAdmin())
+    expect((await resGet.json()).nome).toBe('Cliente Nome Ok')
+  })
+
+  it('PUT com nome so espacos -> 400, sem alterar o cliente', async () => {
+    const resPost = await pedir('/api/clientes', comoAdmin(json({ nome: 'Cliente Nome Ok 2' })))
+    const criado = await resPost.json()
+    const res = await pedir(`/api/clientes/${criado.id}`, comoAdmin({
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nome: '   ' }),
+    }))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'nome e obrigatorio' })
+  })
+
+  it('PUT com nome trimavel -> salva ja trimado', async () => {
+    const resPost = await pedir('/api/clientes', comoAdmin(json({ nome: 'Cliente Renomear' })))
+    const criado = await resPost.json()
+    const res = await pedir(`/api/clientes/${criado.id}`, comoAdmin({
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nome: '  Novo Nome  ' }),
+    }))
+    expect(res.status).toBe(200)
+    expect((await res.json()).nome).toBe('Novo Nome')
+  })
+
+  it('POST com status invalido -> 400 com mensagem especifica (nao a de limite/prazo)', async () => {
+    // Reproduz ao vivo o bug relatado: POST {"nome":"x","status":"sei-la"}
+    // respondia 400 {"erro":"limite e prazo nao podem ser negativos"} —
+    // respostaDeErroPg mapeava todo 23514 pra essa mensagem fixa.
+    const res = await pedir('/api/clientes', comoAdmin(json({ nome: 'Status Ruim', status: 'sei-la' })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'status invalido' })
+  })
+
+  it('POST com tendencia invalida -> 400 com mensagem especifica', async () => {
+    const res = await pedir('/api/clientes', comoAdmin(json({ nome: 'Tendencia Ruim', tend: 'x' })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'tendencia invalida' })
+  })
+
+  it('PUT com status invalido -> 400 com mensagem especifica', async () => {
+    const resPost = await pedir('/api/clientes', comoAdmin(json({ nome: 'Cliente Status Ok' })))
+    const criado = await resPost.json()
+    const res = await pedir(`/api/clientes/${criado.id}`, comoAdmin({
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'sei-la' }),
+    }))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'status invalido' })
+  })
+
   it('POST com nome duplicado no mesmo tenant -> 409', async () => {
     await pedir('/api/clientes', comoAdmin(json({ nome: 'Cliente Duplicado' })))
     const res = await pedir('/api/clientes', comoAdmin(json({ nome: 'Cliente Duplicado' })))

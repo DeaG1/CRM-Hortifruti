@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.src.tsbuildinfo",
+    "target": "es2022",
+    "lib": ["es2022"],
+    "types": ["@cloudflare/workers-types"],
+    "skipLibCheck": true,
+
+    /* wrangler/esbuild fazem a transpilacao de fato — este arquivo e so
+       para type-checking (tsc --noEmit / tsc -b) e para o editor, mesmo
+       papel de web/tsconfig.app.json. */
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"]
+}

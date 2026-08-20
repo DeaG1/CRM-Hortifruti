@@ -10,6 +10,16 @@ type Env = { DATABASE_URL: string }
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>()
 
+/**
+ * /api/health e uma rota publica, sem autenticacao — ate aqui ela devolvia
+ * `String(err)` no erro (que inclui o hostname do banco, ex.:
+ * "getaddrinfo ENOTFOUND db.<ref>.supabase.co", ou o nome do role numa
+ * falha de autenticacao) e o banner completo do PostgreSQL (versao +
+ * compilador) no sucesso. Qualquer um na internet podia sondar isso.
+ * Agora devolve so {ok:true}/{ok:false}; o detalhe vai pro log do servidor
+ * (console.error, visivel via `wrangler tail` em producao), nunca pro
+ * corpo da resposta.
+ */
 app.get('/api/health', async (c) => {
   const isLocal = /^postgres:\/\/[^@]*@(localhost|127\.0\.0\.1)/.test(c.env.DATABASE_URL)
   const sql = postgres(c.env.DATABASE_URL, {
@@ -18,10 +28,11 @@ app.get('/api/health', async (c) => {
     ...(isLocal ? { ssl: false } : {}),
   })
   try {
-    const [row] = await sql<{ versao: string }[]>`select version() as versao`
-    return c.json({ ok: true, db: row.versao })
+    await sql`select version()`
+    return c.json({ ok: true })
   } catch (err) {
-    return c.json({ ok: false, db: String(err) }, 500)
+    console.error('falha no health check:', err)
+    return c.json({ ok: false }, 500)
   } finally {
     c.executionCtx.waitUntil(sql.end())
   }
@@ -88,5 +99,22 @@ app.get('/api/eu', exigirSessao, (c) =>
   c.json({ usuarioId: c.get('usuarioId'), papel: c.get('papel') }))
 
 app.route('/api/clientes', clientes)
+
+/**
+ * Sem isto, qualquer excecao nao tratada (ex.: um erro do Postgres que
+ * respostaDeErroPg nao mapeia, como "invalid input syntax for type
+ * integer" quando um campo numerico recebe lixo) vira o 500 padrao do
+ * Hono: corpo "Internal Server Error" em **texto puro**, nao JSON. O front
+ * (web/src/api/client.ts) faz `JSON.parse(texto)` incondicional — nesse
+ * corpo o parse lanca SyntaxError, o `throw new ErroApi(...)` nunca roda, e
+ * o componente nunca recebe um ErroApi (cenario reproduzido ao vivo digitando
+ * "1.5" no campo de prazo). Este handler garante {erro} em JSON pra
+ * qualquer excecao, e loga o detalhe so no servidor — nunca a mensagem
+ * crua do Postgres pro cliente (mesma preocupacao do /api/health acima).
+ */
+app.onError((err, c) => {
+  console.error('erro nao tratado:', err)
+  return c.json({ erro: 'erro interno' }, 500)
+})
 
 export default app

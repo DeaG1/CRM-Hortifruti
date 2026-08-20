@@ -48,6 +48,19 @@ describe('clientes', () => {
     ).rejects.toThrow()
   })
 
+  it('nao permite gravar para outro tenant (with check da policy de escrita)', async () => {
+    // Mesma prova que isolamento.test.ts ja faz para usuarios — faltava
+    // aqui. A revisao final trocou o with check de clientes por `true` e as
+    // 44 provas anteriores continuaram verdes, porque nenhuma cobria escrita
+    // cross-tenant para esta tabela (so leitura). Como este arquivo e o
+    // molde declarado das 7 entidades da Fase 1, o ponto cego se repetiria
+    // nas sete sem este teste.
+    await expect(
+      withTenant(sql, tenantA, tx => tx`
+        insert into clientes (tenant_id, nome) values (${tenantB}, 'Invasor via Clientes')`)
+    ).rejects.toThrow()
+  })
+
   it('permite o mesmo nome em tenants diferentes', async () => {
     await withTenant(sql, tenantB, tx => tx`
       insert into clientes (tenant_id, nome) values (${tenantB}, 'Mercado A')`)

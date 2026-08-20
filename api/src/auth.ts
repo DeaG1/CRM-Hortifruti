@@ -33,7 +33,12 @@ async function derivar(senha: string, sal: Uint8Array, iteracoes: number) {
     'raw', new TextEncoder().encode(senha), 'PBKDF2', false, ['deriveBits'],
   )
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: sal, iterations: iteracoes, hash: 'SHA-256' },
+    // `as BufferSource`: puramente de tipos — TS 7 endureceu Uint8Array
+    // generico (Uint8Array<ArrayBufferLike> x ArrayBufferView<ArrayBuffer>)
+    // de um jeito que nao bate com o BufferSource de @cloudflare/workers-types
+    // sem essa anotacao; em runtime um Uint8Array sempre foi um BufferSource
+    // valido, isto nao muda nada em execucao.
+    { name: 'PBKDF2', salt: sal as BufferSource, iterations: iteracoes, hash: 'SHA-256' },
     material, TAM_CHAVE * 8,
   )
   return new Uint8Array(bits)

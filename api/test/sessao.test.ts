@@ -199,7 +199,11 @@ describe('fluxo completo: login -> /api/eu -> logout -> /api/eu (deve falhar)', 
 
     // E a sessao some mesmo quando consultada com o role admin, direto,
     // sem depender de RLS ou de resolver_sessao.
-    const [linha] = await admin`select 1 from sessoes where token = ${token}`
+    // `token!`: ja verificado truthy na linha 182 (o match() e que deixa o
+    // tipo declarado como `string | undefined`; postgres.js nao aceita
+    // `undefined` como parametro de query, mesmo que em runtime aqui nunca
+    // chegue vazio).
+    const [linha] = await admin`select 1 from sessoes where token = ${token!}`
     expect(linha).toBeUndefined()
   })
 })

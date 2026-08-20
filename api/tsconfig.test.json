@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+    "target": "es2022",
+    /* Os testes rodam sob Vitest em Node (vitest.config.ts: environment
+       'node'), nao dentro do runtime de Workers — usam fetch/Response via
+       a implementacao global do Node, entao "dom" aqui (em vez de
+       @cloudflare/workers-types) e o que reflete o ambiente real deles.
+       Misturar os dois nos mesmos globais (Request/Response/fetch) causaria
+       colisao de declaracoes — por isso a separacao em dois tsconfigs. */
+    "lib": ["es2022", "dom"],
+    "types": ["node"],
+    "skipLibCheck": true,
+
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["test", "vitest.config.ts"]
+}

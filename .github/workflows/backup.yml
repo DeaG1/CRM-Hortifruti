@@ -1,0 +1,84 @@
+name: backup
+
+# Backup automatico do Postgres de producao (Supabase) para o Cloudflare R2.
+#
+# Roda 5x por dia, 7 dias por semana — o negocio funciona 6 dias por semana,
+# 8h por dia, e perder dados aqui significa perder o cliente. Ver
+# docs/runbook-restore.md para o procedimento de restauracao, o ensaio
+# cronometrado e a lista exata de secrets que este workflow consome.
+
+on:
+  schedule:
+    - cron: '0 11,14,17,20,23 * * *'   # UTC -> 08,11,14,17,20 no horario de Brasilia (UTC-3)
+  workflow_dispatch:
+
+# Evita duas execucoes simultaneas (ex.: um disparo manual em cima do cron)
+# disputando o mesmo objeto no R2.
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Instalar o pg_dump 16
+        run: |
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update && sudo apt-get install -y postgresql-client-16
+
+      - name: Gerar o dump
+        env:
+          PGSSLMODE: require
+          # IMPORTANTE: este secret precisa ser a conexao DIRETA do Supabase
+          # (porta 5432, host db.<ref>.supabase.co), nunca o pooler (porta 6543,
+          # host aws-0-<regiao>.pooler.supabase.com). pg_dump abre uma sessao
+          # longa para percorrer o catalogo e as tabelas; o pooler de transaction
+          # mode do Supabase encerra/recicla a sessao entre statements e o dump
+          # falha (ou pior, sai incompleto sem erro claro). Ver runbook.
+          PGURL: ${{ secrets.DATABASE_URL }}
+        run: |
+          NOME="backup-$(date -u +%Y-%m-%d-%H%M).dump"
+          echo "NOME=$NOME" >> "$GITHUB_ENV"
+          pg_dump --format=custom --no-owner --no-privileges \
+            --file="$NOME" "$PGURL"
+          ls -lh "$NOME"
+
+      - name: Enviar para o R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3 cp "$NOME" "s3://${{ secrets.R2_BUCKET }}/$NOME" \
+            --endpoint-url "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+
+      - name: Expirar backups com mais de 30 dias
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          # Retencao de 30 dias (spec secao 5). Sem isso, 5 dumps/dia enchem
+          # os 10GB gratuitos do R2 e o backup comeca a falhar em silencio,
+          # meses depois — o pior momento possivel para descobrir.
+          CORTE=$(date -u -d '30 days ago' +%Y-%m-%d)
+          aws s3 ls "s3://${{ secrets.R2_BUCKET }}/" \
+            --endpoint-url "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com" \
+          | awk '{print $4}' | grep '^backup-' | while read -r objeto; do
+              DATA=$(echo "$objeto" | sed -E 's/^backup-([0-9]{4}-[0-9]{2}-[0-9]{2}).*/\1/')
+              if [[ "$DATA" < "$CORTE" ]]; then
+                echo "expirando $objeto"
+                aws s3 rm "s3://${{ secrets.R2_BUCKET }}/$objeto" \
+                  --endpoint-url "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+              fi
+            done
+
+      - name: Avisar se falhou
+        if: failure()
+        run: echo "::error::Backup falhou — investigar hoje, nao amanha"

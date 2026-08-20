@@ -1050,7 +1050,7 @@ Em `api/src/index.ts`: `import { clientes } from './routes/clientes'` e `app.rou
 Run: `cd api && npx vitest run`
 Expected: PASS — isolamento (4) + auth (4) + clientes (6)
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add db/migrations/004_clientes.sql api/src/routes/clientes.ts api/test/clientes.test.ts api/src/index.ts
@@ -1893,13 +1893,33 @@ Expected: `{"ok":true,...}`
 
 Abrir o front publicado, logar, criar um cliente, recarregar. Expected: o cliente persiste.
 
-- [ ] **Step 7: Verificar o isolamento em produção**
+- [ ] **Step 7: Medir o CPU time do login**
+
+O `hashSenha` da Task 4 usa PBKDF2 com 210.000 iterações, medido em **~200ms de CPU** localmente. Cloudflare Workers limita CPU por invocação, e derivação de chave conta integralmente. Este passo existe porque a medição só é possível em produção.
+
+Fazer alguns logins reais e ler o CPU time no painel (Workers → sua API → Metrics → CPU Time) ou via `wrangler tail`:
+
+```bash
+cd api && npx wrangler tail --format pretty
+```
+
+Expected: o login completa sem `Error: Worker exceeded CPU time limit`.
+
+**Se estourar**, as saídas em ordem de preferência:
+
+1. Reduzir as iterações para o maior valor que couber no limite, e **registrar a justificativa no código**, junto da constante — um número reduzido sem explicação vira dívida invisível.
+2. Migrar o Worker para o plano pago, que tem teto muito maior (compare o custo com o VPS do Estágio 1 antes: se for equivalente, o Estágio 1 entrega mais).
+3. Mover a verificação de senha para fora do Worker.
+
+Não decida isso antes de medir. O valor atual está correto do ponto de vista criptográfico, e reduzir preventivamente troca segurança por um problema que talvez não exista.
+
+- [ ] **Step 8: Verificar o isolamento em produção**
 
 Criar um segundo tenant com um usuário próprio, logar com ele e confirmar que a lista de clientes vem vazia — não com os clientes do primeiro.
 
 Este é o teste que autoriza o segundo cliente pagante a existir. Não pule.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add .github/workflows/deploy.yml api/wrangler.toml

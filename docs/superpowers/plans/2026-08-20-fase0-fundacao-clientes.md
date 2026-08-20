@@ -1953,6 +1953,17 @@ git commit -m "chore: deploy da API em Workers e do front em Pages"
 
 As 7 entidades restantes (produtos, fornecedores, funcionários, entradas, saídas, perdas, lançamentos), repetindo o padrão validado aqui: migration com RLS → teste de isolamento → rotas → derivação portada com testes → tela → modal.
 
+**Cada entidade leva DOIS arquivos de teste, não um.** `<entidade>.test.ts` cobre a camada de banco (RLS, constraints, índices) e `<entidade>.http.test.ts` cobre as rotas via `app.request`. Copiar só o primeiro deixa `sanear()` (mass assignment), `paraJson()` (conversão `numeric`), a autorização e os códigos de status sem rede de proteção — em todas as sete de uma vez. Isto foi um defeito real desta fase, corrigido no fix round da Task 6.
+
+**Padrões de rota já validados que devem ser copiados literalmente:**
+
+| Padrão | Por quê |
+|---|---|
+| Validar formato uuid antes da query, devolvendo 400 | Sem isso, id malformado vira 500 em texto puro e quebra o contrato JSON |
+| `err.code === '23505'` para duplicata | Substring de mensagem de erro é frágil a versão e locale |
+| `try/catch` de duplicata no `POST` **e** no `PUT` | O `PUT` também dispara o índice único ao renomear |
+| Toda query dentro de `withTenant` | Fora dela a RLS devolve zero linhas em silêncio, sem erro |
+
 Duas dívidas conhecidas que a Fase 1 precisa resolver:
 
 1. **Pedidos e entradas referenciam cliente e fornecedor por nome.** Na migração das próximas entidades, converter para foreign key. As derivações desta fase (`derivarClientes`) casam por `p.cliente === c.nome`; quando `pedidos` ganhar `cliente_id`, essas funções mudam junto — e os testes da Task 7 são o que garante que os números continuam iguais.

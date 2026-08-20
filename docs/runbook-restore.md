@@ -77,6 +77,20 @@ propósito uma vez, fora do horário de produção.
 
 ### 1. Baixar o dump do R2
 
+Exportar antes as variáveis usadas no comando abaixo — sob pânico, colar o
+`aws s3 cp` sem isso só devolve erro de variável vazia, sem dizer qual
+delas. Os valores são os mesmos da tabela de secrets no início deste
+documento (o nome muda porque o `aws` CLI espera `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY`, não `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` —
+mesmo mapeamento que `.github/workflows/backup.yml` já faz):
+
+```bash
+export R2_BUCKET=<o-bucket-da-tabela-de-secrets-acima>
+export R2_ACCOUNT_ID=<o-account-id-da-tabela-de-secrets-acima>
+export AWS_ACCESS_KEY_ID=<R2_ACCESS_KEY_ID>
+export AWS_SECRET_ACCESS_KEY=<R2_SECRET_ACCESS_KEY>
+```
+
 ```bash
 aws s3 cp "s3://$R2_BUCKET/backup-2026-08-20-1902.dump" ./backup.dump \
   --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
@@ -84,6 +98,16 @@ aws s3 cp "s3://$R2_BUCKET/backup-2026-08-20-1902.dump" ./backup.dump \
 
 (Ou baixar pelo Cloudflare Dashboard → R2 → bucket → objeto → Download,
 se as credenciais de CLI não estiverem à mão no momento do incidente.)
+
+**GitHub Secrets são write-only**: depois de salvos, ninguém — nem quem os
+criou — consegue ler `R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` de volta pela
+UI ou API do GitHub, só sobrescrever. Se esses valores não estiverem
+guardados em algum outro cofre (gerenciador de senhas da equipe, etc.), a
+única saída num incidente é gerar um **token R2 novo** (Cloudflare
+Dashboard → R2 → Manage R2 API Tokens → Create API token, mesmo escopo do
+token original — ver tabela de secrets) e atualizar o secret no GitHub com
+as credenciais novas. O token antigo pode ser revogado depois, uma vez
+confirmado que o novo funciona.
 
 ### 2. Subir o Postgres de destino
 

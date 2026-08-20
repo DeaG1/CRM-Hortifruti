@@ -636,7 +636,7 @@ Fecha o buraco deixado na Task 4: `lerSessao` precisa consultar antes de haver t
 
 **Interfaces:**
 - Consumes: `lerSessao` da Task 4
-- Produces: middleware Hono que injeta `c.set('tenantId', ...)`, `c.set('usuarioId', ...)`, `c.set('papel', ...)`; função `sqlDoContexto(c)` que devolve o pool
+- Produces: middleware Hono que injeta `c.set('sql', ...)`, `c.set('tenantId', ...)`, `c.set('usuarioId', ...)`, `c.set('papel', ...)` e `c.set('token', ...)`; middleware `exigirAdmin`; rotas `POST /api/login`, `POST /api/logout`, `GET /api/eu`
 
 - [ ] **Step 1: Migration com a função de resolução de sessão**
 

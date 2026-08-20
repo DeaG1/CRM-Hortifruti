@@ -44,9 +44,11 @@ Motivo: se o tenant vier da URL, trocar o subdomínio vira um vetor de acesso a 
 ## Estrutura de arquivos
 
 ```
+package.json                            dependencia `postgres` para o runner de migrations
 db/
   migrations/001_tenants_usuarios.sql   tenants, usuarios, sessoes + RLS
-  migrations/002_clientes.sql           clientes + RLS
+  migrations/002_policy_sessao.sql      funcao resolver_sessao (SECURITY DEFINER)
+  migrations/003_clientes.sql           clientes + RLS
   migrate.mjs                           runner: aplica .sql em ordem, registra em schema_migrations
 api/
   src/index.ts                          app Hono, montagem de rotas
@@ -268,6 +270,12 @@ create policy tenant_isolation on sessoes
 `tenants` fica **sem** RLS de propósito: o login precisa resolver o tenant antes de haver tenant definido. É a única tabela nessa condição, e ela não guarda dado de negócio.
 
 - [ ] **Step 3: Escrever o runner**
+
+O runner é invocado da raiz (`node db/migrate.mjs`), mas o `postgres` foi instalado em `api/`. Sem um `package.json` na raiz, ele falha com `Cannot find module 'postgres'`. Criar na raiz:
+
+```bash
+npm init -y && npm i postgres
+```
 
 `db/migrate.mjs`:
 
@@ -869,8 +877,14 @@ let tenantA: string, tenantB: string
 
 beforeAll(async () => {
   admin = criarPool(ADMIN); sql = criarPool(URL)
-  const [a] = await admin`select id from tenants where slug = 'teste-a'`
-  const [b] = await admin`select id from tenants where slug = 'teste-b'`
+  // Upsert em vez de select: este arquivo precisa rodar isolado, sem
+  // depender de isolamento.test.ts ter criado os tenants antes.
+  const [a] = await admin`
+    insert into tenants (slug, nome) values ('teste-a', 'Tenant A')
+    on conflict (slug) do update set nome = excluded.nome returning id`
+  const [b] = await admin`
+    insert into tenants (slug, nome) values ('teste-b', 'Tenant B')
+    on conflict (slug) do update set nome = excluded.nome returning id`
   tenantA = a.id; tenantB = b.id
   await admin`delete from clientes where tenant_id in (${tenantA}, ${tenantB})`
 })

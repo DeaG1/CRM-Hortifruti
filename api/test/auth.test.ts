@@ -19,4 +19,10 @@ describe('hash de senha', () => {
   it('rejeita hash malformado sem lancar', async () => {
     expect(await verificarSenha('x', 'lixo')).toBe(false)
   })
+
+  it('rejeita hash nao-string sem lancar (null, undefined, numero)', async () => {
+    expect(await verificarSenha('x', null as unknown as string)).toBe(false)
+    expect(await verificarSenha('x', undefined as unknown as string)).toBe(false)
+    expect(await verificarSenha('x', 123 as unknown as string)).toBe(false)
+  })
 })

@@ -17,6 +17,7 @@ export async function hashSenha(senha: string): Promise<string> {
 }
 
 export async function verificarSenha(senha: string, hash: string): Promise<boolean> {
+  if (typeof hash !== 'string') return false
   const partes = hash.split('$')
   if (partes.length !== 4 || partes[0] !== 'pbkdf2') return false
   const iteracoes = Number(partes[1])

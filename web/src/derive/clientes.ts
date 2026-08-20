@@ -12,6 +12,30 @@ export interface Cliente {
   tend: Tendencia
   limite: number
   prazo: number
+  // Campos de cadastro/crédito adicionais — a API sempre os devolve (default
+  // '' ou 'Em dia'/'PIX' no schema), mas ficam opcionais aqui pra nao quebrar
+  // os fixtures de teste existentes que so preenchem o subconjunto usado nas
+  // derivacoes (id, nome, status, tend, ...).
+  cnpj?: string
+  tel?: string
+  email?: string
+  endereco?: string
+  cobranca?: string
+  forma?: string
+  obs?: string
+}
+
+/**
+ * Valores iniciais copiados de newCliente() no protótipo
+ * (design/CRM Hortifruti.dc.html:1819-1821). Vive aqui (e não em
+ * ModalCliente.tsx, que a consome) porque um componente só pode exportar
+ * componentes sem quebrar o fast refresh — mesma razão que levou
+ * `Papel`/`Tela`/`ADMIN_ONLY_SCREENS` para `telas.ts` na Task 9.
+ */
+export const CLIENTE_NOVO = {
+  nome: '', resp: '', cnpj: '', tel: '', email: '', endereco: '',
+  rota: 'Sul A', freq: '2×/sem · Seg e Qui', status: 'ativo',
+  cobranca: 'Em dia', forma: 'PIX', limite: 0, prazo: 14, tend: '→', obs: '',
 }
 
 export interface Pedido {

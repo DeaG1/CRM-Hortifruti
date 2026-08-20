@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { api, ErroApi } from './api/client'
 import { Login } from './screens/Login'
 import { Shell } from './components/Shell'
 import { ClientesLista } from './screens/ClientesLista'
+import { ClienteFicha } from './screens/ClienteFicha'
+import { ModalCliente } from './components/ModalCliente'
+import type { Cliente } from './derive/clientes'
 import { ADMIN_ONLY_SCREENS, type Tela } from './telas'
 
 /** Espelha o corpo de GET /api/eu (api/src/index.ts). */
@@ -30,6 +33,88 @@ function TelaPlaceholder({ tela }: { tela: Tela }) {
     >
       Tela <strong style={{ color: '#4a4838' }}>{tela}</strong> ainda não implementada nesta fase.
     </div>
+  )
+}
+
+const BOTAO_NOVO_CLIENTE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  background: '#5a7d3a',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 9,
+  padding: '9px 15px',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  fontFamily: "'Public Sans', sans-serif",
+}
+
+type VisaoClientes = 'lista' | 'ficha'
+
+/**
+ * Orquestra lista, ficha e modal de clientes (Task 10): quem decide qual
+ * tela mostrar e se o modal esta aberto (criando ou editando) vive aqui,
+ * fora de ClientesLista/ClienteFicha — os dois ficam sem estado de
+ * navegacao entre si, so preocupados com a propria tela.
+ */
+function ClientesModulo({ onSessaoExpirada }: { onSessaoExpirada: () => void }) {
+  const [visao, setVisao] = useState<VisaoClientes>('lista')
+  const [clienteId, setClienteId] = useState<string | null>(null)
+  // undefined = modal fechado; null = criando; Cliente = editando (prefill)
+  const [modal, setModal] = useState<Partial<Cliente> | null | undefined>(undefined)
+  // Muda a cada salvamento pra forcar ClientesLista/ClienteFicha a remontar
+  // e refazer o fetch — e como a lista/ficha refletem a mudanca sem reload.
+  const [versao, setVersao] = useState(0)
+
+  function abrirFicha(id: string) {
+    setClienteId(id)
+    setVisao('ficha')
+  }
+
+  function voltarParaLista() {
+    setVisao('lista')
+    setClienteId(null)
+  }
+
+  function aoSalvar() {
+    setModal(undefined)
+    setVersao(v => v + 1)
+  }
+
+  return (
+    <>
+      {visao === 'ficha' && clienteId
+        ? (
+          <ClienteFicha
+            key={`${clienteId}:${versao}`}
+            id={clienteId}
+            onVoltar={voltarParaLista}
+            onEditar={c => setModal(c)}
+            onSessaoExpirada={onSessaoExpirada}
+          />
+        )
+        : (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+              <button type="button" style={BOTAO_NOVO_CLIENTE} onClick={() => setModal(null)}>
+                <span style={{ fontSize: 16, lineHeight: 1 }}>＋</span> Novo cliente
+              </button>
+            </div>
+            <ClientesLista key={versao} onAbrir={abrirFicha} onSessaoExpirada={onSessaoExpirada} />
+          </div>
+        )}
+
+      {modal !== undefined && (
+        <ModalCliente
+          cliente={modal}
+          onSalvo={aoSalvar}
+          onFechar={() => setModal(undefined)}
+          onSessaoExpirada={onSessaoExpirada}
+        />
+      )}
+    </>
   )
 }
 
@@ -87,7 +172,7 @@ function App() {
   return (
     <Shell papel={eu.papel} telaAtual={telaEfetiva} onNavegar={setTela} onSair={sair}>
       {telaEfetiva === 'clientes'
-        ? <ClientesLista onAbrir={() => { /* ficha do cliente: Task 10 */ }} onSessaoExpirada={sair} />
+        ? <ClientesModulo onSessaoExpirada={sair} />
         : <TelaPlaceholder tela={telaEfetiva} />}
     </Shell>
   )

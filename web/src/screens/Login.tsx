@@ -1,12 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { api, ErroApi } from '../api/client'
-import { slugDoHortifruti } from '../slugDoHortifruti'
+import { slugDaEmpresa } from '../slugDaEmpresa'
 import './Login.css'
 
 export function Login({ onEntrar }: { onEntrar: () => void }) {
   // Vem do link do cliente (subdominio, /h/<slug> ou ?h=<slug>). So quando
-  // nao vier e que o campo aparece na tela — ver slugDoHortifruti.ts.
-  const slugDaUrl = slugDoHortifruti()
+  // nao vier e que o campo aparece na tela — ver slugDaEmpresa.ts.
+  const slugDaUrl = slugDaEmpresa()
   const [slug, setSlug] = useState(slugDaUrl)
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
@@ -21,7 +21,7 @@ export function Login({ onEntrar }: { onEntrar: () => void }) {
       await api.post('/api/login', { slug, email, senha })
       onEntrar()
     } catch (err) {
-      // Mensagem sempre generica: distinguir "hortifruti nao existe",
+      // Mensagem sempre generica: distinguir "empresa nao existe",
       // "e-mail nao encontrado" e "senha errada" permitiria enumerar
       // tenants e contas cadastradas so tentando logins.
       setErro(
@@ -50,17 +50,17 @@ export function Login({ onEntrar }: { onEntrar: () => void }) {
         <form className="login-card" onSubmit={entrar}>
           <h1 className="login-titulo">Entrar</h1>
           <p className="login-subtitulo">
-            {slugDaUrl ? 'Informe seu e-mail e senha.' : 'Informe os dados de acesso do seu hortifrúti.'}
+            {slugDaUrl ? 'Informe seu e-mail e senha.' : 'Informe os dados de acesso da sua empresa.'}
           </p>
 
           {!slugDaUrl && <div className="login-campo">
-            <label className="login-rotulo" htmlFor="login-slug">Hortifrúti</label>
+            <label className="login-rotulo" htmlFor="login-slug">Empresa</label>
             <input
               id="login-slug"
               className="login-input"
               value={slug}
               onChange={e => setSlug(e.target.value)}
-              placeholder="slug do hortifrúti"
+              placeholder="identificador da empresa"
               autoComplete="organization"
               disabled={enviando}
               required
@@ -75,7 +75,7 @@ export function Login({ onEntrar }: { onEntrar: () => void }) {
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
-              placeholder="voce@hortifruti.com"
+              placeholder="voce@empresa.com"
               autoComplete="username"
               disabled={enviando}
               required

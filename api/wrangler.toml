@@ -33,3 +33,13 @@ run_worker_first = ["/api/*"]
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "f02ff5abe18c44ee93a3d6279c2c788f"
+
+# Smart Placement: roda o Worker perto do BANCO, nao do usuario.
+# Medido antes disto: o Worker respondia de Newark (CF-RAY ...-EWR) e cada
+# ida e volta ate o Supabase em Sao Paulo custava ~116ms; uma transacao
+# (BEGIN + set_config + query + COMMIT) somava ~594ms, e o login ~2,4s.
+# Como quase todo o tempo e conversa com o banco, vale mais estar perto dele.
+# Os assets estaticos nao invocam o Worker (run_worker_first e seletivo para
+# /api/*), entao continuam servidos do edge proximo do usuario.
+[placement]
+mode = "smart"

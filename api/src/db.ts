@@ -82,3 +82,12 @@ export async function withTenant<T>(
     return fn(tx)
   }) as Promise<T>
 }
+
+// Tentativa medida e descartada: enviar set_config e as queries de fn sem
+// `await` entre elas, para o postgres.js agrupar as duas no mesmo lote
+// (pipelining) e economizar uma ida e volta. Nao mudou nada — `sql.begin()`
+// aguarda a resposta do BEGIN antes de despachar o resto, entao as chamadas
+// nunca chegam a ser agrupadas. Medido em producao: withTenant custou ~594ms
+// antes e ~594ms depois. Fica registrado para ninguem tentar de novo achando
+// que e ganho facil: o custo real e a distancia ate o banco (~116ms por ida e
+// volta, ~5 por transacao), nao a forma como as mensagens sao despachadas.

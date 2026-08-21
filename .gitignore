@@ -16,3 +16,4 @@ build/
 api/.env.producao
 SENHA-BANCO.txt
 api/.env.worker
+ACESSOS-TESTE.txt

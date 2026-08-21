@@ -4,7 +4,6 @@ import { criarPoolDoEnv, withTenant, type EnvBanco } from './db'
 import { verificarSenha, criarSessao, ITERACOES } from './auth'
 import { exigirSessao, COOKIE_SESSAO, type Vars } from './middleware/sessao'
 import { clientes } from './routes/clientes'
-import { diag } from './_diag'
 
 type Env = EnvBanco
 
@@ -105,7 +104,6 @@ app.get('/api/eu', exigirSessao, (c) =>
   c.json({ usuarioId: c.get('usuarioId'), papel: c.get('papel') }))
 
 app.route('/api/clientes', clientes)
-app.route('/api/_diag', diag)
 
 /**
  * Sem isto, qualquer excecao nao tratada (ex.: um erro do Postgres que

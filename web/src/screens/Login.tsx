@@ -1,9 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { api, ErroApi } from '../api/client'
+import { slugDoHortifruti } from '../slugDoHortifruti'
 import './Login.css'
 
 export function Login({ onEntrar }: { onEntrar: () => void }) {
-  const [slug, setSlug] = useState('')
+  // Vem do link do cliente (subdominio, /h/<slug> ou ?h=<slug>). So quando
+  // nao vier e que o campo aparece na tela — ver slugDoHortifruti.ts.
+  const slugDaUrl = slugDoHortifruti()
+  const [slug, setSlug] = useState(slugDaUrl)
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
   const [erro, setErro] = useState('')
@@ -45,9 +49,11 @@ export function Login({ onEntrar }: { onEntrar: () => void }) {
 
         <form className="login-card" onSubmit={entrar}>
           <h1 className="login-titulo">Entrar</h1>
-          <p className="login-subtitulo">Informe os dados de acesso do seu hortifrúti.</p>
+          <p className="login-subtitulo">
+            {slugDaUrl ? 'Informe seu e-mail e senha.' : 'Informe os dados de acesso do seu hortifrúti.'}
+          </p>
 
-          <div className="login-campo">
+          {!slugDaUrl && <div className="login-campo">
             <label className="login-rotulo" htmlFor="login-slug">Hortifrúti</label>
             <input
               id="login-slug"
@@ -59,7 +65,7 @@ export function Login({ onEntrar }: { onEntrar: () => void }) {
               disabled={enviando}
               required
             />
-          </div>
+          </div>}
 
           <div className="login-campo">
             <label className="login-rotulo" htmlFor="login-email">E-mail</label>

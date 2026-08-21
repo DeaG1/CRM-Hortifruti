@@ -1,0 +1,177 @@
+.fornecedores-estado {
+  padding: 30px 4px;
+  font-size: 14px;
+  color: #5a584a;
+}
+
+.fornecedores-estado--erro {
+  color: #9a4a2e;
+  font-weight: 600;
+}
+
+.fornecedores-vazio {
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 13px;
+  padding: 30px 18px;
+  text-align: center;
+}
+
+.fornecedores-vazio-titulo {
+  font-size: 14px;
+  font-weight: 600;
+  color: #4a4838;
+}
+
+.fornecedores-vazio-sub {
+  font-size: 12.5px;
+  color: #9a9784;
+  margin-top: 4px;
+  margin-bottom: 16px;
+}
+
+.fornecedores-lista {
+  max-width: 1280px;
+}
+
+/* ---------- topo ---------- */
+
+.fornecedores-topo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.fornecedores-dica {
+  flex: 1;
+  font-size: 12.5px;
+  color: #8a8775;
+}
+
+.fornecedores-botao-novo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #5a7d3a;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 9px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.fornecedores-botao-novo:hover {
+  background: #4a6b2e;
+}
+
+/* ---------- resumo ---------- */
+
+.fornecedores-resumo {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.fornecedores-resumo-card {
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 13px;
+  padding: 16px 18px;
+}
+
+.fornecedores-resumo-label {
+  font-size: 12px;
+  color: #8a8775;
+  font-weight: 600;
+}
+
+.fornecedores-resumo-valor {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 24px;
+  color: #9a9784;
+  margin-top: 6px;
+}
+
+.fornecedores-resumo-sub {
+  font-size: 11.5px;
+  color: #9a9784;
+}
+
+/* ---------- grade de cartoes ---------- */
+
+.fornecedores-grade {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+.fornecedores-card {
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 13px;
+  padding: 18px 20px;
+  cursor: pointer;
+}
+
+.fornecedores-card:hover {
+  border-color: #c3d3a8;
+}
+
+.fornecedores-nome {
+  font-family: 'Archivo', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  color: #21331f;
+}
+
+.fornecedores-sub {
+  font-size: 12.5px;
+  color: #8a8775;
+  margin-top: 2px;
+}
+
+.fornecedores-produtos {
+  display: flex;
+  gap: 6px;
+  margin: 13px 0;
+  flex-wrap: wrap;
+}
+
+.fornecedores-produto-chip {
+  font-size: 11.5px;
+  background: #eef3e6;
+  color: #4a6b2e;
+  padding: 3px 10px;
+  border-radius: 14px;
+}
+
+.fornecedores-produto-vazio {
+  font-size: 12px;
+  color: #9a9784;
+}
+
+.fornecedores-metricas {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding-top: 13px;
+  border-top: 1px solid #f1eee2;
+}
+
+.fornecedores-metrica-label {
+  font-size: 11px;
+  color: #9a9784;
+}
+
+.fornecedores-metrica-valor {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 14px;
+  color: #5a584a;
+}

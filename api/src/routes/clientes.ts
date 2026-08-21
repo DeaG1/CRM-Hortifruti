@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { withTenant } from '../db'
+import { withTenant, type EnvBanco } from '../db'
 import { exigirSessao, exigirAdmin, type Vars } from '../middleware/sessao'
 
 const CAMPOS = [
@@ -127,7 +127,7 @@ function idValido(id: string): boolean {
 }
 
 export const clientes = new Hono<{
-  Bindings: { DATABASE_URL: string }
+  Bindings: EnvBanco
   Variables: Vars
 }>()
 

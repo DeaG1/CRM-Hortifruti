@@ -1,12 +1,11 @@
 import { Hono } from 'hono'
 import { setCookie, deleteCookie } from 'hono/cookie'
-import postgres from 'postgres'
-import { criarPool, withTenant } from './db'
-import { verificarSenha, criarSessao } from './auth'
+import { criarPoolDoEnv, withTenant, type EnvBanco } from './db'
+import { verificarSenha, criarSessao, ITERACOES } from './auth'
 import { exigirSessao, COOKIE_SESSAO, type Vars } from './middleware/sessao'
 import { clientes } from './routes/clientes'
 
-type Env = { DATABASE_URL: string }
+type Env = EnvBanco
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>()
 
@@ -21,12 +20,7 @@ const app = new Hono<{ Bindings: Env; Variables: Vars }>()
  * corpo da resposta.
  */
 app.get('/api/health', async (c) => {
-  const isLocal = /^postgres:\/\/[^@]*@(localhost|127\.0\.0\.1)/.test(c.env.DATABASE_URL)
-  const sql = postgres(c.env.DATABASE_URL, {
-    prepare: false,
-    max: 1,
-    ...(isLocal ? { ssl: false } : {}),
-  })
+  const sql = criarPoolDoEnv(c.env)
   try {
     await sql`select version()`
     return c.json({ ok: true })
@@ -38,18 +32,29 @@ app.get('/api/health', async (c) => {
   }
 })
 
-// Hash descartavel, gerado uma vez, so para consumir o mesmo tempo de CPU
-// quando o usuario (ou o tenant) nao existe. Sem isso, a diferenca de
-// latencia entre "usuario inexistente" e "senha errada" enumera contas:
-// ~200ms de PBKDF2 sao trivialmente mensuraveis por quem tenta logins.
+// Hash descartavel, so para consumir o mesmo tempo de CPU quando o usuario
+// (ou o tenant) nao existe. Sem isso, a diferenca de latencia entre "usuario
+// inexistente" e "senha errada" enumera contas: o PBKDF2 e trivialmente
+// mensuravel por quem tenta logins.
+//
+// O numero de iteracoes vem de ITERACOES, nunca fixado a mao. Ele ja esteve
+// fixado em 210000 enquanto a constante caiu para 100000 (teto do runtime do
+// Workers), e o efeito era pior que um dummy lento: `verificarSenha` LANCA ao
+// receber um hash acima do teto, entao o login com usuario inexistente
+// respondia 500 em vez de 401 — reabrindo por outro caminho exatamente a
+// enumeracao que este dummy existe para fechar.
+//
+// O sal precisa ter TAM_SAL bytes e a chave TAM_CHAVE, senao verificarSenha
+// rejeita o formato de imediato e nao gasta tempo nenhum — o que anula a
+// defesa em silencio.
 const HASH_DUMMY =
-  'pbkdf2$210000$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+  `pbkdf2$${ITERACOES}$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`
 
 app.post('/api/login', async (c) => {
   const { slug, email, senha } = await c.req.json<{
     slug: string; email: string; senha: string
   }>()
-  const sql = criarPool(c.env.DATABASE_URL)
+  const sql = criarPoolDoEnv(c.env)
   try {
     const [tenant] = await sql<{ id: string }[]>`
       select id from tenants where slug = ${slug} and ativo = true`

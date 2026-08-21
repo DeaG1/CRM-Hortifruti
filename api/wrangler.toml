@@ -22,3 +22,14 @@ directory = "../web/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = ["/api/*"]
+
+# Hyperdrive: o Worker nao abre conexao TCP direta ao Supabase.
+# No plano gratuito, cada invocacao tem teto de 50 subrequests, e o
+# handshake TCP+TLS do postgres.js contra o Supabase estoura esse teto —
+# a requisicao morre com "Too many subrequests" apos ~18s. O Hyperdrive
+# mantem o pool do lado da Cloudflare e elimina esse custo.
+# Cache desativado de proposito: num CRM transacional, resposta cacheada
+# faria o usuario salvar um cliente e nao ve-lo na lista.
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "f02ff5abe18c44ee93a3d6279c2c788f"

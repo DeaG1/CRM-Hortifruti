@@ -1,7 +1,35 @@
 import type { Sql } from './db'
 import { withTenant } from './db'
 
-const ITERACOES = 210_000   // recomendacao OWASP para PBKDF2-HMAC-SHA256
+/**
+ * 100.000 e o TETO do runtime, nao uma escolha.
+ *
+ * O valor aqui era 210.000 (recomendacao OWASP para PBKDF2-HMAC-SHA256; a
+ * revisao de 2023 pede 600.000). Mas a WebCrypto do Cloudflare Workers recusa
+ * qualquer valor acima de 100.000:
+ *
+ *   NotSupportedError: Pbkdf2 failed: iteration counts above 100000
+ *   are not supported (requested 210000)
+ *
+ * O Node aceita 210.000 sem reclamar, entao a suite de testes passava inteira
+ * e o erro so apareceu no primeiro login contra o Worker publicado. Vale como
+ * aviso: testes rodando em Node nao provam comportamento em workerd.
+ *
+ * Consequencia de seguranca, dita sem maquiagem: 100.000 iteracoes e menos
+ * resistente a ataque de forca bruta offline do que o recomendado. Se a tabela
+ * `usuarios` vazar, quebrar as senhas custa ~2x menos esforco do que custaria
+ * com 210.000, e ~6x menos do que a recomendacao atual do OWASP.
+ *
+ * Mitigacoes que valem mais que iteracoes extras neste contexto, e que estao
+ * pendentes: limite de tentativas de login por IP e por conta, e exigencia de
+ * senha forte no cadastro de usuario. Ambas entram na Fase 5 (governanca).
+ *
+ * Se um dia a seguranca da senha precisar ser maior que o teto do Workers, as
+ * saidas sao mover a verificacao para fora do Worker ou trocar o esquema por
+ * um com fator de trabalho em memoria. O formato do hash ja carrega o numero
+ * de iteracoes, entao migrar nao invalida as senhas existentes.
+ */
+export const ITERACOES = 100_000
 const TAM_SAL = 16
 const TAM_CHAVE = 32
 

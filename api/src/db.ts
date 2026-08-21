@@ -32,6 +32,37 @@ export function criarPool(url: string) {
   })
 }
 
+export type EnvBanco = {
+  DATABASE_URL: string
+  HYPERDRIVE?: { connectionString: string }
+}
+
+/**
+ * Resolve como falar com o banco a partir do ambiente.
+ *
+ * Em producao, atraves do Hyperdrive. O motivo nao e desempenho, e viabilidade:
+ * o plano gratuito do Workers permite 50 subrequests por invocacao, e o
+ * handshake TCP+TLS que o postgres.js faz direto contra o Supabase estoura esse
+ * teto — a requisicao morre com "Too many subrequests by single Worker
+ * invocation" depois de ~18s. Com o Hyperdrive, o Worker fala com um pool que a
+ * propria Cloudflare mantem, e o custo de subrequests deixa de existir.
+ *
+ * Em desenvolvimento nao ha binding de Hyperdrive, entao cai na DATABASE_URL
+ * do .dev.vars (o Postgres local do docker-compose).
+ *
+ * TLS: a connection string do Hyperdrive e interna a Cloudflare e nao passa
+ * pela internet publica — quem mantem TLS ate o Supabase e o proprio
+ * Hyperdrive, configurado com `?sslmode=require` na origem. Por isso aqui nao
+ * se force `ssl`, ao contrario de criarPool.
+ */
+export function criarPoolDoEnv(env: EnvBanco) {
+  const viaHyperdrive = env.HYPERDRIVE?.connectionString
+  if (viaHyperdrive) {
+    return postgres(viaHyperdrive, { prepare: false, max: 5, idle_timeout: 20 })
+  }
+  return criarPool(env.DATABASE_URL)
+}
+
 /**
  * Abre uma transacao com o tenant fixado e executa fn dentro dela.
  * Toda query de negocio precisa passar por aqui — e o unico ponto

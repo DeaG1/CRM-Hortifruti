@@ -1,6 +1,6 @@
 import type { MiddlewareHandler } from 'hono'
 import { getCookie } from 'hono/cookie'
-import { criarPool, type Sql } from '../db'
+import { criarPoolDoEnv, type Sql, type EnvBanco } from '../db'
 import { lerSessao } from '../auth'
 
 export const COOKIE_SESSAO = 'crm_sessao'
@@ -14,13 +14,13 @@ export type Vars = {
 }
 
 export const exigirSessao: MiddlewareHandler<{
-  Bindings: { DATABASE_URL: string }
+  Bindings: EnvBanco
   Variables: Vars
 }> = async (c, next) => {
   const token = getCookie(c, COOKIE_SESSAO)
   if (!token) return c.json({ erro: 'nao autenticado' }, 401)
 
-  const sql = criarPool(c.env.DATABASE_URL)
+  const sql = criarPoolDoEnv(c.env)
   const sessao = await lerSessao(sql, token)
   if (!sessao) {
     c.executionCtx.waitUntil(sql.end())

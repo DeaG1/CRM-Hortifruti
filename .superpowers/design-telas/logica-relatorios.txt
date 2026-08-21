@@ -1,0 +1,148 @@
+    // ---- relatórios ----
+    const relClientesRows = clientesRaw.map(cc => {
+      const fat = fatByClient[cc.nome]||0, ent = entByClient[cc.nome]||0;
+      const te = ent? Math.round(fat/ent):0;
+      const ccIn = inadOf(cc.nome);
+      const st = this.statusMap(cc.status), hm = this.healthMap(this.healthOf(cc, ccIn, te));
+      return { nome:cc.nome, rota:cc.rota, status:st.l, pedidos:ent, fat,
+        fatTxt:'R$ '+fat.toLocaleString('pt-BR'), teTxt: te? 'R$ '+te.toLocaleString('pt-BR') : '—',
+        part:(receitaFat?Math.round(fat/receitaFat*100):0)+'%',
+        inad:ccIn.toFixed(1).replace('.',',')+'%', inadColor: ccIn<=1?this.GREEN:(ccIn<=2?this.AMBER:this.RED),
+        healthColor:hm.c, healthBg:hm.bg, healthLabel:hm.l };
+    }).sort((a,b)=>b.fat-a.fat);
+    const relClientesTot = [
+      { label:'Clientes ativos', value:String(ativos.length), sub:clientesRaw.length+' no total' },
+      { label:'Faturamento do período', value:'R$ '+fmtBR(receitaFat), sub:periodLabel },
+      { label:'Ticket médio/cliente', value:'R$ '+fmtBR(ticketMesReal), sub:'meta 3,5–3,8k' },
+      { label:'Inadimplência média', value:fmtPct1(inadMedia), sub:'meta ≤ 1%' }
+    ];
+    const statusList = ['Entregue','Em rota','Pendente','Devolvido','Cancelado'];
+    const relStatus = statusList.map(s => { const arr = pedidosPeriodo.filter(p=>p.status===s); return { label:s, count:arr.length, valor:'R$ '+fmtBR(arr.reduce((x,p)=>x+(p.valor||0),0)), color:this.pStatusColor(s), bg:this.pStatusBg(s) }; }).filter(x=>x.count>0);
+    const rotasAgg = {};
+    pedidosPeriodo.forEach(p => { const r = p.rota||'—'; if(!rotasAgg[r]) rotasAgg[r]={ped:0,peso:0,fat:0,perdaKg:0}; rotasAgg[r].ped++; rotasAgg[r].peso+=(p.pesoKg||0); rotasAgg[r].fat+=(p.valor||0); rotasAgg[r].perdaKg+=(p.perdaKg||0); });
+    const relRotas = Object.keys(rotasAgg).sort().map(r => { const o = rotasAgg[r]; return { rota:r, ped:o.ped, peso:o.peso.toLocaleString('pt-BR'), fat:'R$ '+fmtBR(o.fat), ticket:'R$ '+fmtBR(o.ped?o.fat/o.ped:0) }; });
+    // ===== relatório de compras / fornecedores =====
+    const comprAgg = {};
+    entradasPeriodo.forEach(en => {
+      const k = en.fornecedor||'—';
+      if(!comprAgg[k]) comprAgg[k]={coletas:0,qtd:0,valor:0,perda:0,aPagar:0};
+      comprAgg[k].coletas++; comprAgg[k].qtd+=(en.pesoKg||0); comprAgg[k].valor+=(en.valor||0);
+      comprAgg[k].perda+=(en.perdaKg||0);
+      if(en.pago!=='Pago') comprAgg[k].aPagar+=(en.valor||0);
+    });
+    const relCompras = Object.keys(comprAgg).map(k => {
+      const o = comprAgg[k];
+      const pp = o.qtd ? o.perda/o.qtd*100 : 0;
+      return { forn:k, coletas:o.coletas, qtd:o.qtd.toLocaleString('pt-BR'),
+        valor:'R$ '+fmtBR(o.valor), medio: o.qtd? 'R$ '+(o.valor/o.qtd).toFixed(2).replace('.',',') : '—',
+        perda:pp.toFixed(1).replace('.',',')+'%', perdaColor: pp<=10?this.GREEN:(pp<=15?this.AMBER:this.RED),
+        aproveit:(100-pp).toFixed(0)+'%',
+        aPagar: o.aPagar? 'R$ '+fmtBR(o.aPagar) : '—', aPagarColor: o.aPagar? this.RED : '#9a9784',
+        _raw:o };
+    }).sort((a,b)=>b._raw.valor-a._raw.valor);
+    const noRelCompras = relCompras.length===0;
+    const comprTotVal = Object.keys(comprAgg).reduce((s,k)=>s+comprAgg[k].valor,0);
+    const comprTotQtd = Object.keys(comprAgg).reduce((s,k)=>s+comprAgg[k].qtd,0);
+    const comprTotPerda = Object.keys(comprAgg).reduce((s,k)=>s+comprAgg[k].perda,0);
+    const comprTotAPagar = Object.keys(comprAgg).reduce((s,k)=>s+comprAgg[k].aPagar,0);
+    const relComprasTot = [
+      { label:'Total comprado', value:'R$ '+fmtBR(comprTotVal), sub:entradasPeriodo.length+' coleta(s) · '+periodLabel },
+      { label:'Fornecedores no período', value:String(relCompras.length), sub:this.state.fornecedores.length+' cadastrados' },
+      { label:'Perda na coleta', value:(comprTotQtd?(comprTotPerda/comprTotQtd*100):0).toFixed(1).replace('.',',')+'%', sub:comprTotPerda.toLocaleString('pt-BR')+' de '+comprTotQtd.toLocaleString('pt-BR') },
+      { label:'A pagar ao produtor', value:'R$ '+fmtBR(comprTotAPagar), sub: comprTotAPagar>0?'compras em aberto':'tudo pago' }
+    ];
+
+    // ===== ranking de produtos =====
+    const prodAgg = {};
+    const _pk = it => String(it.produtoId||it.nome);
+    const _pn = it => it.nome || prodNameById[String(it.produtoId)] || '—';
+    const _ensure = (k,nome) => { if(!prodAgg[k]) prodAgg[k]={nome,compQ:0,compV:0,vendQ:0,vendV:0,perda:0}; return prodAgg[k]; };
+    entradasPeriodo.forEach(en => (en.itens||[]).forEach(it => { const o=_ensure(_pk(it),_pn(it)); o.compQ+=(+it.kg||0); o.compV+=(+it.kg||0)*(+it.preco||0); o.perda+=(+it.perdaKg||0); }));
+    perdasDep.forEach(pe => { const o=_ensure(String(pe.produtoId||pe.nome), pe.nome||prodNameById[String(pe.produtoId)]||'—'); o.perda+=(+pe.qtd||0); });
+    entregues.forEach(p => (p.itens||[]).forEach(it => { const o=_ensure(_pk(it),_pn(it)); o.vendQ+=(+it.kg||0); o.vendV+=(+it.kg||0)*(+it.preco||0); }));
+    const relProdutos = Object.keys(prodAgg).map(k => {
+      const o = prodAgg[k];
+      const cm = o.compQ? o.compV/o.compQ : 0, vm = o.vendQ? o.vendV/o.vendQ : 0;
+      const mk = (cm>0&&vm>0) ? (vm-cm)/cm*100 : null;
+      const margemR = o.vendV - (o.vendQ*cm);
+      const pp = o.compQ ? o.perda/o.compQ*100 : 0;
+      return { nome:o.nome, compQ:o.compQ.toLocaleString('pt-BR'), vendQ:o.vendQ.toLocaleString('pt-BR'),
+        fat:'R$ '+fmtBR(o.vendV), margem: o.vendQ? 'R$ '+fmtBR(margemR) : '—',
+        markup: mk==null? '—' : Math.round(mk)+'%', markupColor: mk==null? '#9a9784' : (mk>=60?this.GREEN:this.RED),
+        perda: o.compQ? pp.toFixed(1).replace('.',',')+'%' : '—',
+        perdaColor: pp<=10?this.GREEN:(pp<=15?this.AMBER:this.RED),
+        _fat:o.vendV, _margem:margemR, _perda:pp };
+    }).sort((a,b)=>b._fat-a._fat);
+    const noRelProdutos = relProdutos.length===0;
+    const maisVend = relProdutos[0];
+    const maiorMargem = relProdutos.slice().sort((a,b)=>b._margem-a._margem)[0];
+    const maiorPerda = relProdutos.slice().filter(x=>x.perda!=='—').sort((a,b)=>b._perda-a._perda)[0];
+    const relProdutosTot = [
+      { label:'Produtos movimentados', value:String(relProdutos.length), sub:this.state.produtos.length+' cadastrados' },
+      { label:'Mais fatura', value: maisVend? maisVend.nome : '—', sub: maisVend? maisVend.fat : periodLabel },
+      { label:'Maior margem', value: maiorMargem? maiorMargem.nome : '—', sub: maiorMargem? maiorMargem.margem : '—' },
+      { label:'Maior perda', value: maiorPerda? maiorPerda.nome : '—', sub: maiorPerda? maiorPerda.perda : '—' }
+    ];
+
+    // ===== lista de inadimplentes =====
+    const atrasadosPeriodo = pedidosPeriodo.filter(p=>p.pag==='Atrasado');
+    const inadAgg = {};
+    atrasadosPeriodo.forEach(p => {
+      const k = p.cliente||'—';
+      if(!inadAgg[k]) inadAgg[k]={peds:0,valor:0,maisAntigo:null,vencs:[]};
+      inadAgg[k].peds++; inadAgg[k].valor+=(p.valor||0);
+      const t = this._parseDate(p.venc||p.entrega);
+      if (t!=null && (inadAgg[k].maisAntigo==null || t<inadAgg[k].maisAntigo)) inadAgg[k].maisAntigo=t;
+      inadAgg[k].vencs.push(p.venc||p.entrega);
+    });
+    const hojeTs = this._parseDate(this._hojeIso());
+    const relInad = Object.keys(inadAgg).map(k => {
+      const o = inadAgg[k];
+      const dias = (hojeTs!=null && o.maisAntigo!=null) ? Math.max(0, Math.round((hojeTs-o.maisAntigo)/86400000)) : null;
+      const cli = clientesRaw.find(x=>x.nome===k);
+      const fatCli = fatByClient[k]||0;
+      return { cliente:k, resp: cli? (cli.resp||'—') : '—', tel: cli? (cli.tel||'—') : '—',
+        peds:o.peds, valor:'R$ '+fmtBR(o.valor),
+        venc: this._fmtDate(o.vencs.slice().sort()[0]),
+        dias: dias==null? '—' : dias+'d',
+        diasColor: dias==null? '#9a9784' : (dias>30?this.RED:(dias>7?this.AMBER:this.GREEN)),
+        pctCli: fatCli? Math.round(o.valor/fatCli*100)+'%' : '—',
+        open:()=>this.openCliente(cli?cli.id:0), _v:o.valor };
+    }).sort((a,b)=>b._v-a._v);
+    const noRelInad = relInad.length===0;
+    const inadTotVal = relInad.reduce((s,x)=>s+x._v,0);
+    const relInadTot = [
+      { label:'Total em atraso', value:'R$ '+fmtBR(inadTotVal), sub:atrasadosPeriodo.length+' pedido(s) · '+periodLabel },
+      { label:'Clientes inadimplentes', value:String(relInad.length), sub:clientesRaw.length+' na carteira' },
+      { label:'% da receita', value:(receitaFat?(inadTotVal/receitaFat*100):0).toFixed(1).replace('.',',')+'%', sub:'meta ≤ 1%' },
+      { label:'Maior devedor', value: relInad[0]? relInad[0].cliente : '—', sub: relInad[0]? relInad[0].valor : 'nenhum atraso' }
+    ];
+
+    // ===== perdas por motivo e por produto =====
+    const motAgg = {};
+    entradasPeriodo.forEach(en => { const m=(en.motivo&&en.motivo!=='—')?en.motivo:'não informado'; if(!motAgg[m])motAgg[m]={qtd:0,ocor:0}; motAgg[m].qtd+=(en.perdaKg||0); if((en.perdaKg||0)>0) motAgg[m].ocor++; });
+    perdasDep.forEach(pe => { const m=pe.motivo||'não informado'; if(!motAgg[m])motAgg[m]={qtd:0,ocor:0}; motAgg[m].qtd+=(+pe.qtd||0); motAgg[m].ocor++; });
+    const perdaTotalQtd = Object.keys(motAgg).reduce((s,k)=>s+motAgg[k].qtd,0);
+    const relPerdaMotivos = Object.keys(motAgg).map(k => ({
+      motivo:k, qtd:motAgg[k].qtd.toLocaleString('pt-BR'), ocor:motAgg[k].ocor,
+      pct: perdaTotalQtd? Math.round(motAgg[k].qtd/perdaTotalQtd*100)+'%' : '—',
+      barra: perdaTotalQtd? Math.round(motAgg[k].qtd/perdaTotalQtd*100)+'%' : '0%',
+      _q:motAgg[k].qtd })).sort((a,b)=>b._q-a._q);
+    const relPerdaProdutos = relProdutos.slice().filter(x=>x.perda!=='—').sort((a,b)=>b._perda-a._perda)
+      .map(x=>({ nome:x.nome, compQ:x.compQ, perda:x.perda, perdaColor:x.perdaColor }));
+    const noRelPerdas = relPerdaMotivos.length===0;
+    const maiorMot = relPerdaMotivos[0];
+    const relPerdasTot = [
+      { label:'Perda total', value:perdaTotalQtd.toLocaleString('pt-BR'), sub:'somando coleta e depósito' },
+      { label:'Índice de perdas', value:fmtPct1(perdaMedia), sub:'meta ≤ 10%' },
+      { label:'Principal motivo', value: maiorMot? maiorMot.motivo : '—', sub: maiorMot? (maiorMot.pct+' do total') : periodLabel },
+      { label:'Perdas no depósito', value:String(perdasDep.length), sub:'lançamentos avulsos' }
+    ];
+
+    const relPedidosTot = [
+      { label:'Pedidos no período', value:String(pedidosPeriodo.length), sub:periodLabel },
+      { label:'Faturado (entregue)', value:'R$ '+fmtBR(receitaFat), sub:entregues.length+' entregues' },
+      { label:'A receber / atrasado', value:'R$ '+fmtBR(aReceber), sub:nAtraso+' em atraso' },
+      { label:'Qtd entregue', value:entregues.reduce((s,p)=>s+(p.pesoKg||0),0).toLocaleString('pt-BR'), sub:'no período' }
+    ];
+

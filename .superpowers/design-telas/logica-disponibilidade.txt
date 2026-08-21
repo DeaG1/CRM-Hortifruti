@@ -1,0 +1,11 @@
+    // ---- disponibilidade em estoque (para avisar venda a descoberto) ----
+    const _prodName = {}; this.state.produtos.forEach(p => _prodName[String(p.id)] = p.nome);
+    const _k = it => String(it.produtoId||it.nome)+'|'+(it.un||'KG');
+    const availMap = {};
+    const _bump = (k, campo, v) => { if(!availMap[k]) availMap[k]={entrou:0,perda:0,saiu:0}; availMap[k][campo]+=v; };
+    entradasRaw.forEach(en => (en.itens||[]).forEach(it => { _bump(_k(it),'entrou',+it.kg||0); _bump(_k(it),'perda',+it.perdaKg||0); }));
+    (this.state.perdas||[]).forEach(pe => _bump(String(pe.produtoId||pe.nome)+'|'+(pe.un||'KG'),'perda',+pe.qtd||0));
+    const draftPedidoId = (this.state.modal==='pedido' && this.state.draft) ? this.state.draft.id : null;
+    pedidosRaw.filter(p=>p.status!=='Cancelado'&&p.status!=='Devolvido'&&p.id!==draftPedidoId).forEach(p => (p.itens||[]).forEach(it => _bump(_k(it),'saiu',+it.kg||0)));
+    const dispDe = it => { const o = availMap[_k(it)]; return o ? o.entrou-o.perda-o.saiu : 0; };
+

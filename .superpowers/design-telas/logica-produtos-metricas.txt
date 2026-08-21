@@ -1,0 +1,35 @@
+    // ---- produtos ----
+    // perda realizada a partir dos itens das ENTRADAS (compras), acumula por produto
+    const lossByProd = {};
+    (this.state.perdas||[]).forEach(pe => {
+      const k = String(pe.produtoId || pe.nome);
+      if (!lossByProd[k]) lossByProd[k] = { kg:0, perdaKg:0 };
+      lossByProd[k].perdaKg += (+pe.qtd||0);
+    });
+    entradasRaw.forEach(en => (en.itens||[]).forEach(it => {
+      const k = String(it.produtoId || it.nome);
+      if (!lossByProd[k]) lossByProd[k] = { kg:0, perdaKg:0 };
+      lossByProd[k].kg += (+it.kg||0); lossByProd[k].perdaKg += (+it.perdaKg||0);
+    }));
+    let totProdKg = 0, totProdPerda = 0;
+    Object.keys(lossByProd).forEach(k => { totProdKg += lossByProd[k].kg; totProdPerda += lossByProd[k].perdaKg; });
+    const produtoPerdaMedia = totProdKg ? (totProdPerda/totProdKg*100) : null;
+    const produtoPerdaMediaTxt = produtoPerdaMedia==null ? 'sem dados' : produtoPerdaMedia.toFixed(1).replace('.',',')+'%';
+    const produtoPerdaMediaColor = produtoPerdaMedia==null ? '#9a9784' : (produtoPerdaMedia<=10?this.GREEN:(produtoPerdaMedia<=15?this.AMBER:this.RED));
+    const produtos = this.state.produtos.map(p => {
+      const cb = compraByProd[String(p.id)]||compraByProd[p.nome], vb = vendaByProd[String(p.id)]||vendaByProd[p.nome];
+      const cm = cb&&cb.q? cb.t/cb.q : (p.compra||0), vm = vb&&vb.q? vb.t/vb.q : (p.venda||0);
+      const mk = cm>0&&vm>0 ? (vm-cm)/cm*100 : null;
+      const mgR = vm-cm; const mgP = vm? mgR/vm*100 : 0;
+      const lp = lossByProd[String(p.id)] || lossByProd[p.nome];
+      const rpct = lp && lp.kg ? lp.perdaKg/lp.kg*100 : null;
+      return { nome:p.nome, dotColor:'#5a7d3a', un:p.un||'KG',
+        compra: cm>0? 'R$ '+cm.toFixed(2).replace('.',',') : '—',
+        venda: vm>0? 'R$ '+vm.toFixed(2).replace('.',',') : '—',
+        margem: (cm>0&&vm>0)? ('R$ '+mgR.toFixed(2).replace('.',',')+' · '+Math.round(mgP)+'%') : '—',
+        markup: mk==null? '—' : Math.round(mk)+'%', markupColor: mk==null? '#9a9784' : (mk>=60?this.GREEN:this.RED),
+        perda: rpct==null ? '—' : rpct.toFixed(1).replace('.',',')+'%',
+        perdaColor: rpct==null ? '#9a9784' : (rpct<=10?this.GREEN:(rpct<=15?this.AMBER:this.RED)),
+        edit:()=>this.editProduto(p.id) };
+    });
+

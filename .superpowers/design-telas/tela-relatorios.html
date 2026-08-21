@@ -1,0 +1,283 @@
+      <sc-if value="{{ isRelatorios }}" hint-placeholder-val="">
+      <div style="max-width:1280px;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:18px;">
+          <div style="display:flex; flex-wrap:wrap; background:#eee9da; border-radius:10px; padding:3px; gap:3px;">
+            <button onClick="{{ setRelClientes }}" style="border:none; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; background:{{ relTabCliBg }}; color:{{ relTabCliFg }};">Clientes</button>
+            <button onClick="{{ setRelInad }}" style="border:none; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; background:{{ tabInaBg }}; color:{{ tabInaFg }};">Inadimplentes</button>
+            <button onClick="{{ setRelPedidos }}" style="border:none; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; background:{{ relTabPedBg }}; color:{{ relTabPedFg }};">Pedidos</button>
+            <button onClick="{{ setRelCompras }}" style="border:none; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; background:{{ tabComBg }}; color:{{ tabComFg }};">Compras</button>
+            <button onClick="{{ setRelProdutos }}" style="border:none; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; background:{{ tabProBg }}; color:{{ tabProFg }};">Produtos</button>
+            <button onClick="{{ setRelPerdas }}" style="border:none; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; background:{{ tabPerBg }}; color:{{ tabPerFg }};">Perdas</button>
+            <button onClick="{{ setRelLanc }}" style="border:none; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; background:{{ relTabLanBg }}; color:{{ relTabLanFg }};">Lançamentos</button>
+          </div>
+          <div style="flex:1;"></div>
+          <div style="display:flex; gap:7px; align-items:center;" data-no-print="1">
+            <button onClick="{{ exportarCSV }}" style="background:#fff; color:#4a4838; border:1px solid #d8d3c2; border-radius:8px; padding:8px 13px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; white-space:nowrap;" style-hover="background:#f3f0e6;">Exportar CSV</button>
+            <button onClick="{{ imprimirRelatorio }}" style="background:#5a7d3a; color:#fff; border:none; border-radius:8px; padding:8px 13px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; white-space:nowrap;" style-hover="background:#4a6b2e;">Imprimir / PDF</button>
+          </div>
+        </div>
+        <div style="font-size:12.5px; color:#8a8775; margin-bottom:14px;"><strong style="color:#4a4838;">{{ relNomeAtual }}</strong> · filtrado por {{ periodLabel }}</div>
+
+        <!-- REL CLIENTES -->
+        <sc-if value="{{ relClientes }}" hint-placeholder-val="{{ true }}">
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px;">
+          <sc-for list="{{ relClientesTot }}" as="s" hint-placeholder-count="4">
+            <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:16px 18px;">
+              <div style="font-size:12px; color:#8a8775; font-weight:600;">{{ s.label }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:23px; color:#21331f; margin-top:6px;">{{ s.value }}</div>
+              <div style="font-size:11.5px; color:#9a9784;">{{ s.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; overflow:hidden;">
+          <div style="display:grid; grid-template-columns:1.6fr 0.9fr 1fr 0.6fr 1fr 0.9fr 0.6fr 0.7fr 0.9fr; gap:8px; padding:12px 18px; background:#f3f0e6; border-bottom:1px solid #e6e2d4; font-size:11px; font-weight:700; color:#7c7a6a; letter-spacing:0.3px;">
+            <div>CLIENTE</div><div>ROTA</div><div>STATUS</div><div style="text-align:right;">PED.</div><div style="text-align:right;">FATURADO</div><div style="text-align:right;">/ENTREGA</div><div style="text-align:right;">% FAT</div><div style="text-align:right;">INAD.</div><div style="text-align:right;">SAÚDE</div>
+          </div>
+          <sc-for list="{{ relClientesRows }}" as="c" hint-placeholder-count="8">
+            <div style="display:grid; grid-template-columns:1.6fr 0.9fr 1fr 0.6fr 1fr 0.9fr 0.6fr 0.7fr 0.9fr; gap:8px; padding:12px 18px; border-bottom:1px solid #f1eee2; font-size:12.5px; align-items:center;">
+              <div style="font-weight:600; color:#21331f; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ c.nome }}</div>
+              <div style="color:#5a584a;">{{ c.rota }}</div>
+              <div style="color:#5a584a;">{{ c.status }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace;">{{ c.pedidos }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:600; color:#21331f;">{{ c.fatTxt }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ c.teTxt }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace;">{{ c.part }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:{{ c.inadColor }};">{{ c.inad }}</div>
+              <div style="text-align:right;"><span style="font-size:11px; font-weight:600; color:{{ c.healthColor }}; background:{{ c.healthBg }}; padding:3px 9px; border-radius:14px;">{{ c.healthLabel }}</span></div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="font-size:12px; color:#8a8775; margin-top:12px;">Ranking por faturamento no período. Faturado, ticket por entrega e % de participação vêm dos pedidos entregues.</div>
+        </sc-if>
+
+        <!-- REL PEDIDOS -->
+        <sc-if value="{{ relPedidos }}" hint-placeholder-val="">
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px;">
+          <sc-for list="{{ relPedidosTot }}" as="s" hint-placeholder-count="4">
+            <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:16px 18px;">
+              <div style="font-size:12px; color:#8a8775; font-weight:600;">{{ s.label }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:23px; color:#21331f; margin-top:6px;">{{ s.value }}</div>
+              <div style="font-size:11.5px; color:#9a9784;">{{ s.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1.3fr; gap:14px;">
+          <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:20px;">
+            <h3 style="font-family:'Archivo',sans-serif; font-size:15px; font-weight:700; color:#21331f; margin:0 0 14px;">Pedidos por status</h3>
+            <sc-for list="{{ relStatus }}" as="s" hint-placeholder-count="4">
+              <div style="display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid #f1eee2;">
+                <span style="font-size:12px; font-weight:600; color:{{ s.color }}; background:{{ s.bg }}; padding:3px 11px; border-radius:14px; min-width:74px; text-align:center;">{{ s.label }}</span>
+                <span style="flex:1; font-family:'IBM Plex Mono',monospace; font-size:15px; font-weight:600; color:#21331f;">{{ s.count }}</span>
+                <span style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#5a584a;">{{ s.valor }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:20px;">
+            <h3 style="font-family:'Archivo',sans-serif; font-size:15px; font-weight:700; color:#21331f; margin:0 0 14px;">Desempenho por rota</h3>
+            <div style="display:grid; grid-template-columns:1fr 0.6fr 1fr 1fr 0.7fr; gap:8px; padding-bottom:9px; border-bottom:1px solid #e6e2d4; font-size:11px; font-weight:700; color:#9a9784;">
+              <div>ROTA</div><div style="text-align:right;">PED.</div><div style="text-align:right;">QTD</div><div style="text-align:right;">FATURADO</div><div style="text-align:right;">TICKET</div>
+            </div>
+            <sc-for list="{{ relRotas }}" as="r" hint-placeholder-count="4">
+              <div style="display:grid; grid-template-columns:1fr 0.6fr 1fr 1fr 0.7fr; gap:8px; padding:11px 0; border-bottom:1px solid #f1eee2; font-size:12.5px; align-items:center;">
+                <div style="font-weight:600; color:#21331f;">{{ r.rota }}</div>
+                <div style="text-align:right; font-family:'IBM Plex Mono',monospace;">{{ r.ped }}</div>
+                <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ r.peso }}</div>
+                <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:600;">{{ r.fat }}</div>
+                <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ r.ticket }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="font-size:12px; color:#8a8775; margin-top:12px;">Todos os números respeitam o período selecionado e são somados dos pedidos lançados.</div>
+        </sc-if>
+
+        <!-- REL LANÇAMENTOS -->
+        <sc-if value="{{ relLanc }}" hint-placeholder-val="">
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px;">
+          <sc-for list="{{ relLancTot }}" as="s" hint-placeholder-count="4">
+            <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:16px 18px;">
+              <div style="font-size:12px; color:#8a8775; font-weight:600;">{{ s.label }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:23px; color:#21331f; margin-top:6px;">{{ s.value }}</div>
+              <div style="font-size:11.5px; color:#9a9784;">{{ s.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; overflow:hidden;">
+          <div style="display:grid; grid-template-columns:0.7fr 2fr 0.8fr 0.9fr 0.9fr; gap:8px; padding:12px 18px; background:#f3f0e6; border-bottom:1px solid #e6e2d4; font-size:11px; font-weight:700; color:#7c7a6a; letter-spacing:0.3px;">
+            <div>DATA</div><div>MOVIMENTAÇÃO</div><div>TIPO</div><div style="text-align:right;">ENTRADA</div><div style="text-align:right;">SAÍDA</div>
+          </div>
+          <sc-for list="{{ relLancRows }}" as="l" hint-placeholder-count="6">
+            <div style="display:grid; grid-template-columns:0.7fr 2fr 0.8fr 0.9fr 0.9fr; gap:8px; padding:12px 18px; border-bottom:1px solid #f1eee2; font-size:12.5px; align-items:center;">
+              <div style="font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ l.data }}</div>
+              <div style="color:#2a2a24; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ l.origem }}</div>
+              <div><span style="font-size:11.5px; font-weight:600; color:{{ l.tipoColor }}; background:{{ l.tipoBg }}; padding:3px 10px; border-radius:14px;">{{ l.tipo }}</span></div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:#3f8f5b; font-weight:600;">{{ l.ent }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:#9a4a2e; font-weight:600;">{{ l.sai }}</div>
+            </div>
+          </sc-for>
+          <sc-if value="{{ noRelLanc }}" hint-placeholder-val="">
+            <div style="padding:18px; text-align:center; font-size:12.5px; color:#9a9784;">Sem movimentações no período.</div>
+          </sc-if>
+        </div>
+        <div style="font-size:12px; color:#8a8775; margin-top:12px;">Conta tudo: <strong style="color:#2a2a24;">vendas pagas</strong> (entrada de dinheiro), <strong style="color:#2a2a24;">compras dos fornecedores</strong> e <strong style="color:#2a2a24;">lançamentos de custos</strong> (saídas).</div>
+        </sc-if>
+
+        <!-- REL INADIMPLENTES -->
+        <sc-if value="{{ verInad }}" hint-placeholder-val="">
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px;">
+          <sc-for list="{{ relInadTot }}" as="s" hint-placeholder-count="4">
+            <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:16px 18px;">
+              <div style="font-size:12px; color:#8a8775; font-weight:600;">{{ s.label }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:19px; color:#21331f; margin-top:6px;">{{ s.value }}</div>
+              <div style="font-size:11.5px; color:#9a9784;">{{ s.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; overflow:hidden;">
+          <div style="display:grid; grid-template-columns:1.5fr 1.2fr 0.7fr 0.9fr 0.8fr 0.7fr 0.8fr; gap:8px; padding:12px 18px; background:#f3f0e6; border-bottom:1px solid #e6e2d4; font-size:11px; font-weight:700; color:#7c7a6a; letter-spacing:0.3px;">
+            <div>CLIENTE</div><div>CONTATO</div><div style="text-align:right;">PEDIDOS</div><div style="text-align:right;">VALOR</div><div>VENC. MAIS ANTIGO</div><div style="text-align:right;">ATRASO</div><div style="text-align:right;">% DELE</div>
+          </div>
+          <sc-for list="{{ relInad }}" as="r" hint-placeholder-count="2">
+            <div onClick="{{ r.open }}" style="display:grid; grid-template-columns:1.5fr 1.2fr 0.7fr 0.9fr 0.8fr 0.7fr 0.8fr; gap:8px; padding:13px 18px; border-bottom:1px solid #f1eee2; font-size:12.5px; align-items:center; cursor:pointer;" style-hover="background:#faf8f0;">
+              <div style="font-weight:600; color:#21331f;">{{ r.cliente }}<div style="font-size:11px; color:#9a9784; font-weight:400;">{{ r.resp }}</div></div>
+              <div style="font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:#5a584a;">{{ r.tel }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace;">{{ r.peds }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:700; color:#9a4a2e;">{{ r.valor }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ r.venc }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:600; color:{{ r.diasColor }};">{{ r.dias }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ r.pctCli }}</div>
+            </div>
+          </sc-for>
+          <sc-if value="{{ noRelInad }}" hint-placeholder-val="">
+            <div style="padding:26px 18px; text-align:center;">
+              <div style="font-size:13.5px; font-weight:600; color:#2f5d3f;">Nenhum cliente em atraso</div>
+              <div style="font-size:12.5px; color:#9a9784; margin-top:4px;">Todos os pedidos do período estão pagos ou dentro do prazo.</div>
+            </div>
+          </sc-if>
+        </div>
+        <div style="font-size:12px; color:#8a8775; margin-top:12px;">Clique num cliente para abrir a ficha e o histórico de cobrança. <strong style="color:#2a2a24;">% dele</strong> = quanto do faturamento daquele cliente está em atraso.</div>
+        </sc-if>
+
+        <!-- REL COMPRAS -->
+        <sc-if value="{{ verCompras }}" hint-placeholder-val="">
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px;">
+          <sc-for list="{{ relComprasTot }}" as="s" hint-placeholder-count="4">
+            <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:16px 18px;">
+              <div style="font-size:12px; color:#8a8775; font-weight:600;">{{ s.label }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:21px; color:#21331f; margin-top:6px;">{{ s.value }}</div>
+              <div style="font-size:11.5px; color:#9a9784;">{{ s.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; overflow:hidden;">
+          <div style="display:grid; grid-template-columns:1.6fr 0.7fr 0.7fr 0.85fr 0.9fr 0.7fr 0.85fr 0.85fr; gap:8px; padding:12px 18px; background:#f3f0e6; border-bottom:1px solid #e6e2d4; font-size:11px; font-weight:700; color:#7c7a6a; letter-spacing:0.3px;">
+            <div>FORNECEDOR</div><div style="text-align:right;">COLETAS</div><div style="text-align:right;">QTD</div><div style="text-align:right;">PREÇO MÉD.</div><div style="text-align:right;">VALOR</div><div style="text-align:right;">PERDA</div><div style="text-align:right;">APROVEIT.</div><div style="text-align:right;">A PAGAR</div>
+          </div>
+          <sc-for list="{{ relCompras }}" as="r" hint-placeholder-count="3">
+            <div style="display:grid; grid-template-columns:1.6fr 0.7fr 0.7fr 0.85fr 0.9fr 0.7fr 0.85fr 0.85fr; gap:8px; padding:13px 18px; border-bottom:1px solid #f1eee2; font-size:12.5px; align-items:center;">
+              <div style="font-weight:600; color:#21331f;">{{ r.forn }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace;">{{ r.coletas }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace;">{{ r.qtd }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ r.medio }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:700; color:#21331f;">{{ r.valor }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:{{ r.perdaColor }};">{{ r.perda }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ r.aproveit }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:{{ r.aPagarColor }};">{{ r.aPagar }}</div>
+            </div>
+          </sc-for>
+          <sc-if value="{{ noRelCompras }}" hint-placeholder-val="">
+            <div style="padding:22px 18px; text-align:center; font-size:12.5px; color:#9a9784;">Nenhuma compra no período.</div>
+          </sc-if>
+        </div>
+        <div style="font-size:12px; color:#8a8775; margin-top:12px;">Ordenado por valor comprado. <strong style="color:#2a2a24;">Aproveitamento</strong> = quanto da carga chegou em condição de venda.</div>
+        </sc-if>
+
+        <!-- REL PRODUTOS -->
+        <sc-if value="{{ verProdutos }}" hint-placeholder-val="">
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px;">
+          <sc-for list="{{ relProdutosTot }}" as="s" hint-placeholder-count="4">
+            <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:16px 18px;">
+              <div style="font-size:12px; color:#8a8775; font-weight:600;">{{ s.label }}</div>
+              <div style="font-family:'Archivo',sans-serif; font-weight:700; font-size:19px; color:#21331f; margin-top:6px;">{{ s.value }}</div>
+              <div style="font-size:11.5px; color:#9a9784;">{{ s.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; overflow:hidden;">
+          <div style="display:grid; grid-template-columns:1.5fr 0.9fr 0.9fr 1fr 1fr 0.7fr 0.7fr; gap:8px; padding:12px 18px; background:#f3f0e6; border-bottom:1px solid #e6e2d4; font-size:11px; font-weight:700; color:#7c7a6a; letter-spacing:0.3px;">
+            <div>PRODUTO</div><div style="text-align:right;">COMPRADO</div><div style="text-align:right;">VENDIDO</div><div style="text-align:right;">FATURAMENTO</div><div style="text-align:right;">MARGEM</div><div style="text-align:right;">MARKUP</div><div style="text-align:right;">PERDA</div>
+          </div>
+          <sc-for list="{{ relProdutos }}" as="r" hint-placeholder-count="4">
+            <div style="display:grid; grid-template-columns:1.5fr 0.9fr 0.9fr 1fr 1fr 0.7fr 0.7fr; gap:8px; padding:13px 18px; border-bottom:1px solid #f1eee2; font-size:12.5px; align-items:center;">
+              <div style="font-weight:600; color:#21331f;">{{ r.nome }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ r.compQ }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ r.vendQ }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:700; color:#21331f;">{{ r.fat }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:#2f5d3f;">{{ r.margem }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:600; color:{{ r.markupColor }};">{{ r.markup }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:{{ r.perdaColor }};">{{ r.perda }}</div>
+            </div>
+          </sc-for>
+          <sc-if value="{{ noRelProdutos }}" hint-placeholder-val="">
+            <div style="padding:22px 18px; text-align:center; font-size:12.5px; color:#9a9784;">Nenhum produto movimentado no período.</div>
+          </sc-if>
+        </div>
+        <div style="font-size:12px; color:#8a8775; margin-top:12px;">Ordenado por faturamento. <strong style="color:#2a2a24;">Margem</strong> = faturamento menos o custo de compra da quantidade vendida.</div>
+        </sc-if>
+
+        <!-- REL PERDAS -->
+        <sc-if value="{{ verPerdas }}" hint-placeholder-val="">
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px;">
+          <sc-for list="{{ relPerdasTot }}" as="s" hint-placeholder-count="4">
+            <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:16px 18px;">
+              <div style="font-size:12px; color:#8a8775; font-weight:600;">{{ s.label }}</div>
+              <div style="font-family:'Archivo',sans-serif; font-weight:700; font-size:19px; color:#21331f; margin-top:6px;">{{ s.value }}</div>
+              <div style="font-size:11.5px; color:#9a9784;">{{ s.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display:grid; grid-template-columns:1.15fr 1fr; gap:14px;">
+          <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:20px;">
+            <h3 style="font-family:'Archivo',sans-serif; font-size:15px; font-weight:700; color:#21331f; margin:0 0 3px;">Perdas por motivo</h3>
+            <div style="font-size:12px; color:#8a8775; margin-bottom:16px;">Onde a mercadoria está se perdendo.</div>
+            <sc-for list="{{ relPerdaMotivos }}" as="m" hint-placeholder-count="3">
+              <div style="margin-bottom:13px;">
+                <div style="display:flex; align-items:baseline; gap:8px; margin-bottom:5px;">
+                  <div style="flex:1; font-size:13px; font-weight:600; color:#2a2a24; text-transform:capitalize;">{{ m.motivo }}</div>
+                  <div style="font-size:11.5px; color:#9a9784;">{{ m.ocor }} ocorr.</div>
+                  <div style="font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; color:#9a4a2e;">{{ m.qtd }}</div>
+                  <div style="font-family:'IBM Plex Mono',monospace; font-size:12px; color:#5a584a; width:38px; text-align:right;">{{ m.pct }}</div>
+                </div>
+                <div style="height:8px; background:#f1eee2; border-radius:6px; overflow:hidden;">
+                  <div style="height:100%; width:{{ m.barra }}; background:#a96b3a; border-radius:6px;"></div>
+                </div>
+              </div>
+            </sc-for>
+            <sc-if value="{{ noRelPerdas }}" hint-placeholder-val="">
+              <div style="padding:14px 0; text-align:center; font-size:12.5px; color:#9a9784;">Nenhuma perda registrada no período.</div>
+            </sc-if>
+          </div>
+          <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:20px;">
+            <h3 style="font-family:'Archivo',sans-serif; font-size:15px; font-weight:700; color:#21331f; margin:0 0 3px;">Perdas por produto</h3>
+            <div style="font-size:12px; color:#8a8775; margin-bottom:14px;">Perecibilidade varia muito por item — meta ≤ 10%.</div>
+            <div style="display:grid; grid-template-columns:1.5fr 1fr 0.7fr; gap:8px; padding:8px 0; border-bottom:1px solid #e6e2d4; font-size:10.5px; font-weight:700; color:#9a9784; letter-spacing:0.3px;">
+              <div>PRODUTO</div><div style="text-align:right;">COMPRADO</div><div style="text-align:right;">PERDA</div>
+            </div>
+            <sc-for list="{{ relPerdaProdutos }}" as="p" hint-placeholder-count="4">
+              <div style="display:grid; grid-template-columns:1.5fr 1fr 0.7fr; gap:8px; padding:10px 0; border-bottom:1px solid #f1eee2; font-size:12.5px; align-items:center;">
+                <div style="font-weight:600; color:#21331f;">{{ p.nome }}</div>
+                <div style="text-align:right; font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ p.compQ }}</div>
+                <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:600; color:{{ p.perdaColor }};">{{ p.perda }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="font-size:12px; color:#8a8775; margin-top:12px;">Soma a perda registrada na <strong style="color:#2a2a24;">coleta</strong> (dentro de cada entrada) com as perdas lançadas no <strong style="color:#2a2a24;">depósito</strong>.</div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+    </div>
+  </main>
+
+  <!-- ============ MODAL FORM ============ -->

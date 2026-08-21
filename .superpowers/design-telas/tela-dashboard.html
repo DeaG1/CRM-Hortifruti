@@ -1,0 +1,124 @@
+      <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex; flex-direction:column; gap:22px; max-width:1280px;">
+
+        <!-- guia de primeiros passos -->
+        <sc-if value="{{ guiaAberto }}" hint-placeholder-val="">
+        <div style="background:#fff; border:1px solid #e6e2d4; border-left:5px solid #c79320; border-radius:13px; padding:20px 22px;">
+          <div style="display:flex; align-items:flex-start; gap:16px; margin-bottom:16px;">
+            <div style="flex:1;">
+              <div style="font-family:'Archivo',sans-serif; font-weight:700; font-size:16px; color:#21331f;">{{ guiaTitulo }}</div>
+              <div style="font-size:12.5px; color:#8a8775; margin-top:2px;">{{ guiaSub }}</div>
+            </div>
+            <div style="text-align:right; flex:0 0 auto;">
+              <div style="font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; color:#c79320;">{{ guiaProgresso }}</div>
+              <div style="width:90px; height:6px; background:#eee9da; border-radius:6px; margin-top:5px; overflow:hidden;">
+                <div style="height:100%; width:{{ guiaBarra }}; background:#c79320; border-radius:6px;"></div>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <sc-for list="{{ passosRows }}" as="p" hint-placeholder-count="5">
+              <div style="display:flex; align-items:center; gap:13px; padding:9px 0; border-bottom:1px solid #f4f1e7;">
+                <span style="width:24px; height:24px; flex:0 0 24px; border-radius:50%; background:{{ p.markBg }}; color:{{ p.markFg }}; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700;">{{ p.mark }}</span>
+                <div style="flex:1; min-width:0;">
+                  <div style="font-size:13.5px; font-weight:600; color:{{ p.labelColor }};">{{ p.label }}</div>
+                  <div style="font-size:11.5px; color:#9a9784;">{{ p.hint }}</div>
+                </div>
+                <div style="font-size:11.5px; color:#9db088; font-family:'IBM Plex Mono',monospace;">{{ p.countTxt }}</div>
+                <sc-if value="{{ p.showCta }}" hint-placeholder-val="">
+                  <button onClick="{{ p.go }}" style="background:#5a7d3a; color:#fff; border:none; border-radius:8px; padding:7px 14px; font-size:12px; font-weight:700; cursor:pointer; font-family:'Public Sans',sans-serif; white-space:nowrap;" style-hover="background:#4a6b2e;">{{ p.cta }}</button>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- top stat strip -->
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px;">
+          <sc-for list="{{ statCards }}" as="s" hint-placeholder-count="4">
+            <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:16px 18px;">
+              <div style="font-size:12px; color:#8a8775; font-weight:600;">{{ s.label }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:26px; color:#21331f; margin-top:7px; letter-spacing:-0.5px;">{{ s.value }}</div>
+              <div style="font-size:12px; margin-top:4px; color:{{ s.deltaColor }}; font-weight:600;">{{ s.delta }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <!-- KPI grid -->
+        <div>
+          <div style="display:flex; align-items:baseline; gap:10px; margin-bottom:12px;">
+            <h2 style="font-family:'Archivo',sans-serif; font-size:16px; font-weight:700; color:#21331f; margin:0;">Painel de indicadores</h2>
+            <span style="font-size:12px; color:#8a8775;">9 KPIs do estudo · meta vs. realizado</span>
+            <div style="flex:1;"></div>
+            <div style="display:flex; gap:14px; font-size:11px; color:#8a8775;">
+              <span style="display:flex; align-items:center; gap:5px;"><span style="width:9px;height:9px;border-radius:3px;background:#3f8f5b;"></span>Na meta</span>
+              <span style="display:flex; align-items:center; gap:5px;"><span style="width:9px;height:9px;border-radius:3px;background:#c79320;"></span>Atenção</span>
+              <span style="display:flex; align-items:center; gap:5px;"><span style="width:9px;height:9px;border-radius:3px;background:#c2502f;"></span>Fora da meta</span>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px;">
+            <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="9">
+              <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:15px 16px; border-top:3px solid {{ k.color }};">
+                <div style="font-size:12px; color:#6a685c; font-weight:600; min-height:32px; line-height:1.25;">{{ k.label }}</div>
+                <div style="display:flex; align-items:baseline; gap:7px; margin-top:8px;">
+                  <span style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:23px; color:{{ k.color }}; letter-spacing:-0.5px;">{{ k.real }}</span>
+                </div>
+                <div style="height:6px; background:#eee9da; border-radius:6px; margin-top:9px; overflow:hidden;">
+                  <div style="height:100%; width:{{ k.pct }}; background:{{ k.color }}; border-radius:6px;"></div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:7px; font-size:11px; color:#9a9784;">
+                  <span>meta {{ k.meta }}</span>
+                  <span style="color:{{ k.color }}; font-weight:600;">{{ k.tag }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <!-- carteira -->
+        <div style="display:grid; grid-template-columns:1fr; gap:14px;">
+          <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:20px;">
+            <div style="display:flex; align-items:baseline; justify-content:space-between;">
+              <h3 style="font-family:'Archivo',sans-serif; font-size:15px; font-weight:700; color:#21331f; margin:0;">Concentração de carteira</h3>
+              <span style="font-size:12px; color:#c2502f; font-weight:600;">{{ top5Txt }}</span>
+            </div>
+            <div style="font-size:12px; color:#8a8775; margin-top:3px; margin-bottom:16px;">Risco de dependência — alvo: nenhum cliente acima de 15%.</div>
+            <div style="display:flex; flex-direction:column; gap:11px;">
+              <sc-for list="{{ carteira }}" as="c" hint-placeholder-count="6">
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <div style="width:150px; flex:0 0 150px; font-size:13px; color:#2a2a24; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ c.nome }}</div>
+                  <div style="flex:1; height:18px; background:#f1eee2; border-radius:5px; overflow:hidden;">
+                    <div style="height:100%; width:{{ c.bar }}; background:{{ c.color }}; border-radius:5px;"></div>
+                  </div>
+                  <div style="width:42px; text-align:right; font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; color:#2a2a24;">{{ c.pct }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+
+        <!-- cenarios + mix -->
+        <div style="display:grid; grid-template-columns:1fr; gap:14px;">
+          <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:20px;">
+            <h3 style="font-family:'Archivo',sans-serif; font-size:15px; font-weight:700; color:#21331f; margin:0 0 3px;">Cenário realizado vs. projeções</h3>
+            <div style="font-size:12px; color:#8a8775; margin-bottom:16px;">Lucro líquido operacional — onde a operação está performando.</div>
+            <div style="display:flex; flex-direction:column; gap:12px;">
+              <sc-for list="{{ cenarios }}" as="c" hint-placeholder-count="3">
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <div style="width:88px; flex:0 0 88px; font-size:13px; color:#2a2a24; font-weight:{{ c.weight }};">{{ c.nome }}</div>
+                  <div style="flex:1; height:24px; background:#f1eee2; border-radius:6px; overflow:hidden; position:relative;">
+                    <div style="height:100%; width:{{ c.bar }}; background:{{ c.color }}; border-radius:6px;"></div>
+                  </div>
+                  <div style="width:96px; text-align:right; font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; color:{{ c.txtColor }};">{{ c.valor }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="margin-top:14px; font-size:12px; color:#3f8f5b; background:#e7f1e8; border-radius:9px; padding:9px 12px;">● {{ realizadoTxt }}</div>
+          </div>
+        </div>
+
+      </div>
+      </sc-if>
+
+      <!-- ===================== CLIENTES — LISTA ===================== -->

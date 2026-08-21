@@ -1,0 +1,24 @@
+    // ---- estoque (entradas − perdas − saídas, por produto e unidade) ----
+    const prodNameById = {}; this.state.produtos.forEach(p => prodNameById[String(p.id)] = p.nome);
+    const stockMap = {};
+    const skey = it => String(it.produtoId||it.nome)+'|'+(it.un||'KG');
+    const snome = it => it.nome || prodNameById[String(it.produtoId)] || '—';
+    entradasRaw.forEach(en => (en.itens||[]).forEach(it => { const k=skey(it); if(!stockMap[k])stockMap[k]={nome:snome(it),un:it.un||'KG',entrou:0,perda:0,saiu:0}; stockMap[k].entrou+=(+it.kg||0); stockMap[k].perda+=(+it.perdaKg||0); }));
+    (this.state.perdas||[]).forEach(pe => { const k=String(pe.produtoId||pe.nome)+'|'+(pe.un||'KG'); if(!stockMap[k])stockMap[k]={nome:pe.nome||prodNameById[String(pe.produtoId)]||'—',un:pe.un||'KG',entrou:0,perda:0,saiu:0}; stockMap[k].perda+=(+pe.qtd||0); });
+    pedidosRaw.filter(p=>p.status!=='Cancelado'&&p.status!=='Devolvido').forEach(p => (p.itens||[]).forEach(it => { const k=skey(it); if(!stockMap[k])stockMap[k]={nome:snome(it),un:it.un||'KG',entrou:0,perda:0,saiu:0}; stockMap[k].saiu+=(+it.kg||0); }));
+    const fmtQ = n => (+n||0).toLocaleString('pt-BR');
+    const estoqueRaw = Object.keys(stockMap).map(k => { const o=stockMap[k]; return { ...o, saldoN:o.entrou-o.perda-o.saiu }; }).sort((a,b)=>String(a.nome).localeCompare(String(b.nome)));
+    const estoqueRows = estoqueRaw.map(o => ({ nome:o.nome, un:o.un, entrou:fmtQ(o.entrou), perda:fmtQ(o.perda), saiu:fmtQ(o.saiu), saldo:fmtQ(o.saldoN), saldoColor: o.saldoN<0?this.RED:(o.saldoN===0?'#9a9784':'#21331f') }));
+    const noEstoque = estoqueRows.length===0;
+    const perdasDepPeriodo = (periodo==='all' ? (this.state.perdas||[]) : (this.state.perdas||[]).filter(p=>this.monthOf(p.data)===periodo));
+    const perdasRows = perdasDepPeriodo.slice().sort((a,b)=>String(b.data||'').localeCompare(String(a.data||''))).map(pe => ({
+      data:this._fmtDate(pe.data), nome:pe.nome||prodNameById[String(pe.produtoId)]||'—', un:pe.un||'KG',
+      qtd:fmtQ(pe.qtd), motivo:pe.motivo||'—', obs:pe.obs||'—', edit:()=>this.editPerda(pe.id)
+    }));
+    const noPerdas = perdasRows.length===0;
+    const estoqueStats = [
+      { label:'Itens com estoque', value:String(estoqueRaw.filter(o=>o.saldoN>0).length), sub:estoqueRaw.length+' item(ns) movimentados' },
+      { label:'Perdas no depósito', value:String(perdasDepPeriodo.length), sub:'lançamentos no período' },
+      { label:'Saídas registradas', value:String(pedidosRaw.length), sub:'todos os pedidos' }
+    ];
+

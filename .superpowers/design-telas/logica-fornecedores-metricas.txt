@@ -1,0 +1,41 @@
+    // ---- fornecedores ----
+    // preço médio de compra por fornecedor, a partir das entradas (compras)
+    const avgCompraByForn = {};
+    entradasRaw.forEach(en => {
+      let kg=0, tot=0;
+      (en.itens||[]).forEach(it => { kg+=(+it.kg||0); tot+=(+it.kg||0)*(+it.preco||0); });
+      if (kg>0) { if(!avgCompraByForn[en.fornecedor]) avgCompraByForn[en.fornecedor]={kg:0,tot:0}; avgCompraByForn[en.fornecedor].kg+=kg; avgCompraByForn[en.fornecedor].tot+=tot; }
+    });
+    // variação = preço médio da última compra vs. a compra anterior do mesmo fornecedor
+    const precoMedioEntrada = en => { let kg=0,tot=0; (en.itens||[]).forEach(it=>{kg+=(+it.kg||0); tot+=(+it.kg||0)*(+it.preco||0);}); return kg>0? tot/kg : null; };
+    const variaOf = f => {
+      const es = entradasRaw.filter(en=>en.fornecedor===f.nome).slice().sort((a,b)=>String(b.data||'').localeCompare(String(a.data||'')));
+      if (es.length < 2) return null;
+      const atual = precoMedioEntrada(es[0]), ant = precoMedioEntrada(es[1]);
+      if (atual==null || !ant) return null;
+      return (atual - ant)/ant*100;
+    };
+    const variasComDados = this.state.fornecedores.map(variaOf).filter(v => v!=null);
+    const variaMedia = variasComDados.length ? variasComDados.reduce((s,v)=>s+v,0)/variasComDados.length : 0;
+    const fornecedores = this.state.fornecedores.map(f => {
+      const v = variaOf(f);
+      const vTxt = v==null ? '—' : (v>0?'+':'')+v.toFixed(1).replace('.',',')+'%';
+      const vColor = v==null ? '#9a9784' : (Math.abs(v)>=7?this.RED:(Math.abs(v)>=4?this.AMBER:this.GREEN));
+      const a = avgCompraByForn[f.nome];
+      const precoReal = a && a.kg>0 ? a.tot/a.kg : 0;
+      // última coleta e aproveitamento das entradas
+      const entsF = entradasRaw.filter(en=>en.fornecedor===f.nome);
+      const ultColeta = entsF.length ? entsF.sort((a,b)=>(b.data||'').localeCompare(a.data||''))[0].data : '—';
+      const fKg = entsF.reduce((s,en)=>s+(en.pesoKg||0),0);
+      const fPerda = entsF.reduce((s,en)=>s+(en.perdaKg||0),0);
+      const aproveit = fKg>0 ? ((fKg-fPerda)/fKg*100) : 0;
+      return { nome:f.nome, regiao:f.regiao, contato:f.contato,
+        produtos:f.produtos||[], preco: precoReal>0 ? 'R$ '+precoReal.toFixed(2).replace('.',',') : '—',
+        varia:vTxt, varColor:vColor,
+        coleta: ultColeta==='—' ? '—' : this._fmtDate(ultColeta), qualidade: fKg>0 ? aproveit.toFixed(0)+'%' : '—',
+        edit:()=>this.editFornecedor(f.id) };
+    });
+    const fornSummary = {
+      varia:{ v: variasComDados.length ? (variaMedia>0?'+':'')+variaMedia.toFixed(1).replace('.',',')+'%' : '—', color: Math.abs(variaMedia)>=7?this.RED:this.AMBER, sub:'última compra vs. anterior · ±7% CEASA' }
+    };
+

@@ -1,0 +1,45 @@
+    // ---- dashboard ----
+    const statCards = [
+      { label:'Receita bruta', value:'R$ '+fmtBR(receitaBruta), delta:entregues.length+' pedido(s) entregue(s) · '+periodLabel, deltaColor:this.GREEN },
+      { label:'Lucro líquido op.', value:'R$ '+fmtBR(lucroLiquido), delta:pctLucro.toFixed(1).replace('.',',')+'% s/ receita', deltaColor: lucroLiquido>0?this.GREEN:this.RED },
+      { label:'Ciclo de caixa', value:cicloDias+(cicloDias===1?' dia':' dias'), delta:'meta ≤ 13 dias', deltaColor: cicloColor },
+      { label:'Minimercados ativos', value:String(nAtivos), delta:(nAtivos-20>=0?'+'+(nAtivos-20):String(nAtivos-20))+' vs. equilíbrio (20)', deltaColor: nAtivos>=20?this.GREEN:this.RED }
+    ];
+    const kpis = [
+      { label:'Índice de perdas (%)', real:fmtPct1(perdaMedia), meta:'≤ 10%', pct:Math.min(100,Math.round(perdaMedia/10*100))+'%', color: perdaMedia<=10?this.GREEN:(perdaMedia<=13?this.AMBER:this.RED), tag: perdaMedia<=10?'na meta':'fora' },
+      { label:'Markup médio (venda/compra)', real:Math.round(markupMedio)+'%', meta:'≥ 60%', pct:Math.min(100,Math.round(markupMedio/60*100))+'%', color: markupMedio>=60?this.GREEN:this.RED, tag: markupMedio>=60?'na meta':'fora' },
+      { label:'Nº de minimercados ativos', real:String(nAtivos), meta:'~35', pct:Math.min(100,Math.round(nAtivos/35*100))+'%', color: nAtivos>=35?this.GREEN:(nAtivos>=25?this.AMBER:this.RED), tag:(nAtivos-35>=0?'+':'')+(nAtivos-35) },
+      { label:'Ticket médio / minimercado', real:'R$ '+Math.round(ticketMesReal).toLocaleString('pt-BR'), meta:'3,5–3,8k', pct:Math.min(100,Math.round(ticketMesReal/3800*100))+'%', color: ticketMesReal>=3500?this.GREEN:(ticketMesReal>=3000?this.AMBER:this.RED), tag: ticketMesReal>=3500?'na meta':'quase' },
+      { label:'Ticket médio por entrega', real:'R$ '+Math.round(ticketEntregaReal).toLocaleString('pt-BR'), meta:'≥ R$ 430', pct:Math.min(100,Math.round(ticketEntregaReal/430*100))+'%', color: ticketEntregaReal>=430?this.GREEN:(ticketEntregaReal>=150?this.AMBER:this.RED), tag:(ticketEntregaReal>=430?'na meta':'-R$'+Math.round(430-ticketEntregaReal)) },
+      { label:'Inadimplência por cliente', real:fmtPct1(inadMedia), meta:'≤ 1%', pct:Math.min(100,Math.round(inadMedia*100))+'%', color: inadMedia<=1?this.GREEN:(inadMedia<=2?this.AMBER:this.RED), tag: inadMedia<=1?'na meta':'fora' },
+      { label:'Giro de estoque (dias)', real:cicloEst.toString().replace('.',','), meta:'≤ 4 d', pct:Math.min(100,Math.round(cicloEst/4*100))+'%', color: cicloEst<=4?this.GREEN:this.AMBER, tag: cicloEst<=4?'na meta':'+'+(cicloEst-4)+'d' },
+      { label:'Ciclo de caixa (dias)', real:String(cicloDias), meta:'≤ 13 d', pct:Math.min(100,Math.round(cicloDias/13*100))+'%', color: cicloColor, tag: cicloDias<=13?'na meta':'+'+(cicloDias-13)+'d' }
+    ];
+    const cartArr = Object.keys(fatByClient).map(nome => ({ nome, fat:fatByClient[nome] })).filter(x=>x.fat>0).sort((a,b)=>b.fat-a.fat);
+    const cartDen = receitaFat || 1;
+    const cartTop = cartArr.slice(0,5);
+    const cartRest = cartArr.slice(5).reduce((s,x)=>s+x.fat,0);
+    const cartMax = cartTop.length ? cartTop[0].fat/cartDen*100 : 1;
+    const carteira = cartTop.map(x => { const sh = x.fat/cartDen*100; return { nome:x.nome, pct:Math.round(sh)+'%', bar:(cartMax?Math.round(sh/cartMax*100):0)+'%', color: sh>15?this.RED:'#5a7d3a' }; });
+    if (cartRest > 0) carteira.push({ nome:'Demais '+(cartArr.length-5)+' clientes', pct:Math.round(cartRest/cartDen*100)+'%', bar:'100%', color:'#c8c2ad' });
+    const top5Txt = 'Top 5 = ' + Math.round(cartTop.reduce((s,x)=>s+x.fat,0)/cartDen*100) + '% do faturamento';
+    const cenBase = Math.max(lucroLiquido, 1);
+    const cenPess = Math.round(cenBase*0.55), cenOtim = Math.round(cenBase*1.5);
+    const cenScale = Math.max(cenOtim, lucroLiquido, 1);
+    const cenarios = [
+      { nome:'Pessimista', valor:'R$ '+fmtBR(cenPess), bar:Math.round(cenPess/cenScale*100)+'%', color:'#d8c9a8', txtColor:'#8a8775', weight:500 },
+      { nome:'Realista', valor:'R$ '+fmtBR(lucroLiquido), bar:Math.round(Math.max(0,lucroLiquido)/cenScale*100)+'%', color:this.GREEN, txtColor:this.GREEN, weight:700 },
+      { nome:'Otimista', valor:'R$ '+fmtBR(cenOtim), bar:'100%', color:'#a5d66f', txtColor:'#5a7d3a', weight:500 }
+    ];
+    const realizadoTxt = 'Realizado (lucro líquido) — R$ '+fmtBR(lucroLiquido)+' ('+pctLucro.toFixed(1).replace('.',',')+'% s/ receita).';
+    const mixDots = [
+      { nome:'Batata', x:'82%', y:'68%', size:'30px', color:this.GREEN },
+      { nome:'Cebola', x:'78%', y:'70%', size:'26px', color:this.GREEN },
+      { nome:'Cenoura', x:'74%', y:'62%', size:'22px', color:this.GREEN },
+      { nome:'Banana', x:'76%', y:'66%', size:'24px', color:this.GREEN },
+      { nome:'Tomate', x:'66%', y:'52%', size:'22px', color:this.GREEN },
+      { nome:'Folhosas', x:'33%', y:'22%', size:'24px', color:this.AMBER },
+      { nome:'Maçã premium', x:'28%', y:'26%', size:'18px', color:'#7a5d8f' },
+      { nome:'Pimentão premium', x:'38%', y:'30%', size:'18px', color:'#7a5d8f' }
+    ];
+

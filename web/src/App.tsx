@@ -8,10 +8,14 @@ import { ModalCliente } from './components/ModalCliente'
 import { ProdutosLista } from './screens/ProdutosLista'
 import { FornecedoresLista } from './screens/FornecedoresLista'
 import { FuncionariosLista } from './screens/FuncionariosLista'
-import { LancamentosLista } from './screens/LancamentosLista'
 import { EntradasLista } from './screens/EntradasLista'
 import { SaidasLista } from './screens/SaidasLista'
 import { EstoqueLista } from './screens/EstoqueLista'
+// LancamentosLista nao aparece aqui: FinanceiroTela ja a embute como a secao
+// de lancamentos, entao expor as duas separadamente duplicaria a mesma lista.
+import { DashboardTela } from './screens/DashboardTela'
+import { FinanceiroTela } from './screens/FinanceiroTela'
+import { RelatoriosTela } from './screens/RelatoriosTela'
 import type { Cliente } from './derive/clientes'
 import { ADMIN_ONLY_SCREENS, type Tela } from './telas'
 
@@ -192,6 +196,8 @@ function App() {
  */
 function Conteudo({ tela, onSessaoExpirada }: { tela: Tela; onSessaoExpirada: () => void }) {
   switch (tela) {
+    case 'dashboard':     return <DashboardTela onSessaoExpirada={onSessaoExpirada} />
+    case 'relatorios':    return <RelatoriosTela onSessaoExpirada={onSessaoExpirada} />
     case 'clientes':      return <ClientesModulo onSessaoExpirada={onSessaoExpirada} />
     case 'produtos':      return <ProdutosLista onSessaoExpirada={onSessaoExpirada} />
     case 'fornecedores':  return <FornecedoresLista onSessaoExpirada={onSessaoExpirada} />
@@ -200,7 +206,7 @@ function Conteudo({ tela, onSessaoExpirada }: { tela: Tela; onSessaoExpirada: ()
     case 'pedidos':       return <SaidasLista onSessaoExpirada={onSessaoExpirada} />
     // Lancamentos e a parte de Financeiro que ja existe: a tela completa
     // (resultado, ciclo de caixa) depende de vendas e compras cadastradas.
-    case 'financeiro':    return <LancamentosLista onSessaoExpirada={onSessaoExpirada} />
+    case 'financeiro':    return <FinanceiroTela onSessaoExpirada={onSessaoExpirada} />
     // Estoque nao guarda dado proprio: e o saldo por produto+unidade
     // (entradas - perdas - saidas, GET /api/estoque) mais o registro de
     // perdas do deposito, que vive dentro de Estoque no design.

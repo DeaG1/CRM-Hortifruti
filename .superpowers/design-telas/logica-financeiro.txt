@@ -1,0 +1,38 @@
+    // ---- financeiro (vivo, a partir dos pedidos + lançamentos) ----
+    const fmtBR = n => Math.round(n).toLocaleString('pt-BR');
+    const compraMercadoria = entradasPeriodo.reduce((s,en)=>s+(en.valor||0),0);
+    const lancRaw = this.state.lancamentos;
+    const lancPeriodo = periodo==='all' ? lancRaw : lancRaw.filter(l=>this.monthOf(l.data)===periodo);
+    const lancTotal = lancPeriodo.reduce((s,l)=>s+(l.valor||0),0);
+    const receitaBruta = receitaFat; // vem dos pedidos entregues no período
+    const custoTotal = compraMercadoria + lancTotal;
+    const lucroLiquido = receitaBruta - custoTotal;
+    const pctLucro = receitaBruta ? lucroLiquido/receitaBruta*100 : 0;
+    // saldo em caixa (todas as épocas): vendas pagas − compras pagas − lançamentos
+    const cashAll = pedidosRaw.filter(p=>p.pag==='Pago').reduce((s,p)=>s+(p.valor||0),0)
+      - entradasRaw.filter(e=>e.pago==='Pago').reduce((s,e)=>s+(e.valor||0),0)
+      - lancRaw.reduce((s,l)=>s+(l.valor||0),0);
+    // preço médio por produto: compra das entradas, venda das saídas
+    const compraByProd = {}, vendaByProd = {};
+    entradasRaw.forEach(en => (en.itens||[]).forEach(it => { const k=String(it.produtoId||it.nome); if(!compraByProd[k])compraByProd[k]={q:0,t:0}; compraByProd[k].q+=(+it.kg||0); compraByProd[k].t+=(+it.kg||0)*(+it.preco||0); }));
+    pedidosRaw.filter(p=>p.status!=='Cancelado').forEach(p => (p.itens||[]).forEach(it => { const k=String(it.produtoId||it.nome); if(!vendaByProd[k])vendaByProd[k]={q:0,t:0}; vendaByProd[k].q+=(+it.kg||0); vendaByProd[k].t+=(+it.kg||0)*(+it.preco||0); }));
+    const markups = this.state.produtos.map(p => {
+      const cb = compraByProd[String(p.id)]||compraByProd[p.nome], vb = vendaByProd[String(p.id)]||vendaByProd[p.nome];
+      const cm = cb&&cb.q? cb.t/cb.q : (p.compra||0), vm = vb&&vb.q? vb.t/vb.q : (p.venda||0);
+      return cm>0&&vm>0 ? (vm-cm)/cm*100 : null;
+    }).filter(v=>v!=null);
+    const markupMedio = markups.length ? markups.reduce((a,b)=>a+b,0)/markups.length : 0;
+
+    // ---- ciclo de caixa (recebimento vem dos pedidos; estoque, do giro dos produtos) ----
+    const pagosPeriodo = pedidosPeriodo.filter(p=>p.status==='Entregue' && p.recebDias>0);
+    const cicloReceb = pagosPeriodo.length ? Math.round(avg(pagosPeriodo.map(p=>p.recebDias))) : 12;
+    // giro de estoque: dias que o saldo atual duraria no ritmo de saída
+    let qEnt=0, qPer=0, qSai=0;
+    entradasRaw.forEach(en => (en.itens||[]).forEach(it => { qEnt+=(+it.kg||0); qPer+=(+it.perdaKg||0); }));
+    pedidosRaw.filter(p=>p.status!=='Cancelado'&&p.status!=='Devolvido').forEach(p => (p.itens||[]).forEach(it => { qSai+=(+it.kg||0); }));
+    const cicloEst = qSai>0 ? Math.max(1, Math.round(Math.max(0,qEnt-qPer-qSai)/(qSai/30))) : 4;
+    const cicloPag = 3; // prazo de pagamento ao produtor (referência do estudo)
+    const cicloDias = cicloEst + cicloReceb - cicloPag;
+    const cicloColor = cicloDias<=13 ? this.GREEN : (cicloDias<=16 ? this.AMBER : this.RED);
+    const cicloSum = cicloPag + cicloEst + cicloReceb || 1;
+

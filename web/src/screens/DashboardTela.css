@@ -1,0 +1,354 @@
+.dashboard-estado {
+  padding: 30px 4px;
+  font-size: 14px;
+  color: #6a685c;
+}
+
+.dashboard-estado--erro {
+  color: #9a4a2e;
+  font-weight: 600;
+}
+
+.dashboard-vazio {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 40px 18px;
+  text-align: center;
+  max-width: 560px;
+}
+
+.dashboard-vazio-titulo {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2a2a24;
+}
+
+.dashboard-vazio-sub {
+  font-size: 12.5px;
+  color: #6a685c;
+  margin-top: 4px;
+}
+
+.dashboard-tela {
+  max-width: 1280px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  font-family: 'Public Sans', sans-serif;
+  color: #2a2a24;
+}
+
+/* ---------- cartoes do topo ---------- */
+
+.dashboard-cards-topo {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+.dashboard-card-topo {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 16px 18px;
+}
+
+.dashboard-card-topo-rotulo {
+  font-size: 12px;
+  color: #6a685c;
+  font-weight: 600;
+}
+
+.dashboard-card-topo-valor {
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 26px;
+  color: #21331f;
+  margin-top: 7px;
+  letter-spacing: -0.5px;
+}
+
+.dashboard-card-topo-delta {
+  font-size: 12px;
+  margin-top: 4px;
+  font-weight: 600;
+  min-height: 15px;
+}
+
+/* ---------- painel de indicadores (KPIs) ---------- */
+
+.dashboard-kpis-cabecalho {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.dashboard-kpis-titulo {
+  font-family: 'Archivo', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: #21331f;
+  margin: 0;
+}
+
+.dashboard-kpis-contagem {
+  font-size: 12px;
+  color: #6a685c;
+}
+
+.dashboard-kpis-legenda {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: #6a685c;
+  margin-left: auto;
+}
+
+.dashboard-legenda-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.dashboard-legenda-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  flex: 0 0 9px;
+}
+
+.dashboard-kpis-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+.dashboard-kpi-card {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 15px 16px;
+  border-top: 3px solid;
+}
+
+.dashboard-kpi-rotulo {
+  font-size: 12px;
+  color: #6a685c;
+  font-weight: 600;
+  min-height: 32px;
+  line-height: 1.25;
+}
+
+.dashboard-kpi-valor {
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 23px;
+  margin-top: 8px;
+  letter-spacing: -0.5px;
+}
+
+.dashboard-kpi-barra-trilha {
+  height: 6px;
+  background: #eee9da;
+  border-radius: 6px;
+  margin-top: 9px;
+  overflow: hidden;
+}
+
+.dashboard-kpi-barra-preenchimento {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.2s;
+}
+
+.dashboard-kpi-rodape {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 7px;
+  font-size: 11px;
+  color: #9a9784;
+  gap: 8px;
+}
+
+.dashboard-kpi-tag {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---------- secoes (carteira / cenarios) ---------- */
+
+.dashboard-secao {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 20px;
+}
+
+.dashboard-secao-cabecalho {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dashboard-secao-titulo {
+  font-family: 'Archivo', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #21331f;
+  margin: 0;
+}
+
+.dashboard-secao-destaque {
+  font-size: 12px;
+  color: #c2502f;
+  font-weight: 600;
+}
+
+.dashboard-secao-sub {
+  font-size: 12px;
+  color: #6a685c;
+  margin-top: 3px;
+  margin-bottom: 16px;
+}
+
+.dashboard-secao-vazia {
+  font-size: 13px;
+  color: #6a685c;
+  margin: 0;
+  padding: 8px 0 4px;
+}
+
+/* ---------- concentracao de carteira ---------- */
+
+.dashboard-carteira-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.dashboard-carteira-linha {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-carteira-nome {
+  width: 170px;
+  flex: 0 0 170px;
+  font-size: 13px;
+  color: #2a2a24;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashboard-carteira-barra-trilha {
+  flex: 1;
+  height: 18px;
+  background: #f1eee2;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.dashboard-carteira-barra-preenchimento {
+  height: 100%;
+  border-radius: 5px;
+}
+
+.dashboard-carteira-pct {
+  width: 46px;
+  flex: 0 0 46px;
+  text-align: right;
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2a2a24;
+}
+
+/* ---------- cenario realizado vs. projecoes ---------- */
+
+.dashboard-cenarios-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dashboard-cenario-linha {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-cenario-nome {
+  width: 88px;
+  flex: 0 0 88px;
+  font-size: 13px;
+  color: #2a2a24;
+  font-weight: 500;
+}
+
+.dashboard-cenario-nome--realista {
+  font-weight: 700;
+}
+
+.dashboard-cenario-barra-trilha {
+  flex: 1;
+  height: 24px;
+  background: #f1eee2;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.dashboard-cenario-barra-preenchimento {
+  height: 100%;
+  border-radius: 6px;
+}
+
+.dashboard-cenario-barra-preenchimento--pessimista { background: #d8c9a8; }
+.dashboard-cenario-barra-preenchimento--realista { background: #3f8f5b; }
+.dashboard-cenario-barra-preenchimento--otimista { background: #a5d66f; }
+
+.dashboard-cenario-valor {
+  width: 100px;
+  flex: 0 0 100px;
+  text-align: right;
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dashboard-cenario-valor--pessimista { color: #8a8775; }
+.dashboard-cenario-valor--realista { color: #3f8f5b; }
+.dashboard-cenario-valor--otimista { color: #5a7d3a; }
+
+.dashboard-cenarios-realizado {
+  margin-top: 14px;
+  font-size: 12px;
+  color: #3f8f5b;
+  background: #e7f1e8;
+  border-radius: 9px;
+  padding: 9px 12px;
+}
+
+@media (max-width: 1100px) {
+  .dashboard-cards-topo,
+  .dashboard-kpis-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .dashboard-cards-topo,
+  .dashboard-kpis-grid {
+    grid-template-columns: 1fr;
+  }
+}

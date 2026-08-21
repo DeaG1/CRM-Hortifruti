@@ -1,7 +1,24 @@
-name = "crm-hortifruti-api"
+name = "crm-hortifruti"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
 
 [observability]
 enabled = true
+
+# O front e a API sao servidos pelo MESMO Worker, de proposito.
+#
+# O cookie de sessao e HttpOnly + SameSite=Lax. `Lax` nao viaja em requisicao
+# cross-site feita por JavaScript — entao front em *.pages.dev chamando a API
+# em *.workers.dev simplesmente nao autentica. As saidas seriam trocar para
+# SameSite=None (perdendo a protecao contra CSRF) ou depender de um dominio
+# proprio que ainda nao existe. Servir tudo da mesma origem resolve os dois
+# sem abrir mao de nada.
+#
+# `run_worker_first` garante que /api/* chegue ao Worker. Sem isso, o
+# not_found_handling de SPA devolveria index.html para as rotas da API.
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]

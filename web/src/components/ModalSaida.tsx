@@ -1,0 +1,552 @@
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
+import { api, ErroApi } from '../api/client'
+import type { Cliente } from '../derive/clientes'
+import './ModalSaida.css'
+
+export type StatusSaida = 'Pendente' | 'Em rota' | 'Entregue' | 'Cancelado' | 'Devolvido'
+export type PagSaida = 'Pago' | 'Pendente' | 'Atrasado' | '—'
+
+export interface ItemSaida {
+  id?: string
+  produto_id: string
+  un: string
+  qtd: number
+  preco: number
+  perda_kg: number
+}
+
+/** Espelha o cabecalho de `saidas` (api/src/routes/saidas.ts). `valor`/`peso`
+ * so vem em GET / (agregado dos itens); `itens` so vem em GET /:id. */
+export interface Saida {
+  id: string
+  numero: string
+  cliente_id: string | null
+  rota: string
+  data_pedido: string
+  entrega: string | null
+  status: StatusSaida
+  pag: PagSaida
+  venc: string | null
+  data_pag: string | null
+  forma_pag: string
+  perda_kg: number
+  motivo: string
+  obs: string
+  criado_em?: string
+  alterado_em?: string
+  valor?: number
+  peso?: number
+  itens?: ItemSaida[]
+}
+
+interface Produto {
+  id: string
+  nome: string
+  un: string
+  peso_medio: number
+}
+
+/**
+ * Valores iniciais do cabecalho. `status`/`pag` nao levam `as StatusSaida`/
+ * `as PagSaida` de proposito — mesma convencao de CLIENTE_NOVO
+ * (derive/clientes.ts): sem o cast, o literal e alargado para `string` pelo
+ * TypeScript, que e o que `campo()` abaixo espera (senao a atribuicao
+ * generica de `e.target.value` — sempre `string` — nao bateria com um tipo
+ * unico como `StatusSaida`).
+ *
+ * `venc` comeca vazio de proposito — e o ponto central do To Do do cliente
+ * (P1): "vencimento = entrega + prazo do cliente, hoje digitado a mao".
+ * Deixar em branco aqui e o que faz o corpo do POST nao incluir a chave
+ * `venc`, e e so a ausencia da chave que faz a API calcular sozinha (ver
+ * calcularVencAutomatico em api/src/routes/saidas.ts). Se o usuario digitar
+ * algo, o valor dele e enviado e respeitado sem recalculo.
+ */
+const SAIDA_NOVA = {
+  numero: '',
+  cliente_id: '',
+  data_pedido: '',
+  entrega: '',
+  status: 'Pendente',
+  pag: 'Pendente',
+  venc: '',
+  data_pag: '',
+  forma_pag: '',
+  obs: '',
+}
+
+type Rascunho = typeof SAIDA_NOVA
+
+const UNIDADES = ['KG', 'CX', 'UN', 'DZ', 'MC'] as const
+
+/** Chave estavel de UI para cada linha de item — nao vai pro corpo do
+ * request. `produto_id` sozinho nao serve de key (o mesmo produto pode
+ * aparecer em duas linhas), e o indice do array muda ao remover uma linha
+ * do meio (perderia o estado de foco/digitacao das linhas seguintes). */
+let proximaChaveItem = 0
+interface ItemLinha extends ItemSaida {
+  chave: number
+}
+
+function linhaNova(): ItemLinha {
+  return { chave: proximaChaveItem++, produto_id: '', un: 'KG', qtd: 0, preco: 0, perda_kg: 0 }
+}
+
+const money = (n: number) =>
+  'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+interface ModalSaidaProps {
+  /** null = criando uma saida nova. String = editando — usado para buscar o
+   * cabecalho COM itens (GET /:id; a listagem so traz totais agregados). */
+  saidaId: string | null
+  onSalvo: (s: Saida) => void
+  onExcluido?: () => void
+  onFechar: () => void
+  /** Sessão expirou (401 da API) — volta ao login em vez de mostrar erro. */
+  onSessaoExpirada?: () => void
+}
+
+export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExpirada }: ModalSaidaProps) {
+  const editando = saidaId !== null
+
+  const [rascunho, setRascunho] = useState<Rascunho>(SAIDA_NOVA)
+  const [itens, setItens] = useState<ItemLinha[]>([])
+  const [clientes, setClientes] = useState<Cliente[]>([])
+  const [produtos, setProdutos] = useState<Produto[]>([])
+
+  const [carregando, setCarregando] = useState(editando)
+  const [erroDetalhe, setErroDetalhe] = useState('')
+  const [erroOpcoes, setErroOpcoes] = useState('')
+
+  const [erroNumero, setErroNumero] = useState('')
+  const [erroDataPedido, setErroDataPedido] = useState('')
+  const [erroItens, setErroItens] = useState('')
+  const [erroGeral, setErroGeral] = useState('')
+  const [salvando, setSalvando] = useState(false)
+
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false)
+  const [excluindo, setExcluindo] = useState(false)
+  const [erroExclusao, setErroExclusao] = useState('')
+
+  // Clientes e produtos alimentam os seletores em ambos os modos (criar/editar).
+  useEffect(() => {
+    let cancelado = false
+    Promise.all([
+      api.get<Cliente[]>('/api/clientes'),
+      api.get<Produto[]>('/api/produtos'),
+    ])
+      .then(([cs, ps]) => { if (!cancelado) { setClientes(cs); setProdutos(ps) } })
+      .catch((err: unknown) => {
+        if (cancelado) return
+        if (err instanceof ErroApi && err.status === 401) { onSessaoExpirada?.(); return }
+        // Colaborador: hoje /api/clientes e /api/produtos sao admin-only
+        // (exigirAdmin), diferente de /api/saidas. A tela de saidas em si e
+        // liberada pro colaborador, mas sem esses dois endpoints os
+        // seletores ficam vazios — mensagem honesta em vez de um formulario
+        // silenciosamente quebrado. Ver observacao no relatorio final.
+        setErroOpcoes('Não foi possível carregar clientes e produtos para os seletores.')
+      })
+    return () => { cancelado = true }
+  }, [onSessaoExpirada])
+
+  // Modo edicao: busca o cabecalho COM itens (GET /:id) para preencher o
+  // rascunho — a listagem (GET /) nao traz itens, so os totais agregados.
+  useEffect(() => {
+    if (!saidaId) return
+    let cancelado = false
+    setCarregando(true)
+    api.get<Saida>(`/api/saidas/${saidaId}`)
+      .then((s) => {
+        if (cancelado) return
+        setRascunho({
+          numero: s.numero,
+          cliente_id: s.cliente_id ?? '',
+          data_pedido: s.data_pedido ?? '',
+          entrega: s.entrega ?? '',
+          status: s.status,
+          pag: s.pag,
+          venc: s.venc ?? '',
+          data_pag: s.data_pag ?? '',
+          forma_pag: s.forma_pag ?? '',
+          obs: s.obs ?? '',
+        })
+        setItens((s.itens ?? []).map(it => ({ ...it, chave: proximaChaveItem++ })))
+      })
+      .catch((err: unknown) => {
+        if (cancelado) return
+        if (err instanceof ErroApi && err.status === 401) { onSessaoExpirada?.(); return }
+        setErroDetalhe('Não foi possível carregar esta saída.')
+      })
+      .finally(() => { if (!cancelado) setCarregando(false) })
+    return () => { cancelado = true }
+  }, [saidaId, onSessaoExpirada])
+
+  function campo<K extends keyof Rascunho>(chave: K) {
+    return {
+      id: `saida-${chave}`,
+      name: chave,
+      value: rascunho[chave],
+      onChange: (e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+        setRascunho(r => ({ ...r, [chave]: e.target.value })),
+    }
+  }
+
+  const clienteSelecionado = clientes.find(c => c.id === rascunho.cliente_id)
+
+  function adicionarItem() {
+    setItens(is => [...is, linhaNova()])
+  }
+
+  function removerItem(chave: number) {
+    setItens(is => is.filter(it => it.chave !== chave))
+  }
+
+  function atualizarItem(chave: number, campoItem: 'produto_id' | 'un' | 'qtd' | 'preco', valor: string) {
+    setItens(is => is.map((it) => {
+      if (it.chave !== chave) return it
+      if (campoItem === 'qtd' || campoItem === 'preco') {
+        return { ...it, [campoItem]: valor === '' ? 0 : Number(valor) }
+      }
+      return { ...it, [campoItem]: valor }
+    }))
+  }
+
+  const total = itens.reduce((soma, it) => soma + it.qtd * it.preco, 0)
+
+  async function salvar(e: FormEvent) {
+    e.preventDefault()
+    setErroNumero('')
+    setErroDataPedido('')
+    setErroItens('')
+    setErroGeral('')
+
+    let temCampoInvalido = false
+    if (!rascunho.numero.trim()) {
+      setErroNumero('Informe o número do pedido.')
+      temCampoInvalido = true
+    }
+    if (!rascunho.data_pedido) {
+      setErroDataPedido('Informe a data do pedido.')
+      temCampoInvalido = true
+    }
+    // A API tambem rejeita (400: "pelo menos um item e obrigatorio"), mas o
+    // usuario merece saber antes de perder o preenchimento do formulario —
+    // pedido explicito do briefing desta tela.
+    if (itens.length === 0) {
+      setErroItens('Adicione pelo menos um item antes de salvar.')
+      temCampoInvalido = true
+    } else if (itens.some(it => !it.produto_id)) {
+      setErroItens('Selecione um produto em todos os itens.')
+      temCampoInvalido = true
+    }
+    if (temCampoInvalido) return
+
+    setSalvando(true)
+    try {
+      const corpo: Record<string, unknown> = {
+        numero: rascunho.numero.trim(),
+        cliente_id: rascunho.cliente_id || null,
+        rota: clienteSelecionado?.rota ?? '',
+        data_pedido: rascunho.data_pedido,
+        entrega: rascunho.entrega || null,
+        status: rascunho.status,
+        pag: rascunho.pag,
+        data_pag: rascunho.data_pag || null,
+        forma_pag: rascunho.forma_pag,
+        obs: rascunho.obs,
+        itens: itens.map(({ chave: _chave, id: _id, ...item }) => item),
+      }
+      // venc so entra no corpo se o usuario digitou algo — campo vazio
+      // significa "deixa a API calcular entrega + prazo do cliente" (ver
+      // comentario em SAIDA_NOVA e calcularVencAutomatico na API).
+      if (rascunho.venc) corpo.venc = rascunho.venc
+
+      const salvo = editando
+        ? await api.put<Saida>(`/api/saidas/${saidaId}`, corpo)
+        : await api.post<Saida>('/api/saidas', corpo)
+      onSalvo(salvo)
+    } catch (err) {
+      if (err instanceof ErroApi && err.status === 409) {
+        // ja existe uma saida com esse numero (indice unico tenant+numero) —
+        // erro pertence ao campo numero, nao a mensagem generica.
+        setErroNumero('Já existe uma saída com esse número.')
+      } else if (err instanceof ErroApi && err.status === 401) {
+        onSessaoExpirada?.()
+      } else {
+        setErroGeral('Não foi possível salvar. Tente novamente.')
+      }
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  async function excluir() {
+    if (!saidaId) return
+    setErroExclusao('')
+    setExcluindo(true)
+    try {
+      await api.del(`/api/saidas/${saidaId}`)
+      onExcluido?.()
+    } catch (err) {
+      if (err instanceof ErroApi && err.status === 401) { onSessaoExpirada?.(); return }
+      setErroExclusao('Não foi possível excluir. Tente novamente.')
+    } finally {
+      setExcluindo(false)
+    }
+  }
+
+  return (
+    <div
+      className="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={editando ? 'Editar saída' : 'Nova saída'}
+      onClick={onFechar}
+    >
+      {/* stopPropagation + noValidate: mesmo raciocinio de ModalCliente.tsx —
+          clicar no fundo fecha, clicar dentro nao propaga; noValidate desliga
+          so o bloqueio nativo do navegador, quem decide bloquear o submit e a
+          validacao em JS abaixo (o `required` continua no DOM/acessibilidade). */}
+      <form className="modal-card" onClick={e => e.stopPropagation()} onSubmit={salvar} noValidate>
+        <div className="modal-header">
+          <span className="modal-header-dot" />
+          <div className="modal-header-titulo">{editando ? 'Editar saída' : 'Nova saída'}</div>
+          <button type="button" className="modal-fechar" onClick={onFechar} aria-label="Fechar">✕</button>
+        </div>
+
+        <div className="modal-corpo">
+          {carregando ? (
+            <p className="modal-carregando">Carregando…</p>
+          ) : erroDetalhe ? (
+            <p className="modal-erro" role="alert">{erroDetalhe}</p>
+          ) : (
+            <>
+              {confirmandoExclusao && (
+                // role="region" (nao "alertdialog"): e um painel inline dentro
+                // do proprio modal, sem focus trap proprio nem Escape — mesmo
+                // raciocinio de ClienteFicha.tsx. role="alert" no texto garante
+                // que a confirmacao seja anunciada quando aparece.
+                <div className="modal-confirma" role="region" aria-label="Confirmar exclusão">
+                  <p className="modal-confirma-texto" role="alert">
+                    Excluir a saída <strong>{rascunho.numero || saidaId}</strong>? Não é possível desfazer.
+                  </p>
+                  {erroExclusao && <p className="modal-erro" role="alert">{erroExclusao}</p>}
+                  <div className="modal-confirma-acoes">
+                    <button
+                      type="button"
+                      className="modal-botao-cancelar"
+                      onClick={() => setConfirmandoExclusao(false)}
+                      disabled={excluindo}
+                    >
+                      Cancelar
+                    </button>
+                    <button type="button" className="modal-confirma-excluir" onClick={excluir} disabled={excluindo}>
+                      {excluindo ? 'Excluindo…' : 'Confirmar exclusão'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {erroOpcoes && <p className="modal-erro" role="alert">{erroOpcoes}</p>}
+
+              <div className="modal-form-grid">
+                <div className="modal-campo">
+                  <label className="modal-rotulo" htmlFor="saida-numero">Número do pedido</label>
+                  <input className="modal-input" {...campo('numero')} placeholder="Ex.: S-0001" autoFocus required />
+                  {erroNumero && <p className="modal-erro" role="alert">{erroNumero}</p>}
+                </div>
+                <div className="modal-campo">
+                  <label className="modal-rotulo" htmlFor="saida-cliente_id">Cliente</label>
+                  <select className="modal-select" {...campo('cliente_id')}>
+                    <option value="">Selecione…</option>
+                    {clientes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                  </select>
+                </div>
+
+                <div className="modal-campo">
+                  <label className="modal-rotulo" htmlFor="saida-rota">Rota (automática do cliente)</label>
+                  <input
+                    className="modal-input modal-input--desabilitado"
+                    id="saida-rota"
+                    value={clienteSelecionado?.rota ?? ''}
+                    disabled
+                    readOnly
+                  />
+                </div>
+                <div className="modal-campo">
+                  <label className="modal-rotulo" htmlFor="saida-data_pedido">Data do pedido</label>
+                  <input className="modal-input modal-input--mono" type="date" {...campo('data_pedido')} required />
+                  {erroDataPedido && <p className="modal-erro" role="alert">{erroDataPedido}</p>}
+                </div>
+
+                <div className="modal-campo">
+                  <label className="modal-rotulo" htmlFor="saida-entrega">Data de entrega</label>
+                  <input className="modal-input modal-input--mono" type="date" {...campo('entrega')} />
+                </div>
+                <div className="modal-campo">
+                  <label className="modal-rotulo" htmlFor="saida-status">Status do pedido</label>
+                  <select className="modal-select" {...campo('status')}>
+                    <option value="Pendente">Pendente</option>
+                    <option value="Em rota">Em rota</option>
+                    <option value="Entregue">Entregue</option>
+                    <option value="Devolvido">Devolvido</option>
+                    <option value="Cancelado">Cancelado</option>
+                  </select>
+                </div>
+
+                {/* ---------------- itens ---------------- */}
+                <div className="modal-campo modal-campo--full modal-itens">
+                  <div className="modal-itens-cabecalho">
+                    <div className="modal-itens-titulo">Itens do pedido</div>
+                    <button type="button" className="modal-itens-adicionar" onClick={adicionarItem}>
+                      <span className="modal-itens-adicionar-icone">＋</span> Adicionar produto
+                    </button>
+                  </div>
+
+                  {itens.length > 0 && (
+                    <div className="modal-itens-linha modal-itens-linha--cabecalho">
+                      <div>PRODUTO</div>
+                      <div>UNIDADE</div>
+                      <div className="modal-itens-num">QTD</div>
+                      <div className="modal-itens-num">R$/UN</div>
+                      <div className="modal-itens-num">SUBTOTAL</div>
+                      <div />
+                    </div>
+                  )}
+
+                  {itens.map(it => (
+                    <div className="modal-itens-linha" key={it.chave}>
+                      <select
+                        className="modal-select modal-select--linha"
+                        value={it.produto_id}
+                        onChange={e => atualizarItem(it.chave, 'produto_id', e.target.value)}
+                        aria-label="Produto"
+                      >
+                        <option value="">Selecione…</option>
+                        {produtos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+                      </select>
+                      <select
+                        className="modal-select modal-select--linha"
+                        value={it.un}
+                        onChange={e => atualizarItem(it.chave, 'un', e.target.value)}
+                        aria-label="Unidade"
+                      >
+                        {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                      <div>
+                        <input
+                          className="modal-input modal-input--mono modal-input--linha"
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          value={it.qtd}
+                          onChange={e => atualizarItem(it.chave, 'qtd', e.target.value)}
+                          aria-label="Quantidade"
+                        />
+                        {/* Aviso de "quantidade acima do estoque disponivel"
+                            (existe no protótipo, modal-pedido.html) fica para
+                            quando existir um endpoint de estoque — Fase 2,
+                            calculado como entradas - perdas - saidas, ainda
+                            nao implementado. Sem esse numero real nao ha o
+                            que comparar aqui: nao inventar calculo nem valor
+                            de disponibilidade nesta fase. */}
+                      </div>
+                      <input
+                        className="modal-input modal-input--mono modal-input--linha"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={it.preco}
+                        onChange={e => atualizarItem(it.chave, 'preco', e.target.value)}
+                        aria-label="Preço por unidade"
+                      />
+                      <div className="modal-itens-subtotal">{money(it.qtd * it.preco)}</div>
+                      <button
+                        type="button"
+                        className="modal-itens-remover"
+                        onClick={() => removerItem(it.chave)}
+                        aria-label="Remover item"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+
+                  {itens.length === 0 && (
+                    <div className="modal-itens-vazio">
+                      Nenhum item ainda. Clique em <strong>Adicionar produto</strong> para lançar caixas/kg por produto.
+                    </div>
+                  )}
+
+                  <div className="modal-itens-totais">
+                    <div className="modal-itens-totais-label">Total</div>
+                    <div className="modal-itens-totais-valor">{money(total)}</div>
+                  </div>
+
+                  {erroItens && <p className="modal-erro" role="alert">{erroItens}</p>}
+                </div>
+
+                <div className="modal-campo">
+                  <label className="modal-rotulo" htmlFor="saida-pag">Situação de pagamento</label>
+                  <select className="modal-select" {...campo('pag')}>
+                    <option value="Pendente">Pendente</option>
+                    <option value="Pago">Pago</option>
+                    <option value="Atrasado">Atrasado</option>
+                    <option value="—">— (não aplicável)</option>
+                  </select>
+                </div>
+                <div className="modal-campo">
+                  <label className="modal-rotulo" htmlFor="saida-venc">Vencimento</label>
+                  <input className="modal-input modal-input--mono" type="date" {...campo('venc')} />
+                  <p className="modal-nota">
+                    {rascunho.venc
+                      ? 'Valor informado manualmente — não será recalculado.'
+                      : 'Em branco: calculado automaticamente (entrega + prazo de pagamento do cliente).'}
+                  </p>
+                </div>
+
+                <div className="modal-campo">
+                  <label className="modal-rotulo" htmlFor="saida-forma_pag">Forma de pagamento</label>
+                  <select className="modal-select" {...campo('forma_pag')}>
+                    <option value="">—</option>
+                    <option value="PIX">PIX</option>
+                    <option value="Boleto">Boleto</option>
+                    <option value="Dinheiro">Dinheiro</option>
+                  </select>
+                </div>
+                <div className="modal-campo">
+                  <label className="modal-rotulo" htmlFor="saida-data_pag">Data do pagamento</label>
+                  <input className="modal-input modal-input--mono" type="date" {...campo('data_pag')} />
+                </div>
+
+                <div className="modal-campo modal-campo--full">
+                  <label className="modal-rotulo" htmlFor="saida-obs">Observações</label>
+                  <textarea className="modal-textarea" {...campo('obs')} rows={3} />
+                </div>
+
+                <div className="modal-campo modal-campo--full modal-dica">
+                  O <strong>peso total</strong> e o <strong>valor</strong> são somados dos itens acima e alimentam
+                  automaticamente o faturamento.
+                </div>
+              </div>
+
+              {erroGeral && <p className="modal-erro modal-erro-geral" role="alert">{erroGeral}</p>}
+            </>
+          )}
+        </div>
+
+        <div className="modal-rodape">
+          {editando && !carregando && !erroDetalhe && (
+            <button type="button" className="modal-botao-excluir" onClick={() => setConfirmandoExclusao(true)}>
+              Excluir
+            </button>
+          )}
+          <div className="modal-rodape-spacer" />
+          <button type="button" className="modal-botao-cancelar" onClick={onFechar}>Cancelar</button>
+          <button type="submit" className="modal-botao-salvar" disabled={salvando || carregando}>
+            {salvando ? 'Salvando…' : 'Salvar'}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}

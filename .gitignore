@@ -14,3 +14,5 @@ build/
 # credenciais de producao — nunca versionar
 .env.producao
 api/.env.producao
+SENHA-BANCO.txt
+api/.env.worker

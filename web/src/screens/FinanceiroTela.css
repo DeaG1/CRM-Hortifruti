@@ -1,0 +1,306 @@
+.financeiro-estado {
+  padding: 30px 4px;
+  font-size: 14px;
+  color: #6a685c;
+}
+
+.financeiro-estado--erro {
+  color: #9a4a2e;
+  font-weight: 600;
+}
+
+.financeiro-vazio {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 40px 18px;
+  text-align: center;
+  max-width: 560px;
+}
+
+.financeiro-vazio-titulo {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2a2a24;
+}
+
+.financeiro-vazio-sub {
+  font-size: 12.5px;
+  color: #6a685c;
+  margin-top: 4px;
+}
+
+.financeiro-tela {
+  max-width: 1180px;
+}
+
+/* ---------- período ---------- */
+
+.financeiro-periodo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.financeiro-periodo-rotulo {
+  font-size: 12px;
+  color: #6a685c;
+  font-weight: 600;
+}
+
+.financeiro-periodo-select {
+  border: 1px solid #d8d3c2;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  font-family: 'Public Sans', sans-serif;
+  color: #2a2a24;
+  background: #fffefa;
+}
+
+/* ---------- grid principal ---------- */
+
+.financeiro-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.financeiro-coluna-direita {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.financeiro-card {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 22px;
+}
+
+.financeiro-card-titulo {
+  font-family: 'Archivo', sans-serif;
+  font-size: 15.5px;
+  font-weight: 700;
+  color: #21331f;
+  margin: 0 0 4px;
+}
+
+.financeiro-card-legenda {
+  font-size: 12px;
+  color: #6a685c;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+/* ---------- resultado: linhas de receita/custo ---------- */
+
+.financeiro-mono {
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.financeiro-linha {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 11px 0;
+  border-bottom: 1px solid #f1eee2;
+  gap: 12px;
+}
+
+.financeiro-linha--receita {
+  padding: 12px 0;
+  border-bottom: 2px solid #d8d3c2;
+}
+
+.financeiro-linha--total {
+  border-bottom: none;
+}
+
+.financeiro-linha-rotulo {
+  font-size: 13.5px;
+  color: #6a685c;
+}
+
+.financeiro-linha-rotulo--forte {
+  font-size: 14px;
+  font-weight: 700;
+  color: #21331f;
+}
+
+.financeiro-linha-rotulo--sutil {
+  font-size: 13px;
+  color: #8a8775;
+}
+
+.financeiro-valor-forte {
+  font-size: 16px;
+  font-weight: 700;
+  color: #21331f;
+}
+
+.financeiro-valor-custo {
+  font-size: 14px;
+  color: #9a4a2e;
+}
+
+.financeiro-destaque-lucro {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  margin-top: 14px;
+  background: #eef3e6;
+  border: 1px solid #d7e3c6;
+  border-radius: 10px;
+}
+
+.financeiro-destaque-lucro-titulo {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2f5d3f;
+}
+
+.financeiro-destaque-lucro-pct {
+  font-size: 11.5px;
+  color: #5a7d3a;
+  margin-top: 2px;
+}
+
+.financeiro-destaque-lucro-valor {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+/* ---------- lucro em destaque (cartão escuro) ---------- */
+
+.financeiro-lucro-escuro {
+  background: #21331f;
+  color: #e8ecdf;
+  border-radius: 13px;
+  padding: 22px;
+}
+
+.financeiro-lucro-escuro-rotulo {
+  font-size: 12px;
+  color: #9db088;
+}
+
+.financeiro-lucro-escuro-valor {
+  font-family: 'Archivo', sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 32px;
+  margin-top: 4px;
+}
+
+.financeiro-lucro-escuro-sub {
+  font-size: 12.5px;
+  color: #9db088;
+  margin-top: 2px;
+}
+
+/* ---------- ciclo de caixa ---------- */
+
+.financeiro-ciclo-cabecalho {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.financeiro-ciclo-total {
+  font-size: 17px;
+  font-weight: 700;
+  color: #21331f;
+}
+
+.financeiro-ciclo-componentes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.financeiro-ciclo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.financeiro-ciclo-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex: 0 0 9px;
+}
+
+.financeiro-ciclo-item-corpo {
+  flex: 1;
+  min-width: 0;
+}
+
+.financeiro-ciclo-item-rotulo {
+  font-size: 13px;
+  color: #2a2a24;
+}
+
+.financeiro-ciclo-item-motivo {
+  font-size: 11px;
+  color: #9a9784;
+  margin-top: 2px;
+}
+
+.financeiro-ciclo-item-valor {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2a2a24;
+  white-space: nowrap;
+}
+
+.financeiro-ciclo-barra {
+  display: flex;
+  height: 30px;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.financeiro-ciclo-barra-segmento {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'IBM Plex Mono', monospace;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.financeiro-ciclo-formula {
+  font-size: 11px;
+  color: #8a8775;
+  line-height: 1.5;
+}
+
+/* ---------- lançamentos ---------- */
+
+.financeiro-lancamentos {
+  margin-top: 16px;
+}
+
+.financeiro-secao-titulo {
+  font-family: 'Archivo', sans-serif;
+  font-size: 15.5px;
+  font-weight: 700;
+  color: #21331f;
+  margin: 0 0 12px;
+}

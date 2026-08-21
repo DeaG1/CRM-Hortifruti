@@ -1,0 +1,279 @@
+import { describe, it, expect } from 'vitest'
+import {
+  periodoDe,
+  receitaBrutaPeriodo,
+  compraMercadoriaPeriodo,
+  custosPorCategoria,
+  calcularResultado,
+  diasRecebimento,
+  diasPagamentoProdutor,
+  diasEstoque,
+  calcularCicloCaixa,
+} from './financeiro'
+import type { SaidaFin, EntradaFin } from './financeiro'
+import type { Lancamento } from './lancamentos'
+
+const saida = (over: Partial<SaidaFin> = {}): SaidaFin => ({
+  id: 's1', entrega: '2026-06-10', status: 'Entregue', data_pag: '2026-06-15',
+  valor: 1000, peso: 100, ...over,
+})
+
+const entrada = (over: Partial<EntradaFin> = {}): EntradaFin => ({
+  id: 'e1', data: '2026-06-01', pago: 'Pago', data_pag: '2026-06-04',
+  perda_kg: 0, valor_total: 500, peso_total: 100, ...over,
+})
+
+const lancamento = (over: Partial<Lancamento> = {}): Lancamento => ({
+  id: 'l1', data: '2026-06-05', categoria: 'Frete', descricao: '', valor: 100,
+  funcionario_id: null, ...over,
+})
+
+describe('periodoDe', () => {
+  it('devolve AAAA-MM de uma data ISO', () => {
+    expect(periodoDe('2026-06-10')).toBe('2026-06')
+  })
+  it('nao confunde o mesmo mes em anos diferentes (diferente de mesDe em clientes.ts)', () => {
+    expect(periodoDe('2025-06-10')).not.toBe(periodoDe('2026-06-10'))
+  })
+  it('devolve vazio para data invalida ou ausente', () => {
+    expect(periodoDe(null)).toBe('')
+    expect(periodoDe('lixo')).toBe('')
+  })
+})
+
+describe('receitaBrutaPeriodo', () => {
+  it('soma so vendas com status Entregue', () => {
+    const saidas = [
+      saida({ valor: 1000, status: 'Entregue' }),
+      saida({ valor: 500, status: 'Em rota' }),
+      saida({ valor: 300, status: 'Cancelado' }),
+      saida({ valor: 200, status: 'Devolvido' }),
+    ]
+    expect(receitaBrutaPeriodo(saidas, 'all')).toBe(1000)
+  })
+
+  it('filtra pelo mes/ano de entrega', () => {
+    const saidas = [
+      saida({ valor: 1000, entrega: '2026-06-10' }),
+      saida({ valor: 999, entrega: '2025-06-10' }), // mesmo mes, ano anterior
+      saida({ valor: 250, entrega: '2026-07-01' }),
+    ]
+    expect(receitaBrutaPeriodo(saidas, '2026-06')).toBe(1000)
+  })
+
+  it('e zero sem vendas entregues', () => {
+    expect(receitaBrutaPeriodo([], 'all')).toBe(0)
+  })
+})
+
+describe('compraMercadoriaPeriodo', () => {
+  it('soma valor_total de todas as entradas do periodo, pagas ou nao', () => {
+    const entradas = [
+      entrada({ valor_total: 500, pago: 'Pago' }),
+      entrada({ valor_total: 300, pago: 'Pendente' }),
+    ]
+    expect(compraMercadoriaPeriodo(entradas, 'all')).toBe(800)
+  })
+
+  it('filtra pelo mes/ano de data', () => {
+    const entradas = [
+      entrada({ valor_total: 500, data: '2026-06-01' }),
+      entrada({ valor_total: 999, data: '2026-07-01' }),
+    ]
+    expect(compraMercadoriaPeriodo(entradas, '2026-06')).toBe(500)
+  })
+})
+
+describe('custosPorCategoria', () => {
+  it('agrupa lancamentos por categoria, somando o valor', () => {
+    const lancs = [
+      lancamento({ categoria: 'Frete', valor: 100 }),
+      lancamento({ categoria: 'Frete', valor: 50 }),
+      lancamento({ categoria: 'Gasolina', valor: 80 }),
+    ]
+    expect(custosPorCategoria(lancs, 'all')).toEqual([
+      { categoria: 'Frete', valor: 150 },
+      { categoria: 'Gasolina', valor: 80 },
+    ])
+  })
+
+  it('ordena por maior valor primeiro', () => {
+    const lancs = [
+      lancamento({ categoria: 'Gasolina', valor: 10 }),
+      lancamento({ categoria: 'Frete', valor: 500 }),
+    ]
+    const resultado = custosPorCategoria(lancs, 'all')
+    expect(resultado[0].categoria).toBe('Frete')
+    expect(resultado[1].categoria).toBe('Gasolina')
+  })
+
+  it('respeita o periodo', () => {
+    const lancs = [
+      lancamento({ categoria: 'Frete', valor: 100, data: '2026-06-01' }),
+      lancamento({ categoria: 'Frete', valor: 999, data: '2026-07-01' }),
+    ]
+    expect(custosPorCategoria(lancs, '2026-06')).toEqual([{ categoria: 'Frete', valor: 100 }])
+  })
+
+  it('lista vazia sem lancamentos', () => {
+    expect(custosPorCategoria([], 'all')).toEqual([])
+  })
+})
+
+describe('calcularResultado', () => {
+  it('lucro = receita - (compra de mercadoria + lancamentos)', () => {
+    const saidas = [saida({ valor: 2000, status: 'Entregue' })]
+    const entradas = [entrada({ valor_total: 600 })]
+    const lancs = [lancamento({ categoria: 'Frete', valor: 400 })]
+    const resultado = calcularResultado(saidas, entradas, lancs, 'all')
+    expect(resultado.receitaBruta).toBe(2000)
+    expect(resultado.custoTotal).toBe(1000)
+    expect(resultado.lucroLiquido).toBe(1000)
+    expect(resultado.pctLucro).toBeCloseTo(50)
+  })
+
+  it('lucro negativo quando custos superam a receita', () => {
+    const saidas = [saida({ valor: 500, status: 'Entregue' })]
+    const entradas = [entrada({ valor_total: 600 })]
+    const lancs = [lancamento({ categoria: 'Frete', valor: 400 })]
+    const resultado = calcularResultado(saidas, entradas, lancs, 'all')
+    expect(resultado.lucroLiquido).toBe(-500)
+    expect(resultado.lucroLiquido).toBeLessThan(0)
+  })
+
+  it('"Compra de mercadoria" e sempre a primeira linha de custo', () => {
+    const resultado = calcularResultado(
+      [], [entrada({ valor_total: 300 })], [lancamento({ categoria: 'Frete', valor: 50 })], 'all',
+    )
+    expect(resultado.custos[0]).toEqual({ categoria: 'Compra de mercadoria', valor: 300 })
+  })
+
+  it('pctLucro e zero quando nao ha receita (evita divisao por zero)', () => {
+    const resultado = calcularResultado([], [], [], 'all')
+    expect(resultado.pctLucro).toBe(0)
+    expect(resultado.receitaBruta).toBe(0)
+  })
+})
+
+describe('diasRecebimento', () => {
+  it('media de dias entre entrega e pagamento, so Entregues com as duas datas', () => {
+    const saidas = [
+      saida({ entrega: '2026-06-01', data_pag: '2026-06-11', status: 'Entregue' }), // 10 dias
+      saida({ entrega: '2026-06-01', data_pag: '2026-06-06', status: 'Entregue' }), // 5 dias
+    ]
+    expect(diasRecebimento(saidas, 'all')).toBe(8) // media 7.5 arredonda p/ 8
+  })
+
+  it('ignora saidas nao pagas (sem data_pag)', () => {
+    const saidas = [
+      saida({ entrega: '2026-06-01', data_pag: '2026-06-11', status: 'Entregue' }),
+      saida({ entrega: '2026-06-01', data_pag: null, status: 'Entregue' }),
+    ]
+    expect(diasRecebimento(saidas, 'all')).toBe(10)
+  })
+
+  it('ignora saidas nao entregues', () => {
+    const saidas = [saida({ entrega: '2026-06-01', data_pag: '2026-06-11', status: 'Em rota' })]
+    expect(diasRecebimento(saidas, 'all')).toBeNull()
+  })
+
+  it('e null (nao zero) quando nao ha dado suficiente no periodo', () => {
+    expect(diasRecebimento([], 'all')).toBeNull()
+  })
+})
+
+describe('diasPagamentoProdutor', () => {
+  it('media de dias entre a entrada e o pagamento ao produtor, so entradas Pagas', () => {
+    const entradas = [
+      entrada({ data: '2026-06-01', data_pag: '2026-06-06', pago: 'Pago' }), // 5 dias
+      entrada({ data: '2026-06-01', data_pag: '2026-06-04', pago: 'Pago' }), // 3 dias
+    ]
+    expect(diasPagamentoProdutor(entradas, 'all')).toBe(4)
+  })
+
+  it('aceita pagamento no mesmo dia (0 dias), diferente de diasRecebimento', () => {
+    const entradas = [entrada({ data: '2026-06-01', data_pag: '2026-06-01', pago: 'Pago' })]
+    expect(diasPagamentoProdutor(entradas, 'all')).toBe(0)
+  })
+
+  it('ignora entradas nao pagas', () => {
+    const entradas = [entrada({ data: '2026-06-01', data_pag: null, pago: 'Pendente' })]
+    expect(diasPagamentoProdutor(entradas, 'all')).toBeNull()
+  })
+
+  it('e null quando nao ha entrada paga no periodo', () => {
+    expect(diasPagamentoProdutor([], 'all')).toBeNull()
+  })
+})
+
+describe('diasEstoque', () => {
+  it('calcula os dias que o saldo atual duraria no ritmo de saida', () => {
+    // qEnt=1000, qPer=0, qSai=300 -> (1000-300)/(300/30) = 700/10 = 70
+    const entradas = [entrada({ peso_total: 1000, perda_kg: 0 })]
+    const saidas = [saida({ peso: 300, status: 'Entregue' })]
+    expect(diasEstoque(entradas, saidas)).toBe(70)
+  })
+
+  it('desconta perda_kg do cabecalho da entrada', () => {
+    // qEnt=1000, qPer=100, qSai=300 -> (900-300)/10 = 60
+    const entradas = [entrada({ peso_total: 1000, perda_kg: 100 })]
+    const saidas = [saida({ peso: 300, status: 'Entregue' })]
+    expect(diasEstoque(entradas, saidas)).toBe(60)
+  })
+
+  it('ignora saidas canceladas/devolvidas no calculo de qSai', () => {
+    const entradas = [entrada({ peso_total: 1000, perda_kg: 0 })]
+    const saidas = [
+      saida({ peso: 300, status: 'Entregue' }),
+      saida({ peso: 999, status: 'Cancelado' }),
+      saida({ peso: 999, status: 'Devolvido' }),
+    ]
+    expect(diasEstoque(entradas, saidas)).toBe(70)
+  })
+
+  it('nunca desce abaixo de 1 dia', () => {
+    const entradas = [entrada({ peso_total: 10, perda_kg: 0 })]
+    const saidas = [saida({ peso: 10_000, status: 'Entregue' })]
+    expect(diasEstoque(entradas, saidas)).toBe(1)
+  })
+
+  it('e null (nao zero) sem nenhuma saida para estimar o ritmo', () => {
+    expect(diasEstoque([entrada()], [])).toBeNull()
+  })
+})
+
+describe('calcularCicloCaixa — formula completa do To Do (soma, nao CCC classico)', () => {
+  it('soma os tres componentes quando todos sao calculaveis', () => {
+    const entradas = [
+      entrada({ data: '2026-06-01', data_pag: '2026-06-04', pago: 'Pago', peso_total: 1000, perda_kg: 0 }),
+    ]
+    const saidas = [
+      saida({ entrega: '2026-06-01', data_pag: '2026-06-13', status: 'Entregue', peso: 300 }),
+    ]
+    const ciclo = calcularCicloCaixa(entradas, saidas, 'all')
+    // pagamentoProdutor = 3, estoque = (1000-300)/(300/30) = 70, recebimento = 12
+    expect(ciclo.pagamentoProdutor).toBe(3)
+    expect(ciclo.estoque).toBe(70)
+    expect(ciclo.recebimento).toBe(12)
+    expect(ciclo.total).toBe(85) // soma, nao subtracao
+  })
+
+  it('total e null quando falta qualquer componente (nao assume zero)', () => {
+    // sem nenhuma entrada paga -> pagamentoProdutor null -> total null,
+    // mesmo com estoque e recebimento calculaveis
+    const entradas = [entrada({ pago: 'Pendente', data_pag: null, peso_total: 1000, perda_kg: 0 })]
+    const saidas = [
+      saida({ entrega: '2026-06-01', data_pag: '2026-06-13', status: 'Entregue', peso: 300 }),
+    ]
+    const ciclo = calcularCicloCaixa(entradas, saidas, 'all')
+    expect(ciclo.pagamentoProdutor).toBeNull()
+    expect(ciclo.estoque).not.toBeNull()
+    expect(ciclo.recebimento).not.toBeNull()
+    expect(ciclo.total).toBeNull()
+  })
+
+  it('total e null quando nao ha dado nenhum (todos os tres null)', () => {
+    const ciclo = calcularCicloCaixa([], [], 'all')
+    expect(ciclo).toEqual({ pagamentoProdutor: null, estoque: null, recebimento: null, total: null })
+  })
+})

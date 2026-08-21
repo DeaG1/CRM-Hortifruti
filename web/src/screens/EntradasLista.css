@@ -1,0 +1,288 @@
+.entradas-estado {
+  padding: 30px 4px;
+  font-size: 14px;
+  color: #6a685c;
+}
+
+.entradas-estado--erro {
+  color: #9a4a2e;
+  font-weight: 600;
+}
+
+.entradas-lista {
+  max-width: 1280px;
+}
+
+.entradas-topo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.entradas-topo-legenda {
+  flex: 1;
+  font-size: 12.5px;
+  color: #6a685c;
+}
+
+.entradas-botao-novo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #5a7d3a;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 9px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.entradas-botao-novo:hover {
+  background: #4a6b2e;
+}
+
+.entradas-botao-novo-icone {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.entradas-erro-abrir {
+  margin: 0 0 14px;
+  background: #f6e4dc;
+  border: 1px solid #e7cbbf;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: #9a4a2e;
+  font-weight: 600;
+}
+
+/* ---------- stats ---------- */
+
+.entradas-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.entradas-stat {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 15px 17px;
+}
+
+.entradas-stat-label {
+  font-size: 12px;
+  color: #6a685c;
+  font-weight: 600;
+}
+
+.entradas-stat-valor {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 23px;
+  color: #2a2a24;
+  margin-top: 6px;
+}
+
+/* ---------- confirmação de exclusão ---------- */
+
+.entradas-confirma {
+  background: #f6e4dc;
+  border: 1px solid #e7cbbf;
+  border-radius: 11px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.entradas-confirma-texto {
+  margin: 0;
+  font-size: 13px;
+  color: #9a4a2e;
+}
+
+.entradas-confirma-acoes {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.entradas-confirma-cancelar {
+  background: #fffefa;
+  color: #2a2a24;
+  border: 1px solid #d8d3c2;
+  border-radius: 9px;
+  padding: 7px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.entradas-confirma-cancelar:hover {
+  background: #ece8db;
+}
+
+.entradas-confirma-excluir {
+  background: #c2502f;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 7px 16px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.entradas-confirma-excluir:hover:not(:disabled) {
+  background: #9a4a2e;
+}
+
+.entradas-confirma-excluir:disabled,
+.entradas-confirma-cancelar:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* ---------- vazio ---------- */
+
+.entradas-vazio {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 40px 18px;
+  text-align: center;
+  max-width: 560px;
+}
+
+.entradas-vazio-titulo {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2a2a24;
+}
+
+.entradas-vazio-sub {
+  font-size: 12.5px;
+  color: #6a685c;
+  margin-top: 4px;
+  margin-bottom: 16px;
+}
+
+/* ---------- tabela ---------- */
+
+.entradas-tabela {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+.entradas-linha {
+  display: grid;
+  grid-template-columns: 0.7fr 1.2fr 1fr 0.6fr 0.6fr 0.8fr 0.7fr 0.7fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.entradas-linha--cabecalho {
+  padding: 12px 18px;
+  background: #ece8db;
+  border-bottom: 1px solid #d8d3c2;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6a685c;
+  letter-spacing: 0.3px;
+}
+
+.entradas-linha--dados {
+  padding: 13px 18px;
+  border-bottom: 1px solid #ece8db;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.entradas-linha--dados:last-child {
+  border-bottom: none;
+}
+
+.entradas-linha--dados:hover {
+  background: #f5f2e6;
+}
+
+.entradas-col-num {
+  text-align: right;
+}
+
+.entradas-mono {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.entradas-numero {
+  color: #4a6b2e;
+  font-weight: 600;
+}
+
+.entradas-fornecedor-nome {
+  font-weight: 600;
+  color: #2a2a24;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.entradas-data {
+  font-size: 11px;
+  color: #6a685c;
+}
+
+.entradas-motivo {
+  font-size: 11.5px;
+  color: #6a685c;
+}
+
+.entradas-valor {
+  font-weight: 600;
+  color: #2a2a24;
+}
+
+.entradas-pago-badge {
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.entradas-excluir {
+  background: #fffefa;
+  color: #c2502f;
+  border: 1px solid #e7cbbf;
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  white-space: nowrap;
+}
+
+.entradas-excluir:hover {
+  background: #f6e4dc;
+}
+
+.entradas-rodape-nota {
+  font-size: 12px;
+  color: #6a685c;
+  margin-top: 12px;
+}
+
+.entradas-rodape-nota strong {
+  color: #2a2a24;
+}

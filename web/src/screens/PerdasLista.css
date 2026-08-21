@@ -1,0 +1,266 @@
+.perdas-estado {
+  padding: 30px 4px;
+  font-size: 14px;
+  color: #6a685c;
+}
+
+.perdas-estado--erro {
+  color: #9a4a2e;
+  font-weight: 600;
+}
+
+.perdas-lista {
+  max-width: 1280px;
+}
+
+.perdas-topo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.perdas-topo-legenda {
+  flex: 1;
+  font-size: 12.5px;
+  color: #6a685c;
+}
+
+.perdas-botao-novo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #c2502f;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 9px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.perdas-botao-novo:hover {
+  background: #9a4a2e;
+}
+
+.perdas-botao-novo-icone {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* ---------- stats ---------- */
+
+.perdas-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+  max-width: 620px;
+}
+
+.perdas-stat {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 15px 17px;
+}
+
+.perdas-stat-label {
+  font-size: 12px;
+  color: #6a685c;
+  font-weight: 600;
+}
+
+.perdas-stat-valor {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 23px;
+  color: #2a2a24;
+  margin-top: 6px;
+}
+
+.perdas-stat-valor--texto {
+  font-family: 'Public Sans', sans-serif;
+  font-size: 16px;
+}
+
+/* ---------- confirmação de exclusão ---------- */
+
+.perdas-confirma {
+  background: #f6e4dc;
+  border: 1px solid #e7cbbf;
+  border-radius: 11px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.perdas-confirma-texto {
+  margin: 0;
+  font-size: 13px;
+  color: #9a4a2e;
+}
+
+.perdas-erro-abrir {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: #9a4a2e;
+  font-weight: 600;
+}
+
+.perdas-confirma-acoes {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.perdas-confirma-cancelar {
+  background: #fffefa;
+  color: #2a2a24;
+  border: 1px solid #d8d3c2;
+  border-radius: 9px;
+  padding: 7px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.perdas-confirma-cancelar:hover {
+  background: #ece8db;
+}
+
+.perdas-confirma-excluir {
+  background: #c2502f;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 7px 16px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.perdas-confirma-excluir:hover:not(:disabled) {
+  background: #9a4a2e;
+}
+
+.perdas-confirma-excluir:disabled,
+.perdas-confirma-cancelar:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* ---------- vazio ---------- */
+
+.perdas-vazio {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 40px 18px;
+  text-align: center;
+  max-width: 560px;
+}
+
+.perdas-vazio-titulo {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2a2a24;
+}
+
+.perdas-vazio-sub {
+  font-size: 12.5px;
+  color: #6a685c;
+  margin-top: 4px;
+  margin-bottom: 16px;
+}
+
+/* ---------- tabela ---------- */
+
+.perdas-tabela {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+.perdas-linha {
+  display: grid;
+  grid-template-columns: 0.7fr 1.1fr 0.7fr 0.8fr 1.3fr 0.6fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.perdas-linha--cabecalho {
+  padding: 12px 18px;
+  background: #ece8db;
+  border-bottom: 1px solid #d8d3c2;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6a685c;
+  letter-spacing: 0.3px;
+}
+
+.perdas-linha--dados {
+  padding: 13px 18px;
+  border-bottom: 1px solid #ece8db;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.perdas-linha--dados:last-child {
+  border-bottom: none;
+}
+
+.perdas-linha--dados:hover {
+  background: #f5f2e6;
+}
+
+.perdas-col-num {
+  text-align: right;
+}
+
+.perdas-mono {
+  font-family: 'IBM Plex Mono', monospace;
+  color: #2a2a24;
+}
+
+.perdas-produto {
+  font-weight: 600;
+  color: #2a2a24;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.perdas-motivo-badge {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.perdas-obs {
+  font-size: 11.5px;
+  color: #6a685c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.perdas-excluir {
+  background: #fffefa;
+  color: #c2502f;
+  border: 1px solid #e7cbbf;
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  white-space: nowrap;
+}
+
+.perdas-excluir:hover {
+  background: #f6e4dc;
+}

@@ -85,22 +85,32 @@ describe('lancamentos', () => {
   })
 
   it(
-    'FK funcionario_id NAO respeita RLS entre tenants — por isso a rota HTTP ' +
-    'valida com funcionarioPertenceAoTenant antes de gravar',
+    'o banco rejeita lancamento apontando funcionario de outro tenant',
     async () => {
-      // Prova ao vivo do motivo da checagem extra em src/routes/lancamentos.ts:
-      // a integridade referencial do Postgres roda com privilegios do dono da
-      // tabela e ignora RLS, entao esta insercao succede mesmo apontando para
-      // um funcionario de outro tenant. Sem a checagem extra na rota HTTP, a
-      // API deixaria vincular lancamento de um tenant a funcionario de outro.
+      // Este teste ja afirmou o CONTRARIO, e por um bom motivo: a integridade
+      // referencial do PostgreSQL roda com os privilegios do dono da tabela
+      // referenciada e ignora RLS. Enquanto a chave era simples
+      // (funcionario_id -> funcionarios.id), esta insercao era ACEITA em
+      // silencio, e um lancamento de uma empresa podia apontar para o
+      // funcionario de outra — corrompendo o total "a pagar" daquela pessoa.
+      //
+      // A migration 010 fechou isso incluindo o tenant na propria chave:
+      // (tenant_id, funcionario_id) -> funcionarios(tenant_id, id). Agora o
+      // banco recusa, e a recusa nao depende de nenhuma rota lembrar de
+      // validar — vale tambem para acesso direto ao banco e script de
+      // importacao.
+      //
+      // A checagem de funcionarioPertenceAoTenant em src/routes/lancamentos.ts
+      // continua existindo e nao virou redundante: ela devolve 400 com
+      // mensagem util em vez de deixar o banco estourar um 23503 cru.
       const [func] = await withTenant(sql, tenantB, tx => tx`
         insert into funcionarios (tenant_id, nome) values (${tenantB}, 'Funcionario Tenant B')
         returning id`)
-      const linhas = await withTenant(sql, tenantA, tx => tx`
-        insert into lancamentos (tenant_id, data, categoria, valor, funcionario_id)
-        values (${tenantA}, current_date, 'Salário', 1000, ${func.id})
-        returning funcionario_id`)
-      expect(linhas[0].funcionario_id).toBe(func.id)
+      await expect(
+        withTenant(sql, tenantA, tx => tx`
+          insert into lancamentos (tenant_id, data, categoria, valor, funcionario_id)
+          values (${tenantA}, current_date, 'Salário', 1000, ${func.id})`),
+      ).rejects.toThrow()
     },
   )
 

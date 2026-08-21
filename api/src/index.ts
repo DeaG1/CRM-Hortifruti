@@ -4,6 +4,13 @@ import { criarPoolDoEnv, withTenant, type EnvBanco } from './db'
 import { verificarSenha, criarSessao, ITERACOES } from './auth'
 import { exigirSessao, COOKIE_SESSAO, type Vars } from './middleware/sessao'
 import { clientes } from './routes/clientes'
+import { produtos } from './routes/produtos'
+import { fornecedores } from './routes/fornecedores'
+import { funcionarios } from './routes/funcionarios'
+import { lancamentos } from './routes/lancamentos'
+import { entradas } from './routes/entradas'
+import { saidas } from './routes/saidas'
+import { perdas } from './routes/perdas'
 
 type Env = EnvBanco
 
@@ -103,7 +110,18 @@ app.post('/api/logout', exigirSessao, async (c) => {
 app.get('/api/eu', exigirSessao, (c) =>
   c.json({ usuarioId: c.get('usuarioId'), papel: c.get('papel') }))
 
+// As oito entidades do CRM. Cada router traz sua propria exigencia de
+// permissao: clientes, produtos, fornecedores, funcionarios e lancamentos sao
+// telas de admin no design; entradas, saidas e perdas o colaborador tambem
+// acessa (`ADMIN_ONLY_SCREENS` em web/src/telas.ts).
 app.route('/api/clientes', clientes)
+app.route('/api/produtos', produtos)
+app.route('/api/fornecedores', fornecedores)
+app.route('/api/funcionarios', funcionarios)
+app.route('/api/lancamentos', lancamentos)
+app.route('/api/entradas', entradas)
+app.route('/api/saidas', saidas)
+app.route('/api/perdas', perdas)
 
 /**
  * Sem isto, qualquer excecao nao tratada (ex.: um erro do Postgres que

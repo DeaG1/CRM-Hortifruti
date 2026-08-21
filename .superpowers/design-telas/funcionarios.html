@@ -1,0 +1,115 @@
+      <sc-if value="{{ isFuncionarios }}" hint-placeholder-val="">
+      <div style="max-width:1180px;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+          <div style="flex:1; font-size:12.5px; color:#8a8775;">Clique num funcionário para ver os adiantamentos · lançados automaticamente no Financeiro</div>
+          <button onClick="{{ newFuncionario }}" style="display:inline-flex; align-items:center; gap:6px; background:#5a7d3a; color:#fff; border:none; border-radius:9px; padding:9px 15px; font-size:13px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;" style-hover="background:#4a6b2e;"><span style="font-size:16px; line-height:1;">＋</span> Novo funcionário</button>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px;">
+          <sc-for list="{{ funcStats }}" as="s" hint-placeholder-count="4">
+            <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:15px 17px;">
+              <div style="font-size:12px; color:#8a8775; font-weight:600;">{{ s.label }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:23px; color:#21331f; margin-top:6px;">{{ s.value }}</div>
+              <div style="font-size:11.5px; color:#9a9784;">{{ s.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; overflow:hidden;">
+          <div style="display:none;"></div>
+          <sc-for list="{{ funcionariosRows }}" as="f" hint-placeholder-count="3">
+            <div style="border-bottom:1px solid #f1eee2; background:{{ f.rowBg }};">
+            <div onClick="{{ f.toggle }}" style="padding:16px 20px; cursor:pointer;" style-hover="background:#faf8f0;">
+
+              <div style="display:flex; align-items:center; gap:14px; row-gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+                <span style="color:#9a9784; font-size:12px; width:10px; flex:0 0 10px;">{{ f.seta }}</span>
+                <div style="width:0; flex:0 0 0;"></div>
+                <div style="flex:1; min-width:0;">
+                  <div style="font-family:'Archivo',sans-serif; font-weight:700; font-size:15.5px; color:#21331f;">{{ f.nome }}</div>
+                  <div style="font-size:12px; color:#8a8775;">{{ f.cargo }} · {{ f.tel }}</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:9px; flex:0 0 auto; margin-left:auto;">
+                  <div style="text-align:right;">
+                    <div style="font-size:10.5px; font-weight:700; color:#9a9784; letter-spacing:0.3px;">PRÓXIMO PAGAMENTO</div>
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#2a2a24;">{{ f.proxPagTxt }}</div>
+                  </div>
+                  <span style="font-size:11px; font-weight:700; color:{{ f.pagStatusColor }}; background:{{ f.pagStatusBg }}; padding:5px 11px; border-radius:14px; white-space:nowrap;">{{ f.pagStatus }}</span>
+                </div>
+              </div>
+
+              <div style="display:flex; align-items:center; gap:16px; row-gap:14px; flex-wrap:wrap; padding-left:24px;">
+                <div style="display:flex; gap:26px; row-gap:12px; flex-wrap:wrap; flex:1 1 320px;">
+                  <div>
+                    <div style="font-size:10.5px; font-weight:700; color:#9a9784; letter-spacing:0.3px;">SALÁRIO</div>
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:14px; color:#2a2a24; margin-top:1px;">{{ f.salario }}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10.5px; font-weight:700; color:#9a9784; letter-spacing:0.3px;">ADIANTADO</div>
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:14px; color:#9a4a2e; margin-top:1px;">{{ f.adiantado }}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:10.5px; font-weight:700; color:#9a9784; letter-spacing:0.3px;">PAGO</div>
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:14px; color:#5a584a; margin-top:1px;">{{ f.pagoSal }}</div>
+                  </div>
+                  <div style="padding-left:26px; border-left:1px solid #eee9da;">
+                    <div style="font-size:10.5px; font-weight:700; color:#9a9784; letter-spacing:0.3px;">A PAGAR</div>
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:16px; font-weight:700; color:{{ f.aPagarColor }}; margin-top:1px;">{{ f.aPagar }}</div>
+                  </div>
+                </div>
+                <div style="display:flex; gap:7px; align-items:center; flex-wrap:wrap; flex:0 0 auto; margin-left:auto;">
+                  <span style="font-size:11px; color:#9db088; font-weight:600; white-space:nowrap;">{{ f.quitadoTxt }}</span>
+                  <sc-if value="{{ f.podePagar }}" hint-placeholder-val="">
+                    <button onClick="{{ f.pagar }}" style="background:#2f5d3f; color:#fff; border:none; border-radius:8px; padding:8px 14px; font-size:12px; font-weight:700; cursor:pointer; font-family:'Public Sans',sans-serif; white-space:nowrap; box-shadow:0 1px 2px rgba(0,0,0,0.12);" style-hover="background:#254a32;">Pagar salário</button>
+                  </sc-if>
+                  <button onClick="{{ f.adiantar }}" style="background:#fff; color:#a96b3a; border:1px solid #e0c9b4; border-radius:8px; padding:8px 13px; font-size:12px; font-weight:700; cursor:pointer; font-family:'Public Sans',sans-serif; white-space:nowrap;" style-hover="background:#f6efe4;">Adiantar</button>
+                  <button onClick="{{ f.edit }}" style="background:#fff; color:#4a4838; border:1px solid #d8d3c2; border-radius:8px; padding:8px 12px; font-size:12px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; white-space:nowrap;" style-hover="background:#f3f0e6;">Editar</button>
+                </div>
+              </div>
+
+            </div>
+            <sc-if value="{{ f.aberto }}" hint-placeholder-val="">
+              <div style="padding:0 20px 18px 24px; background:#faf8f0;">
+                <div style="display:flex; gap:22px; row-gap:12px; flex-wrap:wrap; margin-bottom:12px; padding:11px 14px; background:#fff; border:1px solid #eee9da; border-radius:9px;">
+                  <div>
+                    <div style="font-size:10.5px; font-weight:700; color:#9a9784; letter-spacing:0.3px;">ÚLTIMO SALÁRIO PAGO</div>
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#2a2a24; margin-top:2px;">{{ f.ultimoPagTxt }}</div>
+                  </div>
+                  <div style="width:1px; background:#eee9da;"></div>
+                  <div>
+                    <div style="font-size:10.5px; font-weight:700; color:#9a9784; letter-spacing:0.3px;">DIA DO PAGAMENTO</div>
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#2a2a24; margin-top:2px;">todo dia {{ f.diaPagTxt }}</div>
+                  </div>
+                  <div style="width:1px; background:#eee9da;"></div>
+                  <div>
+                    <div style="font-size:10.5px; font-weight:700; color:#9a9784; letter-spacing:0.3px;">PRÓXIMO PAGAMENTO</div>
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#2a2a24; margin-top:2px;">{{ f.proxPagTxt }} · <span style="color:{{ f.pagStatusColor }}; font-weight:600;">{{ f.pagStatus }}</span></div>
+                  </div>
+                  <div style="width:1px; background:#eee9da;"></div>
+                  <div>
+                    <div style="font-size:10.5px; font-weight:700; color:#9a9784; letter-spacing:0.3px;">SALDO A PAGAR</div>
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:700; color:{{ f.aPagarColor }}; margin-top:2px;">{{ f.aPagar }}</div>
+                  </div>
+                </div>
+                <div style="font-size:11px; font-weight:700; color:#7c7a6a; letter-spacing:0.3px; margin-bottom:8px;">HISTÓRICO — {{ f.resumo }}</div>
+                <sc-if value="{{ f.semLancs }}" hint-placeholder-val="">
+                  <div style="background:#fff; border:1px dashed #ddd8c6; border-radius:9px; padding:14px; font-size:12.5px; color:#9a9784; text-align:center;">Nenhum adiantamento ou salário lançado neste período. Use <strong>Adiantar</strong> para registrar.</div>
+                </sc-if>
+                <sc-for list="{{ f.lancs }}" as="l" hint-placeholder-count="2">
+                  <div onClick="{{ l.edit }}" style="display:grid; grid-template-columns:0.55fr 1.2fr 1.8fr 0.7fr; gap:10px; align-items:center; background:#fff; border:1px solid #eee9da; border-radius:9px; padding:9px 13px; margin-bottom:6px; font-size:12.5px; cursor:pointer;" style-hover="border-color:#c3d3a8;">
+                    <div style="font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ l.data }}</div>
+                    <div><span style="font-size:11.5px; font-weight:600; background:{{ l.bgCat }}; color:{{ l.corCat }}; padding:3px 10px; border-radius:14px;">{{ l.categoria }}</span></div>
+                    <div style="color:#5a584a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ l.descricao }}</div>
+                    <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:600; color:#9a4a2e;">{{ l.valor }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            </div>
+          </sc-for>
+          <sc-if value="{{ noFunc }}" hint-placeholder-val="">
+            <div style="padding:18px; text-align:center; font-size:12.5px; color:#9a9784;">Nenhum funcionário ainda. Clique em <strong>Novo funcionário</strong> para cadastrar.</div>
+          </sc-if>
+        </div>
+        <div style="font-size:12px; color:#8a8775; margin-top:12px;"><strong style="color:#2a2a24;">A pagar</strong> = salário − adiantamentos − salários pagos no período. O <strong style="color:#2a2a24;">próximo pagamento</strong> é o dia escolhido no cadastro, contado a partir do último salário pago.</div>
+      </div>
+      </sc-if>
+
+      <!-- ===================== FINANCEIRO / DRE ===================== -->

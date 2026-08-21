@@ -1,0 +1,36 @@
+        <sc-if value="{{ modalLancamento }}" hint-placeholder-val="">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Data do lançamento</label>
+            <input type="date" data-field="data" value="{{ draft.data }}" onInput="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Categoria</label>
+            <select data-field="categoria" value="{{ draft.categoria }}" onChange="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+              <sc-for list="{{ lancCategorias }}" as="o" hint-placeholder-count="5">
+                <option value="{{ o }}">{{ o }}</option>
+              </sc-for>
+            </select>
+          </div>
+          <div style="grid-column:1/-1;">
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Descrição</label>
+            <input data-field="descricao" value="{{ draft.descricao }}" onInput="{{ updateDraft }}" placeholder="Ex.: troca de óleo do caminhão" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Valor (R$)</label>
+            <input type="number" step="0.01" data-field="valor" value="{{ draft.valor }}" onInput="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'IBM Plex Mono',monospace; color:#2a2a24; background:#fff; box-sizing:border-box; text-align:right;">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Funcionário (opcional)</label>
+            <select data-field="funcionarioId" value="{{ draft.funcionarioId }}" onChange="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+              <option value="">—</option>
+              <sc-for list="{{ funcionarioOptions }}" as="o" hint-placeholder-count="2">
+                <option value="{{ o.id }}">{{ o.nome }}</option>
+              </sc-for>
+            </select>
+          </div>
+          <div style="grid-column:1/-1; background:#f6f4ec; border-radius:9px; padding:10px 13px; font-size:12px; color:#6a685c; line-height:1.5;">O lançamento entra no <strong>total de custos</strong> do período, no <strong>relatório de lançamentos</strong> e — quando vinculado a um funcionário — desconta do <strong>a pagar</strong> dele.</div>
+        </div>
+        </sc-if>
+
+        <!-- ---- FUNCIONÁRIO FORM ---- -->

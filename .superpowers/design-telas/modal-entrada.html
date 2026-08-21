@@ -1,0 +1,94 @@
+        <sc-if value="{{ modalEntrada }}" hint-placeholder-val="">
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:15px;">
+          <div style="grid-column:1/-1;">
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Fornecedor (produtor)</label>
+            <select data-field="fornecedor" value="{{ draft.fornecedor }}" onChange="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+              <sc-for list="{{ fornecedorOptions }}" as="o" hint-placeholder-count="3">
+                <option value="{{ o }}">{{ o }}</option>
+              </sc-for>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Data da coleta</label>
+            <input type="date" data-field="data" value="{{ draft.data }}" onInput="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Pagamento ao produtor</label>
+            <select data-field="pago" value="{{ draft.pago }}" onChange="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+              <option value="Pendente">Pendente</option>
+              <option value="Pago">Pago</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Data do pagamento</label>
+            <input type="date" data-field="dataPag" value="{{ draft.dataPag }}" onInput="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Forma de pagamento</label>
+            <select data-field="formaPag" value="{{ draft.formaPag }}" onChange="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+              <option value="PIX">PIX</option>
+              <option value="Cartão de crédito">Cartão de crédito</option>
+              <option value="Boleto">Boleto</option>
+              <option value="Dinheiro">Dinheiro</option>
+            </select>
+          </div>
+          <div style="grid-column:1/-1;">
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Motivo da perda</label>
+            <select data-field="motivo" value="{{ draft.motivo }}" onChange="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+              <option value="—">—</option>
+              <option value="transporte">Transporte</option>
+              <option value="armazenagem">Armazenagem</option>
+              <option value="vencimento">Vencimento</option>
+              <option value="manuseio">Manuseio</option>
+            </select>
+          </div>
+
+          <!-- ITENS DA ENTRADA -->
+          <div style="grid-column:1/-1; border:1px solid #e6e2d4; border-radius:11px; overflow:hidden; background:#fff;">
+            <div style="display:flex; align-items:center; gap:10px; padding:11px 14px; background:#f3f0e6; border-bottom:1px solid #e6e2d4;">
+              <div style="flex:1; font-size:12.5px; font-weight:700; color:#4a4838;">Produtos recebidos</div>
+              <button onClick="{{ addItem }}" style="display:inline-flex; align-items:center; gap:5px; background:#5a7d3a; color:#fff; border:none; border-radius:7px; padding:6px 12px; font-size:12px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;" style-hover="background:#4a6b2e;"><span style="font-size:14px; line-height:1;">＋</span> Adicionar produto</button>
+            </div>
+            <div style="display:grid; grid-template-columns:1.5fr 0.75fr 0.7fr 0.8fr 0.7fr 0.6fr 0.9fr 0.3fr; gap:8px; padding:8px 14px; font-size:10.5px; font-weight:700; color:#9a9784; letter-spacing:0.3px; border-bottom:1px solid #f1eee2;">
+              <div>PRODUTO</div><div>UNIDADE</div><div style="text-align:right;">QTD</div><div style="text-align:right;">R$/UN</div><div style="text-align:right;">PERDA</div><div style="text-align:right;">PERDA %</div><div style="text-align:right;">SUBTOTAL</div><div></div>
+            </div>
+            <sc-for list="{{ itemRows }}" as="it" hint-placeholder-count="2">
+              <div style="display:grid; grid-template-columns:1.5fr 0.75fr 0.7fr 0.8fr 0.7fr 0.6fr 0.9fr 0.3fr; gap:8px; padding:7px 14px; align-items:center; border-bottom:1px solid #f4f1e7;">
+                <select data-idx="{{ it.idx }}" data-f="produtoId" value="{{ it.produtoId }}" onChange="{{ updateItem }}" style="width:100%; padding:7px 8px; border:1px solid #d8d3c2; border-radius:7px; font-size:12.5px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+                  <option value="">Selecione…</option>
+                  <sc-for list="{{ produtoOptions }}" as="po" hint-placeholder-count="3">
+                    <option value="{{ po.id }}">{{ po.nome }}</option>
+                  </sc-for>
+                </select>
+                <select data-idx="{{ it.idx }}" data-f="un" value="{{ it.un }}" onChange="{{ updateItem }}" style="width:100%; padding:7px 6px; border:1px solid #d8d3c2; border-radius:7px; font-size:12px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+                  <sc-for list="{{ unidades }}" as="u" hint-placeholder-count="6">
+                    <option value="{{ u }}">{{ u }}</option>
+                  </sc-for>
+                </select>
+                <input type="number" data-idx="{{ it.idx }}" data-f="kg" value="{{ it.kg }}" onInput="{{ updateItem }}" style="width:100%; padding:7px 8px; border:1px solid #d8d3c2; border-radius:7px; font-size:12.5px; font-family:'IBM Plex Mono',monospace; color:#2a2a24; background:#fff; box-sizing:border-box; text-align:right;">
+                <input type="number" step="0.01" data-idx="{{ it.idx }}" data-f="preco" value="{{ it.preco }}" onInput="{{ updateItem }}" style="width:100%; padding:7px 8px; border:1px solid #d8d3c2; border-radius:7px; font-size:12.5px; font-family:'IBM Plex Mono',monospace; color:#2a2a24; background:#fff; box-sizing:border-box; text-align:right;">
+                <input type="number" data-idx="{{ it.idx }}" data-f="perdaKg" value="{{ it.perdaKg }}" onInput="{{ updateItem }}" style="width:100%; padding:7px 8px; border:1px solid #d8d3c2; border-radius:7px; font-size:12.5px; font-family:'IBM Plex Mono',monospace; color:#2a2a24; background:#fff; box-sizing:border-box; text-align:right;">
+                <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-size:12.5px; font-weight:600; color:{{ it.perdaColor }};">{{ it.perdaPct }}</div>
+                <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-size:12.5px; color:#5a584a;">{{ it.subtotal }}</div>
+                <button onClick="{{ it.remove }}" style="justify-self:end; width:24px; height:24px; border-radius:6px; border:1px solid #e7cbbf; background:#fff; color:#c2502f; cursor:pointer; font-size:13px; line-height:1;" style-hover="background:#f6e4dc;">✕</button>
+              </div>
+            </sc-for>
+            <sc-if value="{{ noItens }}" hint-placeholder-val="">
+              <div style="padding:16px 14px; text-align:center; font-size:12.5px; color:#9a9784;">Nenhum produto ainda. Clique em <strong>Adicionar produto</strong> para lançar o que entrou.</div>
+            </sc-if>
+            <div style="display:grid; grid-template-columns:1.5fr 0.75fr 0.7fr 0.8fr 0.7fr 0.6fr 0.9fr 0.3fr; gap:8px; padding:11px 14px; background:#f6efe4; border-top:1px solid #ecdcc6; align-items:center; font-size:12.5px;">
+              <div style="font-weight:700; color:#8a5a2a;">Totais</div>
+              <div></div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:700; color:#21331f;">{{ entTotals.peso }}</div>
+              <div></div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:700; color:#21331f;">{{ entTotals.perdaKg }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:700; color:{{ entTotals.perdaColor }};">{{ entTotals.perdaPct }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:700; color:#21331f;">{{ entTotals.valor }}</div>
+              <div></div>
+            </div>
+          </div>
+          <div style="grid-column:1/-1; background:#f6efe4; border:1px solid #ecdcc6; border-radius:9px; padding:10px 13px; font-size:12px; color:#8a5a2a;">A <strong>perda</strong> é registrada aqui (a mercadoria estraga sobre o que foi comprado) e alimenta o Índice de perdas. O <strong>valor</strong> alimenta a <strong>Compra de mercadoria</strong> no Financeiro.</div>
+        </div>
+        </sc-if>
+
+        <!-- ---- LANÇAMENTO (CUSTO) FORM ---- -->

@@ -1,0 +1,91 @@
+      <sc-if value="{{ isFinanceiro }}" hint-placeholder-val="">
+      <div style="max-width:1180px; display:grid; grid-template-columns:1.15fr 1fr; gap:16px;">
+
+        <!-- Resultado financeiro -->
+        <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:22px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; gap:12px;">
+            <h3 style="font-family:'Archivo',sans-serif; font-size:16px; font-weight:700; color:#21331f; margin:0;">Resultado — {{ periodLabel }}</h3>
+            <button onClick="{{ newLancamento }}" style="background:#5a7d3a; color:#fff; border:none; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif; white-space:nowrap;" style-hover="background:#4a6b2e;">＋ Novo lançamento</button>
+          </div>
+          <div style="font-size:12px; color:#8a8775; margin-bottom:18px;">Receita vem dos pedidos entregues; a compra, das entradas; os demais custos você lança por categoria.</div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:2px solid #e6e2d4;">
+            <span style="font-size:14px; font-weight:700; color:#21331f;">Receita bruta</span>
+            <span style="font-family:'IBM Plex Mono',monospace; font-size:16px; font-weight:700; color:#21331f;">{{ finReceita }}</span>
+          </div>
+          <div style="font-size:11px; color:#9a9784; padding:5px 0 10px;">{{ finReceitaSub }}</div>
+
+          <sc-for list="{{ finCustos }}" as="c" hint-placeholder-count="3">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:11px 0; border-bottom:1px solid #f1eee2;">
+              <span style="font-size:13.5px; color:#6a685c;">(–) {{ c.label }}</span>
+              <span style="font-family:'IBM Plex Mono',monospace; font-size:14px; color:#9a4a2e;">({{ c.value }})</span>
+            </div>
+          </sc-for>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:11px 0; border-bottom:1px solid #f1eee2;">
+            <span style="font-size:13px; color:#8a8775;">= Total de custos</span>
+            <span style="font-family:'IBM Plex Mono',monospace; font-size:14px; color:#6a685c;">{{ finCustoTotal }}</span>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 14px; margin-top:12px; background:#eef3e6; border:1px solid #d7e3c6; border-radius:10px;">
+            <div>
+              <div style="font-size:13px; font-weight:700; color:#2f5d3f;">Lucro líquido</div>
+              <div style="font-size:11.5px; color:#5a7d3a;">{{ finPctTxt }}</div>
+            </div>
+            <span style="font-family:'IBM Plex Mono',monospace; font-size:20px; font-weight:700; color:{{ finLucroColor }};">{{ finLucro }}</span>
+          </div>
+        </div>
+
+        <!-- right: ciclo + lucro -->
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:20px;">
+            <div style="display:flex; align-items:baseline; justify-content:space-between;">
+              <h3 style="font-family:'Archivo',sans-serif; font-size:15px; font-weight:700; color:#21331f; margin:0;">Ciclo de caixa</h3>
+              <span style="font-family:'IBM Plex Mono',monospace; font-weight:600; color:{{ cicloColor }};">{{ cicloDiasTxt }} <span style="font-size:11px; color:#9a9784;">/ meta ≤13</span></span>
+            </div>
+            <div style="font-size:12px; color:#8a8775; margin:3px 0 14px;">Recebimento vem das entregas pagas; estoque, do giro dos produtos.</div>
+            <div style="display:flex; height:30px; border-radius:8px; overflow:hidden; margin-bottom:10px;">
+              <div style="width:{{ cicloPagW }}; background:#5a7d3a; display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; font-weight:600;">{{ cicloPag }}d</div>
+              <div style="width:{{ cicloEstW }}; background:#7cb342; display:flex; align-items:center; justify-content:center; color:#21331f; font-size:11px; font-weight:600;">{{ cicloEst }}d</div>
+              <div style="width:{{ cicloRecW }}; background:#c79320; display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; font-weight:600;">{{ cicloReceb }}d receb.</div>
+            </div>
+            <div style="display:flex; gap:16px; font-size:11.5px; color:#6a685c;">
+              <span><span style="color:#5a7d3a;">●</span> Paga produtor</span>
+              <span><span style="color:#7cb342;">●</span> Estoque</span>
+              <span><span style="color:#c79320;">●</span> Recebimento</span>
+            </div>
+            <div style="font-size:11.5px; color:#8a8775; margin-top:12px; line-height:1.5;">Ciclo = estoque ({{ cicloEst }}d) + recebimento ({{ cicloReceb }}d) − pagamento ao produtor ({{ cicloPag }}d).</div>
+          </div>
+
+          <div style="background:#21331f; color:#e8ecdf; border-radius:13px; padding:22px;">
+            <div style="font-size:12px; color:#9db088;">Lucro líquido operacional · {{ periodLabel }}</div>
+            <div style="font-family:'Archivo',sans-serif; font-weight:800; font-size:34px; margin-top:4px; color:{{ finLucroDarkColor }};">{{ finLucro }}</div>
+            <div style="font-size:13px; color:#9db088; margin-top:2px;">{{ finPctTxt }} · calculado dos pedidos e custos lançados</div>
+          </div>
+        </div>
+
+        <div style="grid-column:1/-1; background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:20px;">
+          <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
+            <h3 style="font-family:'Archivo',sans-serif; font-size:15px; font-weight:700; color:#21331f; margin:0;">Lançamentos do período</h3>
+            <span style="font-size:12px; color:#8a8775;">clique num lançamento para editar</span>
+          </div>
+          <div style="display:grid; grid-template-columns:0.6fr 1.2fr 1.6fr 1fr 0.8fr; gap:8px; padding:9px 0; border-bottom:1px solid #e6e2d4; font-size:11px; font-weight:700; color:#9a9784;">
+            <div>DATA</div><div>CATEGORIA</div><div>DESCRIÇÃO</div><div>FUNCIONÁRIO</div><div style="text-align:right;">VALOR</div>
+          </div>
+          <sc-for list="{{ lancRows }}" as="l" hint-placeholder-count="3">
+            <div onClick="{{ l.edit }}" style="display:grid; grid-template-columns:0.6fr 1.2fr 1.6fr 1fr 0.8fr; gap:8px; padding:11px 0; border-bottom:1px solid #f1eee2; font-size:12.5px; align-items:center; cursor:pointer;" style-hover="background:#faf8f0;">
+              <div style="font-family:'IBM Plex Mono',monospace; color:#5a584a;">{{ l.data }}</div>
+              <div><span style="font-size:11.5px; background:#f3f0e6; color:#4a4838; padding:3px 10px; border-radius:14px; font-weight:600;">{{ l.categoria }}</span></div>
+              <div style="color:#5a584a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ l.descricao }}</div>
+              <div style="color:#8a8775;">{{ l.func }}</div>
+              <div style="text-align:right; font-family:'IBM Plex Mono',monospace; font-weight:600; color:#9a4a2e;">({{ l.valor }})</div>
+            </div>
+          </sc-for>
+          <sc-if value="{{ noLanc }}" hint-placeholder-val="">
+            <div style="padding:16px 0 4px; text-align:center; font-size:12.5px; color:#9a9784;">Nenhum lançamento no período. Clique em <strong>Novo lançamento</strong> para registrar custos.</div>
+          </sc-if>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ===================== RELATÓRIOS ===================== -->

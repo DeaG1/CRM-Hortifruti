@@ -1,0 +1,44 @@
+      <sc-if value="{{ isFornecedores }}" hint-placeholder-val="">
+      <div style="max-width:1280px;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+          <div style="flex:1; font-size:12.5px; color:#8a8775;">Clique num fornecedor para editar</div>
+          <button onClick="{{ newFornecedor }}" style="display:inline-flex; align-items:center; gap:6px; background:#5a7d3a; color:#fff; border:none; border-radius:9px; padding:9px 15px; font-size:13px; font-weight:600; cursor:pointer; font-family:'Public Sans',sans-serif;" style-hover="background:#4a6b2e;"><span style="font-size:16px; line-height:1;">＋</span> Novo fornecedor</button>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:18px;">
+          <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:16px 18px;"><div style="font-size:12px; color:#8a8775; font-weight:600;">Variação de preço de compra</div><div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:24px; color:{{ fornSummary.varia.color }}; margin-top:6px;">{{ fornSummary.varia.v }}</div><div style="font-size:11.5px; color:#9a9784;">{{ fornSummary.varia.sub }}</div></div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:14px;">
+          <sc-for list="{{ fornecedores }}" as="f" hint-placeholder-count="5">
+            <div onClick="{{ f.edit }}" style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:18px 20px; cursor:pointer;" style-hover="border-color:#c3d3a8;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div>
+                  <div style="font-family:'Archivo',sans-serif; font-weight:700; font-size:16px; color:#21331f;">{{ f.nome }}</div>
+                  <div style="font-size:12.5px; color:#8a8775; margin-top:2px;">{{ f.regiao }} · {{ f.contato }}</div>
+                </div>
+              </div>
+              <div style="display:flex; gap:6px; margin:13px 0; flex-wrap:wrap;">
+                <sc-for list="{{ f.produtos }}" as="pr" hint-placeholder-count="2">
+                  <span style="font-size:11.5px; background:#eef3e6; color:#4a6b2e; padding:3px 10px; border-radius:14px;">{{ pr }}</span>
+                </sc-for>
+              </div>
+              <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px; padding-top:13px; border-top:1px solid #f1eee2;">
+                <div><div style="font-size:11px; color:#9a9784;">Preço médio</div><div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:14px; color:#2a2a24;">{{ f.preco }}</div></div>
+                <div><div style="font-size:11px; color:#9a9784;">Variação</div><div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:14px; color:{{ f.varColor }};">{{ f.varia }}</div></div>
+                <div><div style="font-size:11px; color:#9a9784;">Última coleta</div><div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:14px; color:#2a2a24;">{{ f.coleta }}</div></div>
+                <div><div style="font-size:11px; color:#9a9784;">Aproveit.</div><div style="font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:14px; color:#2a2a24;">{{ f.qualidade }}</div></div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <sc-if value="{{ semFornecedores }}" hint-placeholder-val="">
+          <div style="background:#fff; border:1px solid #e6e2d4; border-radius:13px; padding:30px 18px; text-align:center;">
+            <div style="font-size:14px; font-weight:600; color:#4a4838;">Nenhum fornecedor cadastrado</div>
+            <div style="font-size:12.5px; color:#9a9784; margin-top:4px; margin-bottom:16px;">Cadastre os produtores de quem você compra. Sem fornecedor não é possível lançar uma entrada.</div>
+            <button onClick="{{ newFornecedor }}" style="background:#5a7d3a; color:#fff; border:none; border-radius:9px; padding:10px 20px; font-size:13px; font-weight:700; cursor:pointer; font-family:'Public Sans',sans-serif;" style-hover="background:#4a6b2e;">＋ Cadastrar primeiro fornecedor</button>
+          </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <!-- ===================== PRODUTOS ===================== -->

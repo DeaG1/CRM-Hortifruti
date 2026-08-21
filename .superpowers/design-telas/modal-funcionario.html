@@ -1,0 +1,31 @@
+        <sc-if value="{{ modalFuncionario }}" hint-placeholder-val="">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+          <div style="grid-column:1/-1;">
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Nome do funcionário</label>
+            <input data-field="nome" value="{{ draft.nome }}" onInput="{{ updateDraft }}" placeholder="Ex.: João da Silva" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Função / cargo</label>
+            <input data-field="cargo" value="{{ draft.cargo }}" onInput="{{ updateDraft }}" placeholder="Ex.: Motorista" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Telefone</label>
+            <input data-field="tel" value="{{ draft.tel }}" onInput="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Salário mensal (R$)</label>
+            <input type="number" step="0.01" data-field="salario" value="{{ draft.salario }}" onInput="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'IBM Plex Mono',monospace; color:#2a2a24; background:#fff; box-sizing:border-box; text-align:right;">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Dia do pagamento</label>
+            <select data-field="diaPag" value="{{ draft.diaPag }}" onChange="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+              <sc-for list="{{ diasDoMes }}" as="d" hint-placeholder-count="5">
+                <option value="{{ d.v }}">{{ d.l }}</option>
+              </sc-for>
+            </select>
+          </div>
+          <div style="grid-column:1/-1; background:#eef3e6; border:1px solid #d7e3c6; border-radius:9px; padding:10px 13px; font-size:12px; color:#4a6b2e;">O <strong>dia do pagamento</strong> define a próxima data prevista. Adiantamentos e salários pagos são lançamentos do Financeiro vinculados a este funcionário, e descontam do valor <strong>a pagar</strong>.</div>
+        </div>
+        </sc-if>
+
+        <!-- ---- PERDA NO DEPÓSITO FORM ---- -->

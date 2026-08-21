@@ -1,0 +1,19 @@
+        <sc-if value="{{ modalProduto }}" hint-placeholder-val="">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Nome do produto</label>
+            <input data-field="nome" value="{{ draft.nome }}" onInput="{{ updateDraft }}" placeholder="Ex.: Batata" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:#6a685c; margin-bottom:5px; display:block;">Unidade padrão</label>
+            <select data-field="un" value="{{ draft.un }}" onChange="{{ updateDraft }}" style="width:100%; padding:9px 11px; border:1px solid #d8d3c2; border-radius:8px; font-size:13px; font-family:'Public Sans',sans-serif; color:#2a2a24; background:#fff; box-sizing:border-box;">
+              <sc-for list="{{ unidades }}" as="u" hint-placeholder-count="6">
+                <option value="{{ u }}">{{ u }}</option>
+              </sc-for>
+            </select>
+          </div>
+          <div style="grid-column:1/-1; background:#eef3e6; border:1px solid #d7e3c6; border-radius:9px; padding:10px 13px; font-size:12px; color:#4a6b2e;">A <strong>unidade padrão</strong> já vem selecionada quando você escolher este produto numa entrada ou saída. <strong>Preço de compra</strong>, <strong>venda</strong>, <strong>markup</strong> e <strong>% de perda</strong> são calculados automaticamente dos lançamentos.</div>
+        </div>
+        </sc-if>
+
+        <!-- ---- ENTRADA (COMPRA) FORM ---- -->

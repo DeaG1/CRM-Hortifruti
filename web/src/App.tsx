@@ -5,6 +5,13 @@ import { Shell } from './components/Shell'
 import { ClientesLista } from './screens/ClientesLista'
 import { ClienteFicha } from './screens/ClienteFicha'
 import { ModalCliente } from './components/ModalCliente'
+import { ProdutosLista } from './screens/ProdutosLista'
+import { FornecedoresLista } from './screens/FornecedoresLista'
+import { FuncionariosLista } from './screens/FuncionariosLista'
+import { LancamentosLista } from './screens/LancamentosLista'
+import { EntradasLista } from './screens/EntradasLista'
+import { SaidasLista } from './screens/SaidasLista'
+import { PerdasLista } from './screens/PerdasLista'
 import type { Cliente } from './derive/clientes'
 import { ADMIN_ONLY_SCREENS, type Tela } from './telas'
 
@@ -171,11 +178,32 @@ function App() {
 
   return (
     <Shell papel={eu.papel} telaAtual={telaEfetiva} onNavegar={setTela} onSair={sair}>
-      {telaEfetiva === 'clientes'
-        ? <ClientesModulo onSessaoExpirada={sair} />
-        : <TelaPlaceholder tela={telaEfetiva} />}
+      <Conteudo tela={telaEfetiva} onSessaoExpirada={sair} />
     </Shell>
   )
+}
+
+/**
+ * Escolhe a tela. As que ainda nao existem caem no placeholder — hoje sao as
+ * quatro que nao guardam dado proprio (Saude do Negocio, Estoque, Financeiro e
+ * Relatorios): elas calculam sobre as outras, e por isso vem depois delas.
+ */
+function Conteudo({ tela, onSessaoExpirada }: { tela: Tela; onSessaoExpirada: () => void }) {
+  switch (tela) {
+    case 'clientes':      return <ClientesModulo onSessaoExpirada={onSessaoExpirada} />
+    case 'produtos':      return <ProdutosLista onSessaoExpirada={onSessaoExpirada} />
+    case 'fornecedores':  return <FornecedoresLista onSessaoExpirada={onSessaoExpirada} />
+    case 'funcionarios':  return <FuncionariosLista onSessaoExpirada={onSessaoExpirada} />
+    case 'entradas':      return <EntradasLista onSessaoExpirada={onSessaoExpirada} />
+    case 'pedidos':       return <SaidasLista onSessaoExpirada={onSessaoExpirada} />
+    // Lancamentos e a parte de Financeiro que ja existe: a tela completa
+    // (resultado, ciclo de caixa) depende de vendas e compras cadastradas.
+    case 'financeiro':    return <LancamentosLista onSessaoExpirada={onSessaoExpirada} />
+    // Perdas de deposito vivem dentro de Estoque no design; enquanto o saldo
+    // por produto nao existe, a tela mostra ao menos o registro de perdas.
+    case 'estoque':       return <PerdasLista onSessaoExpirada={onSessaoExpirada} />
+    default:              return <TelaPlaceholder tela={tela} />
+  }
 }
 
 export default App

@@ -10,3 +10,7 @@ build/
 *.log
 .wrangler/
 .vercel/
+
+# credenciais de producao — nunca versionar
+.env.producao
+api/.env.producao

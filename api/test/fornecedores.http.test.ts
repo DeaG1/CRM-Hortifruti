@@ -130,8 +130,22 @@ describe('autorizacao', () => {
     expect(await res.json()).toEqual({ erro: 'nao autenticado' })
   })
 
-  it('colaborador -> 403 (design: colaborador nao enxerga fornecedores)', async () => {
+  // Este teste ja exigiu 403 tambem na leitura. Mas o colaborador lanca
+  // entradas, e o modal de entrada precisa do seletor de fornecedor — sem ler a
+  // lista, ele nao conseguia registrar de quem comprou. A tela de Fornecedores
+  // segue restrita ao admin; consultar a lista deixou de ser a mesma coisa que
+  // gerenciar o cadastro.
+  it('colaborador LE fornecedores (precisa disso para lancar entrada)', async () => {
     const res = await pedir('/api/fornecedores', comoColab())
+    expect(res.status).toBe(200)
+  })
+
+  it('colaborador NAO cria fornecedor', async () => {
+    const res = await pedir('/api/fornecedores', {
+      ...comoColab(), method: 'POST',
+      headers: { ...comoColab().headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ nome: 'Tentativa do colaborador' }),
+    })
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ erro: 'sem permissao' })
   })

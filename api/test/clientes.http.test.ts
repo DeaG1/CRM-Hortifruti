@@ -100,8 +100,23 @@ describe('autorizacao', () => {
     expect(await res.json()).toEqual({ erro: 'nao autenticado' })
   })
 
-  it('colaborador -> 403 (design: colaborador nao enxerga clientes)', async () => {
+  // Este teste ja exigiu 403 tambem na leitura, seguindo o design que poe
+  // `clientes` em ADMIN_ONLY_SCREENS. Mas isso quebrava o colaborador: ele
+  // lanca vendas, e nao existe venda sem escolher para quem — o modal de saida
+  // abria sem conseguir preencher o seletor de cliente, e a tela a que ele tem
+  // direito ficava inutil. A restricao do design e sobre a TELA de carteira
+  // (ficha, limite de credito, inadimplencia), nao sobre consultar a lista.
+  it('colaborador LE clientes (precisa disso para lancar venda)', async () => {
     const res = await pedir('/api/clientes', comoColab())
+    expect(res.status).toBe(200)
+  })
+
+  it('colaborador NAO cria cliente', async () => {
+    const res = await pedir('/api/clientes', {
+      ...comoColab(), method: 'POST',
+      headers: { ...comoColab().headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ nome: 'Tentativa do colaborador' }),
+    })
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ erro: 'sem permissao' })
   })

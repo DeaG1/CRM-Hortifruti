@@ -94,7 +94,23 @@ export const produtos = new Hono<{
   Variables: Vars
 }>()
 
-produtos.use('*', exigirSessao, exigirAdmin)
+/**
+ * Ler produtos exige apenas sessao; alterar exige admin.
+ *
+ * A tela de Produtos e restrita ao admin no design, e essa restricao continua
+ * valendo — mas ela e sobre GERENCIAR o cadastro, nao sobre CONSULTAR a lista.
+ * O colaborador tem acesso a Entradas, Saidas e Estoque, e os tres precisam do
+ * seletor de produto para lancar qualquer movimentacao.
+ *
+ * Com `exigirAdmin` em tudo, o colaborador abria "Nova entrada", recebia
+ * "nao foi possivel carregar a lista de produtos" e simplesmente nao conseguia
+ * trabalhar — as telas a que ele tem direito ficavam inuteis. Descoberto ao
+ * construir os modais de entrada e perda.
+ */
+produtos.use('*', exigirSessao)
+produtos.post('*', exigirAdmin)
+produtos.put('*', exigirAdmin)
+produtos.delete('*', exigirAdmin)
 
 produtos.get('/', async (c) => {
   const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>

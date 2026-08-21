@@ -131,7 +131,27 @@ export const clientes = new Hono<{
   Variables: Vars
 }>()
 
-clientes.use('*', exigirSessao, exigirAdmin)
+/**
+ * Ler clientes exige apenas sessao; alterar exige admin.
+ *
+ * A tela de Clientes — com ficha, limite de credito, inadimplencia e health
+ * score — continua restrita ao admin: e informacao comercial sensivel, e o
+ * design coloca `clientes` em ADMIN_ONLY_SCREENS.
+ *
+ * Mas o colaborador lanca vendas, e nao existe venda sem escolher para quem.
+ * Com admin exigido em toda a rota, ele abria "Nova saida" e nao conseguia
+ * selecionar o cliente — a tela a que ele tem direito ficava inutil. A leitura
+ * fica liberada para preencher esse seletor; a carteira completa continua
+ * fora do alcance dele porque a TELA e que e restrita, nao o endpoint.
+ *
+ * Se um dia for preciso esconder tambem os campos sensiveis na leitura do
+ * colaborador, o caminho e um endpoint enxuto (id e nome apenas), nao
+ * bloquear de novo o que ele precisa para trabalhar.
+ */
+clientes.use('*', exigirSessao)
+clientes.post('*', exigirAdmin)
+clientes.put('*', exigirAdmin)
+clientes.delete('*', exigirAdmin)
 
 clientes.get('/', async (c) => {
   const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>

@@ -123,11 +123,49 @@ export const fornecedores = new Hono<{
   Variables: Vars
 }>()
 
-fornecedores.use('*', exigirSessao, exigirAdmin)
+/**
+ * Ler fornecedores exige apenas sessao; alterar exige admin.
+ *
+ * A tela de Fornecedores e restrita ao admin no design, e continua sendo — mas
+ * a restricao e sobre GERENCIAR o cadastro, nao sobre CONSULTAR a lista. O
+ * colaborador lanca entradas, e o modal de entrada precisa do seletor de
+ * fornecedor. Com admin exigido em tudo, ele abria "Nova entrada" e nao
+ * conseguia escolher de quem comprou.
+ */
+fornecedores.use('*', exigirSessao)
+fornecedores.post('*', exigirAdmin)
+fornecedores.put('*', exigirAdmin)
+fornecedores.delete('*', exigirAdmin)
 
+/**
+ * A lista traz os produtos vinculados junto, agregados em SQL.
+ *
+ * Sem isso, a tela precisa buscar `GET /:id` de cada fornecedor para saber o
+ * que ele entrega — com 30 fornecedores, 31 requisicoes. Cada ida ao banco
+ * custa cerca de 116ms quando o Worker roda longe do Postgres (medido em
+ * producao), entao o N+1 sairia de meio segundo para quase quatro.
+ *
+ * O `left join` preserva fornecedor sem nenhum produto vinculado, e o
+ * `filter (where ...)` faz esse caso devolver lista vazia em vez de um array
+ * com um elemento nulo dentro.
+ */
 fornecedores.get('/', async (c) => {
   const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
-    tx`select * from fornecedores order by nome`)
+    tx`select f.*,
+              coalesce(
+                json_agg(
+                  json_build_object('id', p.id, 'nome', p.nome, 'un', p.un)
+                  order by p.nome
+                ) filter (where p.id is not null),
+                '[]'
+              ) as produtos
+         from fornecedores f
+         left join fornecedor_produtos fp
+           on fp.fornecedor_id = f.id and fp.tenant_id = f.tenant_id
+         left join produtos p
+           on p.id = fp.produto_id and p.tenant_id = f.tenant_id
+        group by f.id
+        order by f.nome`)
   return c.json(linhas.map(paraJson))
 })
 

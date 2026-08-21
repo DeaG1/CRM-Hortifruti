@@ -116,8 +116,22 @@ describe('autorizacao', () => {
     expect(await res.json()).toEqual({ erro: 'nao autenticado' })
   })
 
-  it('colaborador -> 403 (design: colaborador nao enxerga produtos)', async () => {
+  // Este teste ja exigiu 403 tambem na leitura. Mas o colaborador tem acesso a
+  // Entradas, Saidas e Estoque, e os tres precisam do seletor de produto — sem
+  // ler a lista, ele abria "Nova entrada" e nao conseguia lancar nada. A tela
+  // de Produtos continua restrita ao admin; o que mudou e que consultar a lista
+  // deixou de ser a mesma coisa que gerenciar o cadastro.
+  it('colaborador LE produtos (precisa disso para lancar movimentacao)', async () => {
     const res = await pedir('/api/produtos', comoColab())
+    expect(res.status).toBe(200)
+  })
+
+  it('colaborador NAO cria produto', async () => {
+    const res = await pedir('/api/produtos', {
+      ...comoColab(), method: 'POST',
+      headers: { ...comoColab().headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ nome: 'Tentativa do colaborador' }),
+    })
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ erro: 'sem permissao' })
   })

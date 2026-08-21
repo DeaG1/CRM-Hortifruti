@@ -11,6 +11,7 @@ import { lancamentos } from './routes/lancamentos'
 import { entradas } from './routes/entradas'
 import { saidas } from './routes/saidas'
 import { perdas } from './routes/perdas'
+import { estoque } from './routes/estoque'
 
 type Env = EnvBanco
 
@@ -122,6 +123,10 @@ app.route('/api/lancamentos', lancamentos)
 app.route('/api/entradas', entradas)
 app.route('/api/saidas', saidas)
 app.route('/api/perdas', perdas)
+// Estoque nao guarda dado proprio — e um agregado sobre entradas, perdas e
+// saidas (ver src/routes/estoque.ts). So exigirSessao, igual entradas/
+// saidas/perdas: colaborador acessa.
+app.route('/api/estoque', estoque)
 
 /**
  * Sem isto, qualquer excecao nao tratada (ex.: um erro do Postgres que

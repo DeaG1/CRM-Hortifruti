@@ -1,0 +1,166 @@
+.estoque-modulo {
+  max-width: 1280px;
+}
+
+.estoque-saldo-secao {
+  margin-bottom: 28px;
+}
+
+.estoque-estado {
+  padding: 30px 4px;
+  font-size: 14px;
+  color: #6a685c;
+}
+
+.estoque-estado--erro {
+  color: #c2502f;
+  font-weight: 600;
+}
+
+/* ---------- vazio ---------- */
+
+.estoque-vazio {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 40px 18px;
+  text-align: center;
+  max-width: 560px;
+}
+
+.estoque-vazio-titulo {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2a2a24;
+}
+
+.estoque-vazio-sub {
+  font-size: 12.5px;
+  color: #6a685c;
+  margin-top: 4px;
+}
+
+/* ---------- stats ---------- */
+
+.estoque-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 260px));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.estoque-stat {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 15px 17px;
+}
+
+.estoque-stat-label {
+  font-size: 12px;
+  color: #6a685c;
+  font-weight: 600;
+}
+
+.estoque-stat-valor {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 23px;
+  color: #2a2a24;
+  margin-top: 6px;
+}
+
+.estoque-stat-sub {
+  font-size: 11.5px;
+  color: #6a685c;
+}
+
+/* ---------- tabela ---------- */
+
+.estoque-tabela {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+.estoque-linha {
+  display: grid;
+  grid-template-columns: 1.6fr 0.8fr 0.8fr 0.8fr 0.8fr 0.9fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.estoque-linha--cabecalho {
+  padding: 12px 18px;
+  background: #ece8db;
+  border-bottom: 1px solid #d8d3c2;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6a685c;
+  letter-spacing: 0.3px;
+}
+
+.estoque-linha--dados {
+  padding: 13px 18px;
+  border-bottom: 1px solid #ece8db;
+  font-size: 12.5px;
+}
+
+.estoque-linha--dados:last-child {
+  border-bottom: none;
+}
+
+.estoque-col-num {
+  text-align: right;
+}
+
+.estoque-mono {
+  font-family: 'IBM Plex Mono', monospace;
+  color: #6a685c;
+}
+
+.estoque-nome {
+  font-weight: 600;
+  color: #2a2a24;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.estoque-un-badge {
+  font-size: 11.5px;
+  background: #eef3e6;
+  color: #4a6b2e;
+  padding: 3px 10px;
+  border-radius: 14px;
+}
+
+.estoque-perda {
+  color: #9a4a2e;
+}
+
+.estoque-saldo {
+  font-weight: 700;
+}
+
+.estoque-saldo-kg {
+  font-family: 'Public Sans', sans-serif;
+  font-weight: 400;
+  font-size: 11px;
+  color: #6a685c;
+  margin-top: 2px;
+}
+
+.estoque-legenda {
+  font-size: 12px;
+  color: #6a685c;
+  margin: 12px 0 0;
+}
+
+/* ---------- seção de perdas do depósito ---------- */
+
+.estoque-perdas-secao {
+  padding-top: 20px;
+  border-top: 1px solid #d8d3c2;
+}

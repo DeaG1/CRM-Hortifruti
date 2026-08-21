@@ -11,7 +11,7 @@ import { FuncionariosLista } from './screens/FuncionariosLista'
 import { LancamentosLista } from './screens/LancamentosLista'
 import { EntradasLista } from './screens/EntradasLista'
 import { SaidasLista } from './screens/SaidasLista'
-import { PerdasLista } from './screens/PerdasLista'
+import { EstoqueLista } from './screens/EstoqueLista'
 import type { Cliente } from './derive/clientes'
 import { ADMIN_ONLY_SCREENS, type Tela } from './telas'
 
@@ -184,9 +184,11 @@ function App() {
 }
 
 /**
- * Escolhe a tela. As que ainda nao existem caem no placeholder — hoje sao as
- * quatro que nao guardam dado proprio (Saude do Negocio, Estoque, Financeiro e
- * Relatorios): elas calculam sobre as outras, e por isso vem depois delas.
+ * Escolhe a tela. As que ainda nao existem caem no placeholder — hoje sao
+ * tres das quatro que nao guardam dado proprio (Saude do Negocio, Financeiro
+ * completo e Relatorios): elas calculam sobre as outras, e por isso vem
+ * depois delas. Estoque (a quarta) ja existe — GET /api/estoque agrega
+ * entradas, perdas e saidas em SQL (ver src/screens/EstoqueLista.tsx).
  */
 function Conteudo({ tela, onSessaoExpirada }: { tela: Tela; onSessaoExpirada: () => void }) {
   switch (tela) {
@@ -199,9 +201,10 @@ function Conteudo({ tela, onSessaoExpirada }: { tela: Tela; onSessaoExpirada: ()
     // Lancamentos e a parte de Financeiro que ja existe: a tela completa
     // (resultado, ciclo de caixa) depende de vendas e compras cadastradas.
     case 'financeiro':    return <LancamentosLista onSessaoExpirada={onSessaoExpirada} />
-    // Perdas de deposito vivem dentro de Estoque no design; enquanto o saldo
-    // por produto nao existe, a tela mostra ao menos o registro de perdas.
-    case 'estoque':       return <PerdasLista onSessaoExpirada={onSessaoExpirada} />
+    // Estoque nao guarda dado proprio: e o saldo por produto+unidade
+    // (entradas - perdas - saidas, GET /api/estoque) mais o registro de
+    // perdas do deposito, que vive dentro de Estoque no design.
+    case 'estoque':       return <EstoqueLista onSessaoExpirada={onSessaoExpirada} />
     default:              return <TelaPlaceholder tela={tela} />
   }
 }

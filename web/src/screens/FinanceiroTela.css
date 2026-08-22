@@ -264,25 +264,10 @@
   white-space: nowrap;
 }
 
-.financeiro-ciclo-barra {
-  display: flex;
-  height: 30px;
-  border-radius: 8px;
-  overflow: hidden;
-  margin-bottom: 12px;
-}
-
-.financeiro-ciclo-barra-segmento {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 11px;
+.financeiro-ciclo-tag {
+  font-size: 12px;
   font-weight: 600;
-  font-family: 'IBM Plex Mono', monospace;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
+  margin-bottom: 10px;
 }
 
 .financeiro-ciclo-formula {

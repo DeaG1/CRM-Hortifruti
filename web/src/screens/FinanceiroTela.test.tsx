@@ -177,4 +177,28 @@ describe('FinanceiroTela — ciclo de caixa', () => {
     expect(screen.getByText(/Nenhuma saída registrada/)).toBeInTheDocument()
     expect(screen.getByText(/Nenhuma venda entregue e paga/)).toBeInTheDocument()
   })
+
+  // DEFEITO 1 (corrigido): a formula passou a subtrair pagamentoProdutor
+  // (CCC padrao), entao o semaforo/meta (antes removido, com uma nota
+  // explicando a ausencia) volta a se aplicar.
+  it('restaura o semaforo com a meta de 13 dias, sem a nota de "sem meta definida"', async () => {
+    mockCarga({
+      saidas: [saida({ entrega: '2026-06-01', data_pag: '2026-06-13', status: 'Entregue', peso: 300 })],
+      entradas: [entrada({ data: '2026-06-01', data_pag: '2026-06-04', pago: 'Pago', peso_total: 1000, perda_kg: 0 })],
+      lancamentos: [],
+    })
+    const { container } = render(<FinanceiroTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Ciclo de caixa')
+
+    // total = estoque(2) + recebimento(12) - pagamentoProdutor(3) = 11 dias,
+    // dentro da meta (<=13) -> verde, tag "na meta"
+    expect(screen.getByText('11 dias')).toBeInTheDocument()
+    expect(screen.getByText(/na meta · meta ≤ 13 dias/)).toBeInTheDocument()
+    const total = container.querySelector('.financeiro-ciclo-total')
+    expect(total).toHaveStyle({ color: '#3f8f5b' })
+
+    // a nota antiga ("sem meta definida", da fase em que a formula somava)
+    // nao existe mais
+    expect(screen.queryByText(/sem meta definida/i)).not.toBeInTheDocument()
+  })
 })

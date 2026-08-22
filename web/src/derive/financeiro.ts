@@ -12,6 +12,14 @@ import type { Lancamento } from './lancamentos'
 // existe no schema real (ex.: `p.recebDias` já vinha pronto no protótipo),
 // este arquivo recalcula o equivalente a partir das datas reais — mesmo
 // resultado, dado que o protótipo não expõe como esse campo era montado.
+//
+// CORREÇÃO AUTORIZADA (2026-08-22): três defeitos de cálculo, portados com
+// fidelidade do protótipo/To Do original, foram revisados e confirmados
+// como erro pelo dono do negócio — a correção abaixo diverge de propósito
+// do texto original, não é um bug novo. Ver o comentário de cada função:
+// calcularCicloCaixa (soma → subtração, CCC padrão), diasRecebimento
+// (inclui recebimento no mesmo dia na média) e diasEstoque (usa o período
+// filtrado em vez do histórico acumulado inteiro / 30 fixo).
 
 /* ============================== tipos ============================== */
 
@@ -188,10 +196,22 @@ function media(valores: number[]): number | null {
  * `recebDias` pronto no objeto pedido; aqui ele é recalculado da mesma
  * forma (dias entre a entrega e o pagamento).
  *
- * O filtro `> 0` (exclui recebimento no mesmo dia da entrega) é fidelidade
- * ao protótipo, não uma escolha nova — sinalizado no relatório de entrega
- * como um comportamento estranho a confirmar com o cliente, porque descarta
- * exatamente os pagamentos mais rápidos da média.
+ * DEFEITO CORRIGIDO (autorizado pelo dono do negócio): o protótipo filtrava
+ * `recebDias > 0`, excluindo da média justamente os recebimentos no MESMO
+ * DIA da entrega — os melhores clientes, os que pagam à vista. O efeito
+ * era perverso: quanto mais gente pagava rápido, pior (mais alto) ficava o
+ * indicador, porque esses zeros eram descartados em vez de puxar a média
+ * pra baixo. Fidelidade ao protótipo, não escolha nova — mas sinalizado no
+ * relatório de entrega como comportamento estranho, e agora confirmado como
+ * erro. A correção troca `d > 0` por `d >= 0`: 0 dias (pago no mesmo dia)
+ * ENTRA na média; só continua de fora o que teria dado negativo (pagamento
+ * registrado antes da entrega — erro de digitação, não recebimento real).
+ *
+ * Isso é diferente de "sem data de pagamento" (`data_pag` nulo): o `map`
+ * abaixo já devolve `null` nesse caso (não 0), e o filtro de tipo
+ * (`d !== null`) descarta esse `null` antes mesmo do `d >= 0` — os dois
+ * casos (pago no mesmo dia vs. sem data de pagamento) já eram, e continuam,
+ * distinguíveis com o dado disponível hoje (`data_pag: string | null`).
  *
  * `null` quando não há nenhuma saída paga com as duas datas no período —
  * nunca 0 (o protótipo caía num "senão 12" fixo; aqui a tela mostra "—").
@@ -200,7 +220,7 @@ export function diasRecebimento(saidas: SaidaFin[], periodo: string): number | n
   const dias = noPeriodo(saidas, periodo, s => s.entrega)
     .filter(s => s.status === 'Entregue')
     .map(s => (s.entrega && s.data_pag) ? diasEntre(s.entrega, s.data_pag) : null)
-    .filter((d): d is number => d !== null && d > 0)
+    .filter((d): d is number => d !== null && d >= 0)
   const m = media(dias)
   return m === null ? null : Math.round(m)
 }
@@ -230,20 +250,61 @@ export function diasPagamentoProdutor(entradas: EntradaFin[], periodo: string): 
 }
 
 /**
+ * Número de dias corridos a usar como divisor do ritmo de saída em
+ * `diasEstoque` — suporte da correção do defeito de giro de estoque
+ * (ver comentário de `diasEstoque` logo abaixo). Três casos:
+ *
+ * 1. `periodo` = 'AAAA-MM': dias corridos do MÊS CIVIL correspondente
+ *    (28-31, conforme o mês) — propriedade do calendário, não do dado.
+ * 2. `periodo` = 'all': "todo o período" aqui é literalmente todo o
+ *    histórico presente nos itens informados, então seu "número real de
+ *    dias" é o intervalo entre a data mais antiga e a mais recente entre
+ *    elas (não um valor fixo). Cresce junto com o histórico cadastrado —
+ *    ao contrário do "/30" fixo antigo, a proporção volume/dias continua
+ *    representativa mesmo com meses (ou anos) de dado acumulado.
+ * 3. Nenhuma data utilizável entre as informadas (ex.: only saídas sem
+ *    `entrega` preenchida, período 'all') — caso degenerado em que não dá
+ *    pra medir o período real. Cai numa janela explícita de 30 dias,
+ *    documentada aqui: é a "janela recente" pedida para quando não há como
+ *    determinar o período de fato, usada só como último recurso.
+ */
+function diasDoPeriodo(periodo: string, datas: (string | null | undefined)[]): number {
+  const mesCivil = /^(\d{4})-(\d{2})$/.exec(periodo)
+  if (periodo !== 'all' && mesCivil) {
+    const ano = Number(mesCivil[1])
+    const mes = Number(mesCivil[2])
+    return new Date(Date.UTC(ano, mes, 0)).getUTCDate() // dia 0 do mês seguinte = último dia deste mês
+  }
+  const validas = datas.filter((d): d is string => typeof d === 'string' && DATA_RE.test(d))
+  if (validas.length === 0) return 30 // janela recente explícita: nenhuma data pra medir o período real
+  const tempos = validas.map(d => new Date(`${d.slice(0, 10)}T00:00:00Z`).getTime())
+  return Math.max(1, Math.round((Math.max(...tempos) - Math.min(...tempos)) / 86_400_000) + 1)
+}
+
+/**
  * Giro de estoque, em dias: quanto tempo o saldo atual duraria no ritmo de
  * saída. Portado de logica-dashboard.txt linhas 29-33
- * ("qEnt - qPer - qSai) / (qSai/30)"). Fidelidade inclui duas
- * características que podem parecer estranhas — registradas aqui e no
- * relatório de entrega, não corrigidas em silêncio:
+ * ("qEnt - qPer - qSai) / (qSai/30)").
  *
- * 1. Usa o volume de TODA a entrada/saída já cadastrada (não filtra por
- *    período) — mesmo comportamento do protótipo, que soma `entradasRaw`/
- *    `pedidosRaw` (não `entradasPeriodo`/`pedidosPeriodo`) aqui.
- * 2. Divide o total de saída acumulado por 30 para estimar um "ritmo
- *    diário" — só é uma boa aproximação se o histórico cadastrado cobrir
- *    ~30 dias; com uma base maior, o giro calculado tende a encolher
- *    artificialmente (o denominador cresce mais rápido que um "ritmo
- *    recente" real).
+ * DEFEITO CORRIGIDO (autorizado pelo dono do negócio): a versão portada
+ * usava o volume de TODA a entrada/saída já cadastrada (sem filtrar por
+ * período) dividido por 30 fixo, como se fosse sempre um "ritmo diário
+ * recente" — só é uma boa aproximação enquanto o histórico cadastrado
+ * cobre uns 30 dias. Com três meses de operação o número já não significa
+ * o que promete, e piora (encolhe) sozinho a cada mês que passa, sem nada
+ * ter mudado no ritmo real do negócio: o numerador (saldo) cresce muito
+ * mais devagar que o denominador (saída acumulada de todo o histórico/30),
+ * então o giro calculado tende a zero conforme a base envelhece.
+ *
+ * A correção usa o PERÍODO EFETIVAMENTE FILTRADO — mesmo `periodo` de
+ * `calcularCicloCaixa`/`noPeriodo`, já usado pelos outros dois componentes
+ * do ciclo — em vez do histórico inteiro, e divide pelo número REAL de
+ * dias desse período (`diasDoPeriodo`, acima): dias corridos do mês civil
+ * quando um mês está selecionado, ou o intervalo real de datas presentes
+ * quando o filtro é 'all' (que aqui cresce junto com o histórico, ao
+ * contrário do "/30" fixo). Uma tela sem filtro de período algum cairia no
+ * mesmo `diasDoPeriodo('all', ...)`, que por sua vez só usa a janela fixa
+ * de 30 dias como último recurso, quando nem isso dá pra medir.
  *
  * `qPer` (perda) usa `perda_kg` do cabeçalho da entrada (perda na coleta/
  * transporte) — é o campo equivalente disponível na resposta de
@@ -253,17 +314,20 @@ export function diasPagamentoProdutor(entradas: EntradaFin[], periodo: string): 
  * fora desse escopo. A perda de depósito (tabela `perdas`, pós-entrada) não
  * entra por não estar entre as três APIs desta tela.
  *
- * `null` quando não há nenhuma saída (qSai <= 0) — não há ritmo de saída
- * para estimar um giro, e um "giro 0" ou "giro infinito" seria enganoso.
+ * `null` quando não há nenhuma saída no período (qSai <= 0) — não há ritmo
+ * de saída para estimar um giro, e um "giro 0" ou "giro infinito" seria
+ * enganoso.
  */
-export function diasEstoque(entradas: EntradaFin[], saidas: SaidaFin[]): number | null {
-  const qEnt = entradas.reduce((s, e) => s + (e.peso_total || 0), 0)
-  const qPer = entradas.reduce((s, e) => s + (e.perda_kg || 0), 0)
-  const qSai = saidas
-    .filter(s => s.status !== 'Cancelado' && s.status !== 'Devolvido')
-    .reduce((s, x) => s + (x.peso || 0), 0)
+export function diasEstoque(entradas: EntradaFin[], saidas: SaidaFin[], periodo: string): number | null {
+  const entradasPeriodo = noPeriodo(entradas, periodo, e => e.data)
+  const saidasPeriodo = noPeriodo(saidas, periodo, s => s.entrega)
+  const qEnt = entradasPeriodo.reduce((s, e) => s + (e.peso_total || 0), 0)
+  const qPer = entradasPeriodo.reduce((s, e) => s + (e.perda_kg || 0), 0)
+  const saidasValidas = saidasPeriodo.filter(s => s.status !== 'Cancelado' && s.status !== 'Devolvido')
+  const qSai = saidasValidas.reduce((s, x) => s + (x.peso || 0), 0)
   if (qSai <= 0) return null
-  return Math.max(1, Math.round(Math.max(0, qEnt - qPer - qSai) / (qSai / 30)))
+  const dias = diasDoPeriodo(periodo, [...entradasPeriodo.map(e => e.data), ...saidasPeriodo.map(s => s.entrega)])
+  return Math.max(1, Math.round(Math.max(0, qEnt - qPer - qSai) / (qSai / dias)))
 }
 
 /**
@@ -273,38 +337,47 @@ export function diasEstoque(entradas: EntradaFin[], saidas: SaidaFin[]): number 
  *   dias de pagamento ao produtor (data do pagamento − data da entrada) +
  *   dias de estoque (giro real) + dias de recebimento."
  *
- * Fórmula: total = pagamentoProdutor + estoque + recebimento (SOMA).
+ * Fórmula: total = estoque + recebimento − pagamentoProdutor.
  *
- * Isto é uma divergência DELIBERADA do protótipo, sinalizada no relatório
- * de entrega, não uma correção silenciosa: em logica-dashboard.txt linha
- * 35, `cicloDias = cicloEst + cicloReceb - cicloPag` — no espírito do Cash
- * Conversion Cycle clássico, que SUBTRAI os dias que a mercadoria ainda não
- * foi paga ao fornecedor (esse dinheiro ainda não saiu do caixa, então
- * "encurta" o ciclo). Só que lá `cicloPag` é a constante fixa 3
- * ("referência do estudo"), nunca calculada de dado real — exatamente o
- * ponto que o To Do pede para corrigir: computar de verdade a partir de
- * `data_pag − data` de cada entrada paga, e SOMAR (não subtrair) ao total.
- * Este arquivo segue o texto do To Do à risca. Quem revisar os números deve
- * saber que a leitura financeira padrão de CCC subtrairia esse componente;
- * aqui ele soma, por pedido explícito do cliente.
+ * DEFEITO CORRIGIDO (autorizado pelo dono do negócio, 2026-08-22): o texto
+ * do To Do acima diz "somar" os três componentes, e a versão anterior
+ * deste arquivo seguia isso à risca (total = pagamentoProdutor + estoque +
+ * recebimento). Isto é o Ciclo de Conversão de Caixa (CCC), a métrica
+ * padrão — e o CCC clássico SUBTRAI o prazo de pagamento ao fornecedor, não
+ * soma: em logica-dashboard.txt linha 35, `cicloDias = cicloEst + cicloReceb
+ * - cicloPag`, mesma direção. O prazo que o produtor concede TRABALHA A
+ * FAVOR do caixa — se você recebe do minimercado em 14 dias mas só paga o
+ * produtor em 30, é o produtor quem financia seu capital de giro nesse
+ * intervalo. Somando (como a versão anterior fazia), o indicador piorava
+ * justamente quando a negociação com o produtor era boa — o oposto do que
+ * deveria sinalizar. O dono do negócio revisou e confirmou: é erro de
+ * cálculo, não uma divergência deliberada do CCC clássico como o comentário
+ * anterior desta função registrava — a soma era fiel ao texto do To Do
+ * (nunca testada contra a leitura financeira padrão), a subtração é a
+ * correção. Consequência prática: com a fórmula certa, o semáforo de
+ * `statusCicloDeCaixa`/`METAS_DASHBOARD.cicloCaixaMetaDias` (dashboard.ts,
+ * meta ≤13 dias) volta a fazer sentido para este número — ele era calibrado
+ * para a subtração, nunca para a soma — e a tela financeira (FinanceiroTela)
+ * volta a mostrá-lo, em vez da nota "sem meta definida" que existia
+ * enquanto a fórmula estava errada.
  *
  * Cada componente que não puder ser calculado com os dados do período (sem
  * saída entregue e paga, sem entrada paga, ou sem saída para estimar o
  * giro) volta como `null` — nunca 0. Um ciclo de caixa com um componente
  * "zerado" silenciosamente mentiria pra menos; a tela mostra "—" e explica
  * o motivo, em vez de inventar um número. Pelo mesmo motivo, `total` só é
- * calculado quando os três componentes existem — somar um `null` como 0
+ * calculado quando os três componentes existem — usar um `null` como 0
  * distorceria o total do mesmo jeito que um componente zerado distorceria.
  */
 export function calcularCicloCaixa(entradas: EntradaFin[], saidas: SaidaFin[], periodo: string): CicloCaixa {
   const pagamentoProdutor = diasPagamentoProdutor(entradas, periodo)
-  const estoque = diasEstoque(entradas, saidas)
+  const estoque = diasEstoque(entradas, saidas, periodo)
   const recebimento = diasRecebimento(saidas, periodo)
   const completo = pagamentoProdutor !== null && estoque !== null && recebimento !== null
   return {
     pagamentoProdutor,
     estoque,
     recebimento,
-    total: completo ? pagamentoProdutor + estoque + recebimento : null,
+    total: completo ? estoque + recebimento - pagamentoProdutor : null,
   }
 }

@@ -180,6 +180,34 @@ describe('diasRecebimento', () => {
   it('e null (nao zero) quando nao ha dado suficiente no periodo', () => {
     expect(diasRecebimento([], 'all')).toBeNull()
   })
+
+  // DEFEITO 2 (corrigido): o protótipo excluía `recebDias > 0` da média — ou
+  // seja, descartava justamente o recebimento no MESMO DIA da entrega (os
+  // clientes que pagam à vista, os melhores). Efeito: quanto mais gente
+  // pagava rápido, pior ficava o indicador. As duas provas abaixo:
+  it('inclui recebimento no mesmo dia da entrega (0 dias) na media — defeito corrigido', () => {
+    const saidas = [
+      saida({ entrega: '2026-06-01', data_pag: '2026-06-01', status: 'Entregue' }), // 0 dias, deve ENTRAR
+      saida({ entrega: '2026-06-01', data_pag: '2026-06-11', status: 'Entregue' }), // 10 dias
+    ]
+    // media (0+10)/2 = 5. Com o defeito antigo (filtro `> 0`), o 0 seria
+    // descartado e a media seria so 10 — um indicador pior mostrado como
+    // "melhor" (mais dias) exatamente porque um cliente pagou na hora.
+    expect(diasRecebimento(saidas, 'all')).toBe(5)
+  })
+
+  it('nao confunde pagamento no mesmo dia (0) com ausencia de data de pagamento (null)', () => {
+    const saidas = [
+      saida({ entrega: '2026-06-01', data_pag: '2026-06-01', status: 'Entregue' }), // 0 dias, entra
+      saida({ entrega: '2026-06-01', data_pag: null, status: 'Entregue' }), // sem data, fica de fora
+    ]
+    // so o primeiro entra na media (0); o segundo (sem data_pag) nao vira
+    // um zero disfarcado — se virasse, o resultado tambem seria 0 aqui por
+    // coincidencia, mas o teste de "ignora saidas nao pagas" acima ja prova
+    // que um segundo registro SEM data nao afeta a media quando ha outros
+    // valores reais somados a ele.
+    expect(diasRecebimento(saidas, 'all')).toBe(0)
+  })
 })
 
 describe('diasPagamentoProdutor', () => {
@@ -207,55 +235,111 @@ describe('diasPagamentoProdutor', () => {
 })
 
 describe('diasEstoque', () => {
-  it('calcula os dias que o saldo atual duraria no ritmo de saida', () => {
-    // qEnt=1000, qPer=0, qSai=300 -> (1000-300)/(300/30) = 700/10 = 70
-    const entradas = [entrada({ peso_total: 1000, perda_kg: 0 })]
-    const saidas = [saida({ peso: 300, status: 'Entregue' })]
-    expect(diasEstoque(entradas, saidas)).toBe(70)
+  it('calcula os dias que o saldo do periodo duraria no ritmo de saida, usando os dias do mes civil', () => {
+    // periodo '2026-06' (junho, 30 dias): qEnt=1000, qPer=0, qSai=300 ->
+    // (1000-300)/(300/30) = 700/10 = 70
+    const entradas = [entrada({ data: '2026-06-01', peso_total: 1000, perda_kg: 0 })]
+    const saidas = [saida({ entrega: '2026-06-10', peso: 300, status: 'Entregue' })]
+    expect(diasEstoque(entradas, saidas, '2026-06')).toBe(70)
   })
 
   it('desconta perda_kg do cabecalho da entrada', () => {
     // qEnt=1000, qPer=100, qSai=300 -> (900-300)/10 = 60
-    const entradas = [entrada({ peso_total: 1000, perda_kg: 100 })]
-    const saidas = [saida({ peso: 300, status: 'Entregue' })]
-    expect(diasEstoque(entradas, saidas)).toBe(60)
+    const entradas = [entrada({ data: '2026-06-01', peso_total: 1000, perda_kg: 100 })]
+    const saidas = [saida({ entrega: '2026-06-10', peso: 300, status: 'Entregue' })]
+    expect(diasEstoque(entradas, saidas, '2026-06')).toBe(60)
   })
 
   it('ignora saidas canceladas/devolvidas no calculo de qSai', () => {
-    const entradas = [entrada({ peso_total: 1000, perda_kg: 0 })]
+    const entradas = [entrada({ data: '2026-06-01', peso_total: 1000, perda_kg: 0 })]
     const saidas = [
-      saida({ peso: 300, status: 'Entregue' }),
-      saida({ peso: 999, status: 'Cancelado' }),
-      saida({ peso: 999, status: 'Devolvido' }),
+      saida({ entrega: '2026-06-10', peso: 300, status: 'Entregue' }),
+      saida({ entrega: '2026-06-10', peso: 999, status: 'Cancelado' }),
+      saida({ entrega: '2026-06-10', peso: 999, status: 'Devolvido' }),
     ]
-    expect(diasEstoque(entradas, saidas)).toBe(70)
+    expect(diasEstoque(entradas, saidas, '2026-06')).toBe(70)
   })
 
   it('nunca desce abaixo de 1 dia', () => {
-    const entradas = [entrada({ peso_total: 10, perda_kg: 0 })]
-    const saidas = [saida({ peso: 10_000, status: 'Entregue' })]
-    expect(diasEstoque(entradas, saidas)).toBe(1)
+    const entradas = [entrada({ data: '2026-06-01', peso_total: 10, perda_kg: 0 })]
+    const saidas = [saida({ entrega: '2026-06-10', peso: 10_000, status: 'Entregue' })]
+    expect(diasEstoque(entradas, saidas, '2026-06')).toBe(1)
   })
 
   it('e null (nao zero) sem nenhuma saida para estimar o ritmo', () => {
-    expect(diasEstoque([entrada()], [])).toBeNull()
+    expect(diasEstoque([entrada()], [], 'all')).toBeNull()
+  })
+
+  // DEFEITO 3 (corrigido): a versao anterior usava o volume acumulado de
+  // TODO o historico cadastrado, dividido por 30 fixo — com o passar dos
+  // meses o numero deixa de significar "ritmo recente" e encolhe sozinho,
+  // sem nada ter mudado no negocio. As provas abaixo:
+
+  it('usa os dias REAIS do mes selecionado, nao 30 fixo — julho tem 31 dias', () => {
+    // periodo '2026-07' (julho, 31 dias): qEnt=1000, qPer=0, qSai=310 ->
+    // (1000-310)/(310/31) = 690/10 = 69. Com 30 fixo (o defeito antigo)
+    // daria (1000-310)/(310/30) = 690/10.33... = 66.77 -> arredonda 67,
+    // um numero diferente e sem relacao com o calendario real do periodo.
+    const entradas = [entrada({ data: '2026-07-01', peso_total: 1000, perda_kg: 0 })]
+    const saidas = [saida({ entrega: '2026-07-15', peso: 310, status: 'Entregue' })]
+    expect(diasEstoque(entradas, saidas, '2026-07')).toBe(69)
+  })
+
+  it('periodo "all" usa o intervalo real de datas do historico, nao 30 fixo', () => {
+    // entrada em 2026-01-01, saida em 2026-03-31: intervalo real = 90 dias
+    // (89 dias entre as datas + 1). giro = (1000-300)/(300/90) = 700/3.33 = 210.
+    // Com o defeito antigo (fixo /30): (1000-300)/(300/30) = 70 — o bug
+    // subestimava o giro em 3x conforme o historico crescia (o numerador
+    // some pouco, o "/30" ficava cada vez mais errado quanto mais historico
+    // acumulado existisse fora de uma janela recente real).
+    const entradas = [entrada({ data: '2026-01-01', peso_total: 1000, perda_kg: 0 })]
+    const saidas = [saida({ entrega: '2026-03-31', peso: 300, status: 'Entregue' })]
+    expect(diasEstoque(entradas, saidas, 'all')).toBe(210)
+  })
+
+  it('nao soma historico de fora do periodo selecionado (isola por periodo, nao acumula tudo)', () => {
+    // Tres meses de dado: abril, maio e junho. Selecionando so junho, o
+    // resultado deve ser IDENTICO ao de calcular so com os dados de junho —
+    // abril/maio (fora do periodo) nao podem influenciar o numero de junho.
+    // Isso e exatamente o que o defeito antigo quebrava (ele somava tudo,
+    // de todo o historico, independente do periodo pedido).
+    const entradasTodas = [
+      entrada({ id: 'e-abr', data: '2026-04-05', peso_total: 5000, perda_kg: 0 }),
+      entrada({ id: 'e-mai', data: '2026-05-05', peso_total: 5000, perda_kg: 0 }),
+      entrada({ id: 'e-jun', data: '2026-06-01', peso_total: 1000, perda_kg: 0 }),
+    ]
+    const saidasTodas = [
+      saida({ id: 's-abr', entrega: '2026-04-20', peso: 2000, status: 'Entregue' }),
+      saida({ id: 's-mai', entrega: '2026-05-20', peso: 2000, status: 'Entregue' }),
+      saida({ id: 's-jun', entrega: '2026-06-10', peso: 300, status: 'Entregue' }),
+    ]
+    const soJunho = diasEstoque([entradasTodas[2]], [saidasTodas[2]], '2026-06')
+    const comHistoricoExtra = diasEstoque(entradasTodas, saidasTodas, '2026-06')
+    expect(comHistoricoExtra).toBe(soJunho)
+    expect(comHistoricoExtra).toBe(70) // (1000-300)/(300/30)
   })
 })
 
-describe('calcularCicloCaixa — formula completa do To Do (soma, nao CCC classico)', () => {
-  it('soma os tres componentes quando todos sao calculaveis', () => {
+describe('calcularCicloCaixa — CCC padrao (subtrai pagamentoProdutor, defeito corrigido)', () => {
+  it('estoque + recebimento - pagamentoProdutor, quando os tres sao calculaveis', () => {
     const entradas = [
-      entrada({ data: '2026-06-01', data_pag: '2026-06-04', pago: 'Pago', peso_total: 1000, perda_kg: 0 }),
+      entrada({ data: '2026-05-01', data_pag: '2026-05-04', pago: 'Pago', peso_total: 1000, perda_kg: 0 }),
     ]
     const saidas = [
-      saida({ entrega: '2026-06-01', data_pag: '2026-06-13', status: 'Entregue', peso: 300 }),
+      saida({ entrega: '2026-05-30', data_pag: '2026-06-11', status: 'Entregue', peso: 300 }),
     ]
     const ciclo = calcularCicloCaixa(entradas, saidas, 'all')
-    // pagamentoProdutor = 3, estoque = (1000-300)/(300/30) = 70, recebimento = 12
+    // pagamentoProdutor = 3 (entrada->pagamento). estoque = (1000-300)/(300/30)
+    // = 70 (30 dias = intervalo real entre a entrada mais antiga e a saida
+    // mais recente, periodo 'all'). recebimento = 12 (entrega->pagamento).
     expect(ciclo.pagamentoProdutor).toBe(3)
     expect(ciclo.estoque).toBe(70)
     expect(ciclo.recebimento).toBe(12)
-    expect(ciclo.total).toBe(85) // soma, nao subtracao
+    // DEFEITO 1 (corrigido): total = 70 + 12 - 3 = 79 (CCC padrao, subtrai o
+    // prazo do produtor porque ele financia o caixa). A formula antiga
+    // (fiel ao texto do To Do, "somar os tres") daria 70+12+3 = 85 — o
+    // numero ERRADO que a versao anterior deste arquivo produzia.
+    expect(ciclo.total).toBe(79)
   })
 
   it('total e null quando falta qualquer componente (nao assume zero)', () => {

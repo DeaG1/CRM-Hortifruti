@@ -9,6 +9,8 @@ import {
   type Resultado,
   type CicloCaixa,
 } from '../derive/financeiro'
+import { METAS_DASHBOARD, statusCicloDeCaixa } from '../derive/dashboard'
+import type { Health } from '../derive/clientes'
 import type { Lancamento } from '../derive/lancamentos'
 import { LancamentosLista } from './LancamentosLista'
 import './FinanceiroTela.css'
@@ -25,6 +27,12 @@ import './FinanceiroTela.css'
 const RED = '#c2502f'
 const AMBER = '#c79320'
 const GREEN = '#3f8f5b'
+const NEUTRO = '#6a685c'
+
+/** Mesmas cores do semáforo do Painel de Indicadores (DashboardTela) — os
+ * valores em si (verde/âmbar/vermelho) não são repetidos ali nem aqui além
+ * desta constante; `Health` (derive/clientes.ts) é o mesmo tipo usado lá. */
+const CORES_SEMAFORO: Record<Health, string> = { green: GREEN, amber: AMBER, red: RED }
 
 const money = (n: number) => 'R$ ' + Math.round(n).toLocaleString('pt-BR')
 
@@ -204,7 +212,29 @@ function LucroDestaque({ resultado, label }: { resultado: Resultado; label: stri
  * (pagamento ao produtor, giro de estoque, recebimento): o dono do negócio
  * precisa ver de onde o número veio, não só o total. Quando um componente
  * não é calculável no período, aparece "—" com o motivo — nunca 0 embutido
- * silenciosamente na soma.
+ * silenciosamente no total.
+ *
+ * SEMÁFORO RESTAURADO (defeito 1 corrigido, autorizado pelo dono do
+ * negócio): esta tela chegou a mostrar o total sem cor e sem meta, com uma
+ * nota explicando que "a meta ≤13 dias valia para o cálculo antigo" — isso
+ * porque, na época, a fórmula ainda somava pagamentoProdutor em vez de
+ * subtrair (ver calcularCicloCaixa em derive/financeiro.ts), e a meta do
+ * estudo (METAS_DASHBOARD.cicloCaixaMetaDias, calibrada para a SUBTRAÇÃO,
+ * o CCC padrão) não fazia sentido pra soma. Com a fórmula corrigida, a meta
+ * volta a se aplicar e o semáforo (statusCicloDeCaixa, mesma classificação
+ * do Painel de Indicadores) volta a colorir o total — em vez de reimportar
+ * as METAS/status daqui como números soltos, que é exatamente o tipo de
+ * duplicação que o comentário de METAS_DASHBOARD (dashboard.ts) pede pra
+ * evitar.
+ *
+ * A antiga barra empilhada (proporção de cada componente sobre o total) foi
+ * removida: ela só fazia sentido quando os três valores eram somados (a
+ * largura de cada segmento, em % do total, sempre batia 100%). Sob
+ * subtração, pagamentoProdutor REDUZ o total em vez de compor com ele —
+ * uma barra "empilhada" desenharia esse componente como se estivesse
+ * somando, o oposto do que a fórmula faz. Os três valores continuam
+ * visíveis, com nome e dias, na lista de componentes abaixo — o que o dono
+ * do negócio pediu (ver de onde o número vem) não depende dessa barra.
  */
 function CicloCaixaCard({ ciclo }: { ciclo: CicloCaixa }) {
   const componentes: { chave: keyof CicloCaixa; rotulo: string; cor: string; motivo: string }[] = [
@@ -222,15 +252,21 @@ function CicloCaixaCard({ ciclo }: { ciclo: CicloCaixa }) {
     },
   ]
 
+  const status = ciclo.total !== null ? statusCicloDeCaixa(ciclo.total) : null
+  const corTotal = status ? CORES_SEMAFORO[status] : NEUTRO
+  const tagTexto = status === 'green' ? 'na meta' : status === 'amber' ? 'atenção' : status === 'red' ? 'fora da meta' : null
+
   return (
     <div className="financeiro-card">
       <div className="financeiro-ciclo-cabecalho">
         <h3 className="financeiro-card-titulo">Ciclo de caixa</h3>
-        <span className="financeiro-mono financeiro-ciclo-total">{diasTxt(ciclo.total)}</span>
+        <span className="financeiro-mono financeiro-ciclo-total" style={{ color: corTotal }}>
+          {diasTxt(ciclo.total)}
+        </span>
       </div>
       <div className="financeiro-card-legenda">
-        Soma dos três trechos em que o dinheiro fica fora do caixa: quanto se leva para pagar o produtor, quanto
-        tempo a mercadoria fica em estoque, e quanto se leva para receber do cliente.
+        Giro de estoque + recebimento − pagamento ao produtor: o prazo que o produtor concede trabalha a favor do
+        caixa, por isso é subtraído (Ciclo de Conversão de Caixa padrão), não somado.
       </div>
 
       <div className="financeiro-ciclo-componentes">
@@ -249,28 +285,16 @@ function CicloCaixaCard({ ciclo }: { ciclo: CicloCaixa }) {
         })}
       </div>
 
-      {ciclo.total !== null && (
-        <div className="financeiro-ciclo-barra">
-          {componentes.map(c => {
-            const valor = ciclo[c.chave] as number
-            const largura = (valor / (ciclo.total as number)) * 100
-            return (
-              <div
-                key={c.chave}
-                className="financeiro-ciclo-barra-segmento"
-                style={{ width: `${largura}%`, background: c.cor }}
-              >
-                {valor}d
-              </div>
-            )
-          })}
+      {tagTexto && (
+        <div className="financeiro-ciclo-tag" style={{ color: corTotal }}>
+          {tagTexto} · meta ≤ {METAS_DASHBOARD.cicloCaixaMetaDias} dias (âmbar até {METAS_DASHBOARD.cicloCaixaAmbarAteDias})
         </div>
       )}
 
       <div className="financeiro-ciclo-formula">
-        Ciclo de caixa = pagamento ao produtor + giro de estoque + recebimento (soma dos três — item do To Do do
-        cliente). Sem meta definida para esta fórmula ainda: a meta "≤ 13 dias" do protótipo valia para o cálculo
-        antigo, que só considerava recebimento e subtraía um prazo fixo de pagamento ao produtor.
+        Ciclo de caixa = giro de estoque + recebimento − pagamento ao produtor (CCC padrão). Se você recebe do
+        minimercado antes de pagar o produtor, é o produtor quem financia seu capital de giro nesse intervalo — por
+        isso o prazo dele reduz o ciclo, em vez de somar.
       </div>
     </div>
   )

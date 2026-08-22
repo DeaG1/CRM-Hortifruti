@@ -514,3 +514,32 @@ describe('cenariosDeResultado', () => {
     expect(real.larguraBarraPct).toBe(0) // max(0,-200)=0
   })
 })
+
+describe('indiceDePerdas reconcilia perda de coleta', () => {
+  // O total no cabecalho da entrada e a soma das perdas dos itens sao o mesmo
+  // evento em duas granularidades (o prototipo recalcula o cabecalho a partir
+  // dos itens ao salvar). Somar os dois desconta em dobro; usar so o cabecalho
+  // ignora o detalhe quando ele e maior. A regra e o maior dos dois, e ela
+  // precisa bater com estoque e relatorios — dois indicadores que deveriam
+  // coincidir e nao coincidem sao piores que um indicador ausente.
+  const entrada = (perda_kg: number, perda_itens_qtd: number) => ({
+    id: 'e1', data: '2026-06-01', pago: 'Pago' as const, data_pag: '2026-06-02',
+    perda_kg, perda_itens_qtd, valor_total: 1000, peso_total: 1000,
+  })
+
+  it('usa o cabecalho quando ele e maior que a soma dos itens', () => {
+    const r = indiceDePerdas([entrada(100, 40)], [])
+    expect(r.disponivel && r.valor).toBeCloseTo(10)
+  })
+
+  it('usa a soma dos itens quando ela e maior que o cabecalho', () => {
+    const r = indiceDePerdas([entrada(40, 100)], [])
+    expect(r.disponivel && r.valor).toBeCloseTo(10)
+  })
+
+  it('nao soma os dois (evita descontar a mesma perda duas vezes)', () => {
+    const r = indiceDePerdas([entrada(100, 100)], [])
+    // somando daria 20%; o correto e 10%
+    expect(r.disponivel && r.valor).toBeCloseTo(10)
+  })
+})

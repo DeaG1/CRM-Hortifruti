@@ -85,7 +85,13 @@ export interface EntradaResumo {
  * basta — ver o comentário grande em buscarEstoque (estoque.ts) para o
  * raciocínio completo por trás da regra.
  */
-export function perdaColetaEfetiva(en: Pick<EntradaResumo, 'perda_kg' | 'perda_itens_qtd'>): number {
+export function perdaColetaEfetiva(
+  // Campos opcionais de proposito: a API sempre envia os dois, mas fixtures de
+  // teste montam entradas parciais, e o `|| 0` abaixo ja trata ausencia. Exigir
+  // ambos obrigaria a reescrever dezenas de fixtures sem ganho de correcao —
+  // ausente e zero produzem o mesmo resultado nesta conta.
+  en: { perda_kg?: number; perda_itens_qtd?: number },
+): number {
   return Math.max(en.perda_kg || 0, en.perda_itens_qtd || 0)
 }
 

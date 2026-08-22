@@ -1,7 +1,7 @@
 import type { Cliente, Health } from './clientes'
 import type { Lancamento } from './lancamentos'
 import { diasEstoque, calcularCicloCaixa } from './financeiro'
-import { derivarRelatorioProdutos, type ProdutoAgregado } from './relatorios'
+import { derivarRelatorioProdutos, type ProdutoAgregado, perdaColetaEfetiva } from './relatorios'
 
 /**
  * Formas mínimas de Saida/Entrada/Perda como a API devolve (ver
@@ -46,6 +46,15 @@ export interface Entrada {
   pago: 'Pago' | 'Pendente' | 'Atrasado'
   data_pag: string | null
   perda_kg: number
+  /** Soma de `entrada_itens.perda_kg`, que GET /api/entradas devolve ao lado
+   * do total do cabecalho. Os dois sao o MESMO evento de perda em
+   * granularidades diferentes — ver perdaColetaEfetiva em derive/relatorios.ts.
+   *
+   * Opcional de proposito: a API sempre envia, mas os testes montam entradas
+   * parciais, e `perdaColetaEfetiva` ja trata ausencia como zero. Exigir o
+   * campo aqui obrigaria a reescrever dezenas de fixtures sem ganho de
+   * correcao — o valor ausente e indistinguivel de zero para esta conta. */
+  perda_itens_qtd?: number
   valor_total: number
   peso_total: number
 }
@@ -171,7 +180,14 @@ export function percentualLucro(receita: Indicador, lucro: Indicador): Indicador
 export function indiceDePerdas(entradas: Entrada[], perdas: Perda[]): Indicador {
   const kgRecebido = entradas.reduce((s, en) => s + (en.peso_total || 0), 0)
   if (kgRecebido === 0) return indisponivel('sem compras (entradas) registradas')
-  const perdaEntradas = entradas.reduce((s, en) => s + (en.perda_kg || 0), 0)
+  // perdaColetaEfetiva, e nao `en.perda_kg` cru: o total no cabecalho da
+  // entrada e a soma das perdas dos itens sao o MESMO evento em duas
+  // granularidades — o prototipo recalcula o cabecalho a partir dos itens ao
+  // salvar (design/CRM Hortifruti.dc.html:2037). Usar o campo cru aqui, com o
+  // estoque e os relatorios ja reconciliando, faria o indice de perdas do
+  // painel divergir do numero das outras telas — e nada e pior num painel do
+  // que dois indicadores que deveriam bater e nao batem.
+  const perdaEntradas = entradas.reduce((s, en) => s + perdaColetaEfetiva(en), 0)
   const perdaDeposito = perdas.reduce((s, p) => s + (p.qtd || 0), 0)
   return disponivel(((perdaEntradas + perdaDeposito) / kgRecebido) * 100)
 }

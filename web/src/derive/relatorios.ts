@@ -47,17 +47,46 @@ export interface SaidaResumo {
 
 /** Cabeçalho de uma entrada (compra), como GET /api/entradas devolve — ver
  * api/src/routes/entradas.ts (paraJsonLista). `valor_total`/`peso_total`
- * são os totais agregados dos itens. */
+ * são os totais agregados dos itens.
+ *
+ * `perda_kg` (cabeçalho) e `perda_itens_qtd` (soma de entrada_itens.perda_kg
+ * dessa entrada) descrevem o MESMO evento de perda na coleta em duas
+ * granularidades — nunca dois números independentes a somar. Ver
+ * perdaColetaEfetiva() logo abaixo e o comentário grande em
+ * api/src/routes/estoque.ts (buscarEstoque) para a evidência e o raciocínio
+ * completo (o protótipo recalcula o cabeçalho a partir dos itens ao salvar
+ * a entrada; a API portada não reproduz esse recálculo, então os dois
+ * campos podem divergir na prática). */
 export interface EntradaResumo {
   numero: string
   fornecedor_id: string | null
   data: string
   perda_kg: number
+  /** Soma de entrada_itens.perda_kg desta entrada — ver perdaColetaEfetiva(). */
+  perda_itens_qtd: number
   motivo: string
   pago: 'Pago' | 'Pendente' | 'Atrasado'
   data_pag: string | null
   valor_total: number
   peso_total: number
+}
+
+/**
+ * A perda de coleta "de verdade" de uma entrada: o MAIOR entre o cabeçalho
+ * (perda_kg) e a soma dos itens dela (perda_itens_qtd), nunca a soma dos
+ * dois — somar contaria a mesma perda duas vezes sempre que os dois campos
+ * descreverem o mesmo evento (o caso normal, fiel ao protótipo). Usada
+ * pelos relatórios que agrupam por uma dimensão do CABEÇALHO da entrada
+ * (fornecedor, motivo) — diferente de api/src/routes/relatorios.ts e
+ * api/src/routes/estoque.ts, que agrupam por PRODUTO e por isso, quando o
+ * cabeçalho excede a soma dos itens, precisam ratear a diferença
+ * proporcionalmente (o cabeçalho não tem produto_id próprio); aqui a
+ * entrada inteira já É a unidade de agregação, então o máximo simples
+ * basta — ver o comentário grande em buscarEstoque (estoque.ts) para o
+ * raciocínio completo por trás da regra.
+ */
+export function perdaColetaEfetiva(en: Pick<EntradaResumo, 'perda_kg' | 'perda_itens_qtd'>): number {
+  return Math.max(en.perda_kg || 0, en.perda_itens_qtd || 0)
 }
 
 /** Perda de depósito (pós-entrada), como GET /api/perdas devolve — ver
@@ -451,6 +480,11 @@ export interface RelatorioComprasTotais {
  * Porta o bloco `relCompras`/`relComprasTot` (linhas 2650-2673 do
  * protótipo). Mesma troca nome->id de derivarRelatorioClientes, aqui para
  * fornecedor.
+ *
+ * A perda por fornecedor usa perdaColetaEfetiva(en) (máximo entre cabeçalho
+ * e soma dos itens da entrada), não `en.perda_kg` cru — ver o comentário em
+ * EntradaResumo/perdaColetaEfetiva, acima: os dois campos descrevem o mesmo
+ * evento de perda, somar contaria em dobro.
  */
 export function derivarRelatorioCompras(
   fornecedores: Fornecedor[],
@@ -468,7 +502,7 @@ export function derivarRelatorioCompras(
     o.coletas++
     o.qtd += en.peso_total || 0
     o.valor += en.valor_total || 0
-    o.perda += en.perda_kg || 0
+    o.perda += perdaColetaEfetiva(en)
     if (en.pago !== 'Pago') o.aPagar += en.valor_total || 0
     agg.set(k, o)
   })
@@ -491,7 +525,7 @@ export function derivarRelatorioCompras(
   }).sort((a, b) => b.valor - a.valor)
 
   const compradoQtd = doPeriodo.reduce((s, e) => s + (e.peso_total || 0), 0)
-  const perdaQtd = doPeriodo.reduce((s, e) => s + (e.perda_kg || 0), 0)
+  const perdaQtd = doPeriodo.reduce((s, e) => s + perdaColetaEfetiva(e), 0)
 
   return {
     linhas,
@@ -617,12 +651,21 @@ export interface RelatorioPerdasTotais {
  * Porta o bloco `relPerdaMotivos`/`relPerdaProdutos`/`relPerdasTot` (linhas
  * 2700-2715 do protótipo).
  *
- * "Por motivo" usa só CABEÇALHO de entrada (motivo + perda_kg) e a lista de
- * perdas de depósito — nenhum item, por isso não depende do endpoint
- * agregado. "Por produto" reaproveita a saída de derivarRelatorioProdutos
- * (`produtosView`, já filtrada pelo mesmo período) em vez de recalcular —
- * mesma fonte que alimenta a aba Produtos, evitando pedir o agregado duas
- * vezes ou duas contas divergirem.
+ * "Por motivo" usa CABEÇALHO de entrada (motivo + perdaColetaEfetiva) e a
+ * lista de perdas de depósito — não busca os itens de cada entrada
+ * individualmente, só o total já resolvido em perda_itens_qtd (GET
+ * /api/entradas já devolve pronto, ver EntradaResumo/entradas.ts), por isso
+ * não depende do endpoint agregado (relatorios/produtos). "Por produto"
+ * reaproveita a saída de derivarRelatorioProdutos (`produtosView`, já
+ * filtrada pelo mesmo período) em vez de recalcular — mesma fonte que
+ * alimenta a aba Produtos, evitando pedir o agregado duas vezes ou duas
+ * contas divergirem.
+ *
+ * A perda de cada entrada usa perdaColetaEfetiva(en) (máximo entre
+ * cabeçalho e soma dos itens), não `en.perda_kg` cru — mesmo raciocínio de
+ * derivarRelatorioCompras (ver comentário em EntradaResumo/
+ * perdaColetaEfetiva, acima): cabeçalho e soma dos itens descrevem o mesmo
+ * evento de perda, somar contaria em dobro.
  */
 export function derivarRelatorioPerdas(
   entradas: EntradaResumo[],
@@ -638,8 +681,9 @@ export function derivarRelatorioPerdas(
   entradasPeriodo.forEach(en => {
     const m = (en.motivo && en.motivo !== '—') ? en.motivo : 'não informado'
     const o = agg.get(m) ?? { qtd: 0, ocor: 0 }
-    o.qtd += en.perda_kg || 0
-    if ((en.perda_kg || 0) > 0) o.ocor++
+    const perda = perdaColetaEfetiva(en)
+    o.qtd += perda
+    if (perda > 0) o.ocor++
     agg.set(m, o)
   })
   perdasPeriodo.forEach(pe => {
@@ -667,7 +711,7 @@ export function derivarRelatorioPerdas(
     .map(p => ({ nome: p.nome, compradoQtd: p.compradoQtd, perdaPct: p.perdaPct }))
 
   const entKgTot = entradasPeriodo.reduce((s, e) => s + (e.peso_total || 0), 0)
-  const entPerdaTot = entradasPeriodo.reduce((s, e) => s + (e.perda_kg || 0), 0)
+  const entPerdaTot = entradasPeriodo.reduce((s, e) => s + perdaColetaEfetiva(e), 0)
     + perdasPeriodo.reduce((s, p) => s + (p.qtd || 0), 0)
 
   return {

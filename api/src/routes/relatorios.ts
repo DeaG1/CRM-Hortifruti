@@ -27,11 +27,24 @@ import { exigirSessao, exigirAdmin, type Vars } from '../middleware/sessao'
  * rota), que já devolve o consolidado por produto — compra_qtd/compra_valor
  * de entrada_itens, venda_qtd/venda_valor de saida_itens (só pedidos
  * Entregues, mesmo filtro que o relatório de clientes usa para "faturado"),
- * mais a perda de coleta (entrada_itens.perda_kg) e de depósito (perdas.qtd).
+ * mais a perda de coleta e de depósito (perdas.qtd).
  * `de`/`ate` (opcionais, 'AAAA-MM') filtram cada subconsulta pela data do
  * documento pai — mesmo intervalo usado nos outros seis relatórios
  * (noPeriodo em derive/relatorios.ts), só que calculado em SQL em vez de em
  * memória, porque aqui a soma que ele filtra também está em SQL.
+ *
+ * perda_coleta_qtd usa a MESMA regra de api/src/routes/estoque.ts
+ * (buscarEstoque, CTEs entrada_totais/ent — ver o comentário grande lá para
+ * o raciocínio completo): por entrada, o maior entre o cabeçalho
+ * (entradas.perda_kg) e a soma dos itens dela, nunca a soma dos dois — os
+ * dois campos descrevem o MESMO evento de perda na coleta (evidência: o
+ * protótipo recalcula o cabeçalho a partir dos itens ao salvar, ver
+ * logica-estoque/estoque.ts), só que em granularidades diferentes. Quando o
+ * cabeçalho excede a soma dos itens, a diferença é rateada proporcional ao
+ * peso (qtd) de cada item, porque o cabeçalho não tem produto_id próprio.
+ * Isto existe pra este número BATER com o que a tela de Estoque mostra —
+ * antes da correção, os dois já divergiam (aqui só via itens, sem olhar o
+ * cabeçalho; lá nem um nem outro).
  */
 const PERIODO_RE = /^\d{4}-\d{2}$/
 
@@ -76,9 +89,28 @@ relatorios.get('/produtos', async (c) => {
       select ei.produto_id,
              sum(ei.qtd) as qtd,
              sum(ei.qtd * ei.preco) as valor,
-             sum(ei.perda_kg) as perda_kg
+             -- Mesma regra de buscarEstoque (api/src/routes/estoque.ts): a
+             -- perda do item, mais — so quando o cabecalho da entrada excede
+             -- a soma dos itens dela — a fatia proporcional ao peso (qtd)
+             -- desse item na diferenca. 'et' (subconsulta logo abaixo) nao
+             -- filtra por periodo de proposito: e o total da entrada
+             -- INTEIRA, usado so pra comparar com o cabecalho dela, nao pra
+             -- decidir o que entra no relatorio (isso quem decide e o
+             -- 'where' mais abaixo, sobre e.data).
+             sum(
+               ei.perda_kg + case
+                 when et.qtd_itens > 0
+                   then (greatest(e.perda_kg, et.perda_itens) - et.perda_itens) * ei.qtd / et.qtd_itens
+                 else 0
+               end
+             ) as perda_kg
       from entrada_itens ei
       join entradas e on e.id = ei.entrada_id
+      join (
+        select entrada_id, sum(perda_kg) as perda_itens, sum(qtd) as qtd_itens
+        from entrada_itens
+        group by entrada_id
+      ) et on et.entrada_id = ei.entrada_id
       where (${deVal}::text is null or to_char(e.data, 'YYYY-MM') >= ${deVal})
         and (${ateVal}::text is null or to_char(e.data, 'YYYY-MM') <= ${ateVal})
       group by ei.produto_id

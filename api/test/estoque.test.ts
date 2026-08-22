@@ -49,10 +49,19 @@ async function criarProduto(
 
 type ItemEntrada = { produto_id: string; un?: string; qtd: number; preco?: number; perda_kg?: number }
 
-async function criarEntrada(tenantId: string, itens: ItemEntrada[]): Promise<string> {
+/**
+ * `opts.perda_kg`: perda no CABECALHO da entrada (entradas.perda_kg,
+ * distinta de `it.perda_kg` em cada item) — opcional, default 0 (mesmo
+ * default do banco), pra nao quebrar os testes que ja existiam antes da
+ * correcao de dupla contagem (ver comentario em buscarEstoque/estoque.ts).
+ */
+async function criarEntrada(
+  tenantId: string, itens: ItemEntrada[], opts: { perda_kg?: number } = {},
+): Promise<string> {
   seq += 1
   const [e] = await withTenant(sql, tenantId, tx => tx`
-    insert into entradas (tenant_id, numero, data) values (${tenantId}, ${'E-' + seq}, '2026-08-01')
+    insert into entradas (tenant_id, numero, data, perda_kg)
+    values (${tenantId}, ${'E-' + seq}, '2026-08-01', ${opts.perda_kg ?? 0})
     returning id`)
   for (const it of itens) {
     await withTenant(sql, tenantId, tx => tx`
@@ -68,7 +77,7 @@ async function criarPerda(tenantId: string, produtoId: string, qtd: number, un =
     values (${tenantId}, '2026-08-02', ${produtoId}, ${un}, ${qtd})`)
 }
 
-type ItemSaida = { produto_id: string; un?: string; qtd: number; preco?: number }
+type ItemSaida = { produto_id: string; un?: string; qtd: number; preco?: number; perda_kg?: number }
 
 async function criarSaida(tenantId: string, status: string, itens: ItemSaida[]): Promise<string> {
   seq += 1
@@ -78,8 +87,8 @@ async function criarSaida(tenantId: string, status: string, itens: ItemSaida[]):
     returning id`)
   for (const it of itens) {
     await withTenant(sql, tenantId, tx => tx`
-      insert into saida_itens (tenant_id, saida_id, produto_id, un, qtd, preco)
-      values (${tenantId}, ${s.id}, ${it.produto_id}, ${it.un ?? 'KG'}, ${it.qtd}, ${it.preco ?? 2})`)
+      insert into saida_itens (tenant_id, saida_id, produto_id, un, qtd, preco, perda_kg)
+      values (${tenantId}, ${s.id}, ${it.produto_id}, ${it.un ?? 'KG'}, ${it.qtd}, ${it.preco ?? 2}, ${it.perda_kg ?? 0})`)
   }
   return s.id as string
 }
@@ -173,5 +182,106 @@ describe('buscarEstoque', () => {
     expect(Number(linha!.entrou)).toBe(0)
     expect(Number(linha!.perda)).toBe(3)
     expect(Number(linha!.saiu)).toBe(0)
+  })
+
+  // ---- correcao autorizada pelo cliente: as duas perdas que o prototipo
+  // nunca descontava (entradas.perda_kg no cabecalho, saida_itens.perda_kg)
+  // — ver o comentario grande em buscarEstoque/estoque.ts para o raciocinio
+  // completo, inclusive por que coleta usa MAX em vez de SOMA.
+
+  it('perda no cabecalho da entrada (entradas.perda_kg) desconta do saldo quando os itens nao cobrem o total', async () => {
+    const produtoId = await criarProduto(tenantA, 'Manga Cabecalho')
+    // cabecalho=8, item nao registra nenhuma perda propria: os 8kg do
+    // cabecalho sao uma perda real (de transporte) que os itens ainda nao
+    // mostram, e o unico item da entrada fica com a totalidade dela.
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 100, perda_kg: 0 }], { perda_kg: 8 })
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const linha = linhas.find(l => l.produto_id === produtoId)!
+    expect(Number(linha.entrou)).toBe(100)
+    expect(Number(linha.perda)).toBe(8)
+    const saldo = Number(linha.entrou) - Number(linha.perda) - Number(linha.saiu)
+    expect(saldo).toBe(92)
+  })
+
+  it('dupla contagem: cabecalho igual a soma dos itens NAO soma os dois (usa o maior, nao a soma)', async () => {
+    const produtoA = await criarProduto(tenantA, 'Batata Dupla Contagem')
+    const produtoB = await criarProduto(tenantA, 'Cebola Dupla Contagem')
+    // Mesmo padrao do prototipo (saveDraft): cabecalho == soma dos itens
+    // (85 + 55 = 140) — as DUAS colunas descrevem o MESMO evento de perda,
+    // so em granularidades diferentes. Somar daria 280 (perda inflada,
+    // saldo menor que a realidade); a correcao usa 140.
+    await criarEntrada(tenantA, [
+      { produto_id: produtoA, qtd: 1500, perda_kg: 85 },
+      { produto_id: produtoB, qtd: 750, perda_kg: 55 },
+    ], { perda_kg: 140 })
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const linhaA = linhas.find(l => l.produto_id === produtoA)!
+    const linhaB = linhas.find(l => l.produto_id === produtoB)!
+    // Cabecalho nao acrescenta nada: cada item fica exatamente com a perda
+    // que ele mesmo registrou.
+    expect(Number(linhaA.perda)).toBe(85)
+    expect(Number(linhaB.perda)).toBe(55)
+    // E o total bate com o cabecalho (140), nunca com a soma dos dois (280).
+    expect(Number(linhaA.perda) + Number(linhaB.perda)).toBe(140)
+  })
+
+  it('cabecalho maior que a soma dos itens: a diferenca e rateada proporcional ao peso (qtd) de cada item', async () => {
+    const produtoA = await criarProduto(tenantA, 'Alface Rateio')
+    const produtoB = await criarProduto(tenantA, 'Tomate Rateio')
+    // Nenhum item registrou perda propria, so o cabecalho (200kg) — o caso
+    // mais provavel no dia a dia (colaborador so preenche o total do
+    // transporte, sem detalhar por produto). Qtd total = 2000 (1500+500);
+    // produtoA leva 75% do peso, produtoB 25%.
+    await criarEntrada(tenantA, [
+      { produto_id: produtoA, qtd: 1500, perda_kg: 0 },
+      { produto_id: produtoB, qtd: 500, perda_kg: 0 },
+    ], { perda_kg: 200 })
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const linhaA = linhas.find(l => l.produto_id === produtoA)!
+    const linhaB = linhas.find(l => l.produto_id === produtoB)!
+    expect(Number(linhaA.perda)).toBe(150) // 200 * 1500/2000
+    expect(Number(linhaB.perda)).toBe(50)  // 200 * 500/2000
+    expect(Number(linhaA.perda) + Number(linhaB.perda)).toBe(200)
+  })
+
+  it('entrada com todos os itens em qtd=0 nao quebra o rateio (divisao por zero evitada)', async () => {
+    const produtoId = await criarProduto(tenantA, 'Zero Qtd')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 0, perda_kg: 0 }], { perda_kg: 50 })
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const linha = linhas.find(l => l.produto_id === produtoId)!
+    // Sem peso nenhum pra ratear, o excedente do cabecalho fica sem
+    // atribuicao (limitacao documentada em buscarEstoque) — o importante
+    // aqui e nao lancar erro de divisao por zero.
+    expect(Number(linha.perda)).toBe(0)
+  })
+
+  it('perda no item da saida (saida_itens.perda_kg) desconta do saldo, alem da qtd que saiu', async () => {
+    const produtoId = await criarProduto(tenantA, 'Manga Entrega')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 100 }])
+    // qtd=20 chegou ao cliente (faturado), perda_kg=5 saiu do deposito mas
+    // nao chegou — as duas juntas saem do deposito, nao so a qtd.
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, qtd: 20, perda_kg: 5 }])
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const linha = linhas.find(l => l.produto_id === produtoId)!
+    expect(Number(linha.saiu)).toBe(20)
+    expect(Number(linha.perda)).toBe(5)
+    const saldo = Number(linha.entrou) - Number(linha.perda) - Number(linha.saiu)
+    expect(saldo).toBe(75) // 100 - 5 - 20
+  })
+
+  it('perda no item de uma saida Cancelada/Devolvida nao conta (mesmo filtro de status do "saiu")', async () => {
+    const produtoId = await criarProduto(tenantA, 'Manga Cancelada')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 100 }])
+    await criarSaida(tenantA, 'Cancelado', [{ produto_id: produtoId, qtd: 999, perda_kg: 999 }])
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const linha = linhas.find(l => l.produto_id === produtoId)!
+    expect(Number(linha.saiu)).toBe(0)
+    expect(Number(linha.perda)).toBe(0)
   })
 })

@@ -303,6 +303,26 @@ describe('conversao numerica (paraJson)', () => {
     expect(linha.valor_total).toBe(40)
     expect(linha.peso_total).toBe(15)
   })
+
+  it('GET / devolve perda_itens_qtd (soma do perda_kg dos itens, separado do perda_kg do cabecalho)', async () => {
+    const res = await pedir('/api/entradas', comoAdmin(json({
+      numero: 'NUM-PERDA-ITENS', data: '2026-01-10', perda_kg: 3,
+      itens: [umItem({ qtd: 10, preco: 2, perda_kg: 1.5 }), umItem({ qtd: 5, preco: 4, perda_kg: 0.5 })],
+    })))
+    const criado = await res.json()
+
+    const resLista = await pedir('/api/entradas', comoAdmin())
+    const lista = await resLista.json()
+    const linha = lista.find((e: { id: string }) => e.id === criado.id)
+    expect(linha).toBeDefined()
+    expect(typeof linha.perda_itens_qtd).toBe('number')
+    // cabecalho (perda_kg=3) e a soma dos itens (perda_itens_qtd=2) sao
+    // numeros INDEPENDENTES nesta rota — cada um convertido do seu jeito,
+    // sem nenhum recalculo entre os dois (quem decide o que fazer com essa
+    // divergencia sao os relatorios/estoque, nao esta rota).
+    expect(linha.perda_kg).toBe(3)
+    expect(linha.perda_itens_qtd).toBe(2)
+  })
 })
 
 describe('ciclo CRUD completo (com itens)', () => {

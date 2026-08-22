@@ -48,7 +48,8 @@ function paraJsonItem<T extends Record<string, unknown>>(linha: T) {
 
 /**
  * Para a listagem (GET /): a linha vem de uma agregacao (sum sobre os
- * itens), entao alem de perda_kg tambem converte valor_total/peso_total.
+ * itens), entao alem de perda_kg tambem converte valor_total/peso_total e
+ * perda_itens_qtd.
  */
 function paraJsonLista<T extends Record<string, unknown>>(linha: T) {
   const { tenant_id: _tenantId, ...resto } = linha
@@ -57,6 +58,7 @@ function paraJsonLista<T extends Record<string, unknown>>(linha: T) {
     perda_kg: Number(linha.perda_kg ?? 0),
     valor_total: Number(linha.valor_total ?? 0),
     peso_total: Number(linha.peso_total ?? 0),
+    perda_itens_qtd: Number(linha.perda_itens_qtd ?? 0),
   }
 }
 
@@ -238,10 +240,24 @@ entradas.use('*', exigirSessao)
 entradas.get('/', async (c) => {
   // Cabecalhos com totais agregados dos itens, sem trazer os itens em si —
   // a lista tem dezenas de linhas e nao precisa deles (GET /:id traz).
+  //
+  // perda_itens_qtd (sum(i.perda_kg), separado de e.perda_kg que ja vem em
+  // e.*): existe pra quem consome esta listagem poder decidir se o
+  // cabecalho da entrada esta trazendo perda NOVA ou so repetindo o que os
+  // itens ja mostram, sem precisar buscar os itens a parte. E a mesma
+  // pergunta que api/src/routes/estoque.ts (buscarEstoque) resolve por
+  // produto — aqui e o mesmo dado, cru, por entrada inteira, pra
+  // web/src/derive/relatorios.ts (derivarRelatorioCompras/derivarRelatorio-
+  // Perdas) poderem aplicar a mesma regra de "usar o maior, nao somar os
+  // dois" nos relatorios que agrupam por fornecedor/motivo (dimensoes do
+  // CABECALHO da entrada, no do produto — por isso nao precisam do rateio
+  // proporcional que buscarEstoque faz, so do maximo). Ver o comentario
+  // grande em buscarEstoque pra o raciocinio completo.
   const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx => tx`
     select e.*,
       coalesce(sum(i.qtd * i.preco), 0) as valor_total,
-      coalesce(sum(i.qtd), 0) as peso_total
+      coalesce(sum(i.qtd), 0) as peso_total,
+      coalesce(sum(i.perda_kg), 0) as perda_itens_qtd
     from entradas e
     left join entrada_itens i on i.entrada_id = e.id
     group by e.id

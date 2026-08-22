@@ -128,6 +128,29 @@ async function criarEntradaComItem(
   return e.id as string
 }
 
+/**
+ * Uma entrada com VARIOS itens e perda no CABECALHO (entradas.perda_kg) —
+ * usada pra cobrir a mesma regra de max/rateio de buscarEstoque
+ * (api/src/routes/estoque.ts), agora tambem em GET /api/relatorios/produtos.
+ */
+async function criarEntradaComItens(
+  tid: string,
+  opts: {
+    numero: string; data: string; perdaKgCabecalho?: number
+    itens: { produtoId: string; qtd: number; preco: number; perdaKg?: number }[]
+  },
+) {
+  const [e] = await admin`
+    insert into entradas (tenant_id, numero, data, perda_kg)
+    values (${tid}, ${opts.numero}, ${opts.data}, ${opts.perdaKgCabecalho ?? 0}) returning id`
+  for (const it of opts.itens) {
+    await admin`
+      insert into entrada_itens (tenant_id, entrada_id, produto_id, qtd, preco, perda_kg)
+      values (${tid}, ${e.id}, ${it.produtoId}, ${it.qtd}, ${it.preco}, ${it.perdaKg ?? 0})`
+  }
+  return e.id as string
+}
+
 async function criarSaidaComItem(
   tid: string,
   opts: { numero: string; entrega: string; status: string; produtoId: string; qtd: number; preco: number },
@@ -260,5 +283,47 @@ describe('soma por produto', () => {
     const res = await pedir('/api/relatorios/produtos?de=2026-06&ate=2026-06', comoAdmin())
     const linhas = await res.json() as Array<Record<string, unknown>>
     expect(linhas.find(l => l.produto_id === produtoOutro)).toBeUndefined()
+  })
+
+  // ---- perda_coleta_qtd: mesma regra de max/rateio de buscarEstoque (ver
+  // comentario no topo de src/routes/relatorios.ts) — unifica com o que a
+  // tela de Estoque mostra, em vez de olhar so os itens.
+
+  it('cabecalho igual a soma dos itens da entrada NAO soma os dois (usa o maior, nao a soma)', async () => {
+    const produtoA = await criarProduto(tenantId, 'Produto Dupla Contagem A')
+    const produtoB = await criarProduto(tenantId, 'Produto Dupla Contagem B')
+    await criarEntradaComItens(tenantId, {
+      numero: 'REL-DUPLA-1', data: '2026-06-08', perdaKgCabecalho: 140,
+      itens: [
+        { produtoId: produtoA, qtd: 1500, preco: 2, perdaKg: 85 },
+        { produtoId: produtoB, qtd: 750, preco: 2, perdaKg: 55 },
+      ],
+    })
+
+    const res = await pedir('/api/relatorios/produtos?de=2026-06&ate=2026-06', comoAdmin())
+    const linhas = await res.json() as Array<Record<string, unknown>>
+    const linhaA = linhas.find(l => l.produto_id === produtoA)!
+    const linhaB = linhas.find(l => l.produto_id === produtoB)!
+    expect(linhaA.perda_coleta_qtd).toBe(85)
+    expect(linhaB.perda_coleta_qtd).toBe(55)
+  })
+
+  it('cabecalho maior que a soma dos itens: a diferenca e rateada proporcional ao peso (qtd)', async () => {
+    const produtoA = await criarProduto(tenantId, 'Produto Rateio A')
+    const produtoB = await criarProduto(tenantId, 'Produto Rateio B')
+    await criarEntradaComItens(tenantId, {
+      numero: 'REL-RATEIO-1', data: '2026-06-08', perdaKgCabecalho: 200,
+      itens: [
+        { produtoId: produtoA, qtd: 1500, preco: 2 },
+        { produtoId: produtoB, qtd: 500, preco: 2 },
+      ],
+    })
+
+    const res = await pedir('/api/relatorios/produtos?de=2026-06&ate=2026-06', comoAdmin())
+    const linhas = await res.json() as Array<Record<string, unknown>>
+    const linhaA = linhas.find(l => l.produto_id === produtoA)!
+    const linhaB = linhas.find(l => l.produto_id === produtoB)!
+    expect(linhaA.perda_coleta_qtd).toBe(150) // 200 * 1500/2000
+    expect(linhaB.perda_coleta_qtd).toBe(50)  // 200 * 500/2000
   })
 })

@@ -9,6 +9,7 @@ import {
   derivarRelatorioProdutos,
   derivarRelatorioPerdas,
   derivarRelatorioLedger,
+  perdaColetaEfetiva,
   type SaidaResumo,
   type EntradaResumo,
   type PerdaDeposito,
@@ -30,7 +31,7 @@ const saida = (over: Partial<SaidaResumo> = {}): SaidaResumo => ({
 })
 
 const entrada = (over: Partial<EntradaResumo> = {}): EntradaResumo => ({
-  numero: 'C-1', fornecedor_id: 'f1', data: '2026-06-08', perda_kg: 0,
+  numero: 'C-1', fornecedor_id: 'f1', data: '2026-06-08', perda_kg: 0, perda_itens_qtd: 0,
   motivo: 'transporte', pago: 'Pago', data_pag: '2026-06-10',
   valor_total: 4000, peso_total: 2000, ...over,
 })
@@ -372,6 +373,26 @@ describe('derivarRelatorioPedidos', () => {
   })
 })
 
+// ---------------------------------------------------- perdaColetaEfetiva
+
+describe('perdaColetaEfetiva', () => {
+  it('cabecalho igual a soma dos itens: o maximo e o proprio valor (nao dobra)', () => {
+    expect(perdaColetaEfetiva({ perda_kg: 140, perda_itens_qtd: 140 })).toBe(140)
+  })
+
+  it('cabecalho maior que a soma dos itens: usa o cabecalho', () => {
+    expect(perdaColetaEfetiva({ perda_kg: 150, perda_itens_qtd: 140 })).toBe(150)
+  })
+
+  it('soma dos itens maior que o cabecalho (cabecalho=0, caso mais comum): usa a soma dos itens', () => {
+    expect(perdaColetaEfetiva({ perda_kg: 0, perda_itens_qtd: 12 })).toBe(12)
+  })
+
+  it('os dois zerados: zero', () => {
+    expect(perdaColetaEfetiva({ perda_kg: 0, perda_itens_qtd: 0 })).toBe(0)
+  })
+})
+
 // ------------------------------------------------------------- 4. relatório de compras
 
 describe('derivarRelatorioCompras', () => {
@@ -389,6 +410,35 @@ describe('derivarRelatorioCompras', () => {
     expect(linhas[0].precoMedio).toBe(2)
     expect(linhas[0].perdaPct).toBeCloseTo(5) // 75/1500*100
     expect(linhas[0].aproveitPct).toBeCloseTo(95)
+  })
+
+  it('dupla contagem: cabecalho e soma dos itens da MESMA entrada nao se somam (usa o maior)', () => {
+    const entradas = [
+      // cabecalho (perda_kg=140) == soma dos itens (perda_itens_qtd=140):
+      // o mesmo evento de perda, duas granularidades — nao pode virar 280.
+      entrada({ fornecedor_id: 'f1', peso_total: 1000, perda_kg: 140, perda_itens_qtd: 140 }),
+    ]
+    const { totais } = derivarRelatorioCompras(fornecedores, entradas, '', '')
+    expect(totais.perdaQtd).toBe(140)
+  })
+
+  it('cabecalho=0 mas itens somam perda (caso comum: so o item foi preenchido): conta pela soma dos itens', () => {
+    // Sem isto, o relatorio de compras mostraria perda 0 pra uma entrada que
+    // realmente perdeu 12kg na coleta (so nao foi detalhado no campo do
+    // cabecalho) — o mesmo numero que a tela de Estoque ja mostra corretamente.
+    const entradas = [
+      entrada({ fornecedor_id: 'f1', peso_total: 1000, perda_kg: 0, perda_itens_qtd: 12 }),
+    ]
+    const { totais } = derivarRelatorioCompras(fornecedores, entradas, '', '')
+    expect(totais.perdaQtd).toBe(12)
+  })
+
+  it('cabecalho maior que a soma dos itens da entrada: usa o cabecalho, nao soma os dois', () => {
+    const entradas = [
+      entrada({ fornecedor_id: 'f1', peso_total: 1000, perda_kg: 150, perda_itens_qtd: 140 }),
+    ]
+    const { totais } = derivarRelatorioCompras(fornecedores, entradas, '', '')
+    expect(totais.perdaQtd).toBe(150)
   })
 
   it('a pagar soma so entradas nao pagas (pago !== "Pago")', () => {
@@ -547,6 +597,26 @@ describe('derivarRelatorioPerdas', () => {
     expect(transporte.qtd).toBe(15)
     expect(transporte.ocorrencias).toBe(2)
     expect(totais.perdaTotalQtd).toBe(19)
+  })
+
+  it('dupla contagem: cabecalho e soma dos itens da MESMA entrada nao se somam (usa o maior)', () => {
+    const entradas = [
+      entrada({ motivo: 'transporte', perda_kg: 140, perda_itens_qtd: 140 }),
+    ]
+    const { porMotivo, totais } = derivarRelatorioPerdas(entradas, [], [], '', '')
+    expect(porMotivo.find(m => m.motivo === 'transporte')!.qtd).toBe(140)
+    expect(totais.perdaTotalQtd).toBe(140)
+  })
+
+  it('cabecalho=0 mas itens somam perda (caso comum: colaborador so preenche o item): conta pela soma dos itens', () => {
+    const entradas = [
+      entrada({ motivo: 'transporte', perda_kg: 0, perda_itens_qtd: 12 }),
+    ]
+    const { porMotivo, totais } = derivarRelatorioPerdas(entradas, [], [], '', '')
+    const transporte = porMotivo.find(m => m.motivo === 'transporte')!
+    expect(transporte.qtd).toBe(12)
+    expect(transporte.ocorrencias).toBe(1) // perda > 0 mesmo com cabecalho zerado
+    expect(totais.perdaTotalQtd).toBe(12)
   })
 
   it('motivo ausente ou "—" na entrada vira "não informado"', () => {

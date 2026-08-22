@@ -5,6 +5,7 @@ import { api, ErroApi } from '../api/client'
 import type { Cliente } from '../derive/clientes'
 import type { Saida, Entrada, Perda } from '../derive/dashboard'
 import type { Lancamento } from '../derive/lancamentos'
+import type { ProdutoAgregado } from '../derive/relatorios'
 
 // Mesmo mock do molde (ClientesLista.test.tsx): so `api.get` e substituido,
 // ErroApi continua a classe real (o componente faz `err instanceof ErroApi`).
@@ -21,11 +22,12 @@ const cliente = (over: Partial<Cliente> = {}): Cliente => ({
 })
 
 const saida = (over: Partial<Saida> = {}): Saida => ({
-  cliente_id: '1', status: 'Entregue', pag: 'Pago', entrega: '2026-06-10', data_pag: '2026-06-10',
-  valor: 1000, ...over,
+  id: 's1', cliente_id: '1', status: 'Entregue', pag: 'Pago', entrega: '2026-06-10', data_pag: '2026-06-10',
+  valor: 1000, peso: 100, ...over,
 })
 
 const entrada = (over: Partial<Entrada> = {}): Entrada => ({
+  id: 'e1', data: '2026-06-01', pago: 'Pago', data_pag: '2026-06-04',
   perda_kg: 0, valor_total: 0, peso_total: 0, ...over,
 })
 
@@ -33,15 +35,23 @@ const lancamento = (over: Partial<Lancamento> = {}): Lancamento => ({
   id: 'l1', data: '2026-06-10', categoria: 'Frete', descricao: '', valor: 0, funcionario_id: null, ...over,
 } as Lancamento)
 
+const produtoAgregado = (over: Partial<ProdutoAgregado> = {}): ProdutoAgregado => ({
+  produto_id: 'p1', nome: 'Produto', un: 'KG',
+  compra_qtd: 0, compra_valor: 0, perda_coleta_qtd: 0,
+  venda_qtd: 0, venda_valor: 0, perda_deposito_qtd: 0,
+  ...over,
+})
+
 interface Dados {
   clientes?: Cliente[]
   saidas?: Saida[]
   entradas?: Entrada[]
   lancamentos?: Lancamento[]
   perdas?: Perda[]
+  produtosAgregados?: ProdutoAgregado[]
 }
 
-/** api.get e chamado 5x em paralelo (Promise.all) dentro do componente — o
+/** api.get e chamado 6x em paralelo (Promise.all) dentro do componente — o
  * mock precisa responder de acordo com a rota pedida, nao com a ordem. */
 function mockApiPara(dados: Dados) {
   mockGet.mockImplementation((rota: unknown) => {
@@ -51,6 +61,7 @@ function mockApiPara(dados: Dados) {
       case '/api/entradas': return Promise.resolve(dados.entradas ?? [])
       case '/api/lancamentos': return Promise.resolve(dados.lancamentos ?? [])
       case '/api/perdas': return Promise.resolve(dados.perdas ?? [])
+      case '/api/relatorios/produtos': return Promise.resolve(dados.produtosAgregados ?? [])
       default: return Promise.reject(new Error('rota inesperada: ' + String(rota)))
     }
   })
@@ -125,11 +136,12 @@ describe('DashboardTela — indicador sem dado mostra travessao, nunca zero', ()
     expect(screen.queryByText('R$ 0')).not.toBeInTheDocument()
   })
 
-  it('markup e giro de estoque ficam sempre em "—" (dado por item nao exposto pela API)', async () => {
+  it('markup, giro de estoque e ciclo de caixa continuam em "—" quando o dado agregado nao chega (sem peso de saida, sem produtos agregados)', async () => {
     mockApiPara({
       clientes: [cliente()],
-      saidas: [saida({ valor: 5000 })],
+      saidas: [saida({ valor: 5000, peso: 0 })], // sem peso vendido -> giro/ciclo nao tem ritmo pra estimar
       entradas: [entrada({ valor_total: 2000, peso_total: 200, perda_kg: 5 })],
+      // produtosAgregados nao informado (fica []) -> markup sem produto nenhum
     })
     render(<DashboardTela onSessaoExpirada={() => {}} />)
     await screen.findByText('Painel de indicadores')
@@ -137,6 +149,36 @@ describe('DashboardTela — indicador sem dado mostra travessao, nunca zero', ()
     expect(within(cartao('Markup médio (venda/compra)')).getByText('—')).toBeInTheDocument()
     expect(within(cartao('Giro de estoque (dias)')).getByText('—')).toBeInTheDocument()
     expect(within(cartao('Ciclo de caixa (dias)')).getByText('—')).toBeInTheDocument()
+  })
+})
+
+describe('DashboardTela — os tres indicadores destravados por GET /api/relatorios/produtos', () => {
+  it('markup medio, giro de estoque e ciclo de caixa calculam valores reais quando ha dado suficiente', async () => {
+    mockApiPara({
+      clientes: [cliente()],
+      saidas: [saida({
+        valor: 5000, peso: 300, entrega: '2026-05-30', data_pag: '2026-06-11', status: 'Entregue',
+      })],
+      entradas: [entrada({
+        valor_total: 2000, peso_total: 1000, perda_kg: 0,
+        data: '2026-05-01', data_pag: '2026-05-04', pago: 'Pago',
+      })],
+      produtosAgregados: [
+        // cm=100/10=10, vm=200/10=20 -> markup 100%
+        produtoAgregado({ compra_qtd: 10, compra_valor: 100, venda_qtd: 10, venda_valor: 200 }),
+      ],
+    })
+    render(<DashboardTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+
+    expect(within(cartao('Markup médio (venda/compra)')).getByText('100%')).toBeInTheDocument()
+    // giro ('all': 30 dias reais entre 05-01 e 05-30): (1000-300)/(300/30) = 70
+    expect(within(cartao('Giro de estoque (dias)')).getByText('70')).toBeInTheDocument()
+    // ciclo (CCC padrao): estoque=70 + recebimento=12 (05-30->06-11) - pagamentoProdutor=3 (05-01->05-04) = 79
+    expect(within(cartao('Ciclo de caixa (dias)')).getByText('79')).toBeInTheDocument()
+    expect(within(
+      screen.getByText('Ciclo de caixa').closest('.dashboard-card-topo') as HTMLElement,
+    ).getByText('79 dias')).toBeInTheDocument()
   })
 })
 

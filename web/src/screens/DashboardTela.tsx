@@ -16,7 +16,6 @@ import {
   markupMedio,
   giroDeEstoque,
   cicloDeCaixa,
-  cicloRecebimentoDias,
   statusIndiceDePerdas,
   statusMarkup,
   statusClientesAtivosKpi,
@@ -34,6 +33,7 @@ import {
   type Entrada,
   type Perda,
 } from '../derive/dashboard'
+import type { ProdutoAgregado } from '../derive/relatorios'
 import './DashboardTela.css'
 
 const CORES: Record<Health, string> = { green: '#3f8f5b', amber: '#c79320', red: '#c2502f' }
@@ -94,6 +94,7 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
   const [entradas, setEntradas] = useState<Entrada[]>([])
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [perdas, setPerdas] = useState<Perda[]>([])
+  const [produtosAgregados, setProdutosAgregados] = useState<ProdutoAgregado[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
 
@@ -105,10 +106,16 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
       api.get<Entrada[]>('/api/entradas'),
       api.get<Lancamento[]>('/api/lancamentos'),
       api.get<Perda[]>('/api/perdas'),
+      // Consolidado por produto (compra/venda/perda) — alimenta markupMedio().
+      // Sem de/ate: esta tela nunca teve seletor de período, sempre opera
+      // sobre a base inteira (mesmo escopo "todas as épocas" dos outros
+      // fetches acima).
+      api.get<ProdutoAgregado[]>('/api/relatorios/produtos'),
     ])
-      .then(([cs, ss, es, ls, ps]) => {
+      .then(([cs, ss, es, ls, ps, pas]) => {
         if (cancelado) return
         setClientes(cs); setSaidas(ss); setEntradas(es); setLancamentos(ls); setPerdas(ps)
+        setProdutosAgregados(pas)
       })
       .catch((err: unknown) => {
         if (cancelado) return
@@ -143,8 +150,7 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
   const pctLucro = percentualLucro(receita, lucro)
   const nAtivos = clientesAtivos(clientes)
   const giro = giroDeEstoque(entradas, saidas)
-  const recebimento = cicloRecebimentoDias(saidas)
-  const ciclo = cicloDeCaixa(giro, recebimento)
+  const ciclo = cicloDeCaixa(entradas, saidas)
 
   const entreguesCount = saidas.filter(s => s.status === 'Entregue').length
 
@@ -153,7 +159,7 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
 
   // ---- KPIs (painel de indicadores) ----
   const perdas1 = indiceDePerdas(entradas, perdas)
-  const markup = markupMedio(entradas, saidas)
+  const markup = markupMedio(produtosAgregados)
   const ticketMes = ticketMedioPorMinimercado(saidas)
   const ticketEntrega = ticketMedioPorEntrega(saidas)
   const inad = inadimplenciaGeral(saidas)

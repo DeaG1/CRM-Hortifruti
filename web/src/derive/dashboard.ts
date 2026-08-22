@@ -1,5 +1,7 @@
 import type { Cliente, Health } from './clientes'
 import type { Lancamento } from './lancamentos'
+import { diasEstoque, calcularCicloCaixa } from './financeiro'
+import { derivarRelatorioProdutos, type ProdutoAgregado } from './relatorios'
 
 /**
  * Formas mínimas de Saida/Entrada/Perda como a API devolve (ver
@@ -9,22 +11,40 @@ import type { Lancamento } from './lancamentos'
  * reimportados daqui de propósito (um módulo `derive/*` puro não deveria
  * depender de um arquivo de componente) e não existe ainda um
  * `derive/saidas.ts` / `derive/entradas.ts` / `derive/perdas.ts` pra
- * importar em vez disso. Fica anotado no relatório da tarefa: quando esses
- * módulos existirem, estas três interfaces devem ser substituídas por eles.
- * `status`/`pag`/`pago` ficam como `string` (não os union types exatos) só
- * pra não duplicar aquela lista aqui — as comparações abaixo usam os
- * literais exatos de qualquer forma.
+ * importar em vez disso. Fica anotado no relatório da tarefa (de novo, ainda
+ * não resolvido): quando esses módulos existirem, estas três interfaces
+ * devem ser substituídas por eles — hoje o mesmo par Saida/Entrada é
+ * redeclarado de forma independente em derive/financeiro.ts (SaidaFin/
+ * EntradaFin) e derive/relatorios.ts (SaidaResumo/EntradaResumo).
+ *
+ * `id`/`peso` (Saida) e `id`/`data`/`pago`/`data_pag` (Entrada) foram
+ * adicionados aqui (antes só os campos que os indicadores "—" avisavam
+ * faltar) porque giroDeEstoque()/cicloDeCaixa() agora IMPORTAM as funções
+ * equivalentes de derive/financeiro.ts (diasEstoque/calcularCicloCaixa) em
+ * vez de recalcular a mesma conta — ver os dois comentários mais abaixo. Os
+ * campos já vinham de GET /api/saidas e GET /api/entradas de qualquer jeito
+ * (paraJson/paraJsonLista nas duas rotas); só não estavam modelados aqui.
+ * `status` teve que virar o union exato (em vez de `string`) pelo mesmo
+ * motivo: é o tipo que SaidaFin declara, e TypeScript não aceita passar um
+ * `string` largo onde a função importada espera um union fechado. `pag`
+ * continua `string` — nenhuma função importada precisa dele.
  */
 export interface Saida {
+  id: string
   cliente_id: string | null
-  status: string
+  status: 'Pendente' | 'Em rota' | 'Entregue' | 'Cancelado' | 'Devolvido'
   pag: string
   entrega: string | null
   data_pag: string | null
   valor?: number
+  peso?: number
 }
 
 export interface Entrada {
+  id: string
+  data: string
+  pago: 'Pago' | 'Pendente' | 'Atrasado'
+  data_pag: string | null
   perda_kg: number
   valor_total: number
   peso_total: number
@@ -70,7 +90,11 @@ export const METAS_DASHBOARD = {
   /** Ciclo de caixa (dias) — meta ≤13d, âmbar até 16d. */
   cicloCaixaMetaDias: 13,
   cicloCaixaAmbarAteDias: 16,
-  /** Prazo de pagamento ao produtor — referência fixa do estudo, não uma meta. */
+  /** Prazo de pagamento ao produtor — referência fixa do estudo original, não
+   * uma meta. NÃO é mais usada por cicloDeCaixa() (que hoje importa
+   * calcularCicloCaixa() de derive/financeiro.ts e usa o prazo REAL,
+   * data_pag − data de cada entrada paga, em vez desta constante) — mantida
+   * aqui só como registro histórico do valor que o protótipo assumia. */
   cicloPagamentoProdutorDias: 3,
   /** Concentração de carteira — cliente acima disso é destacado em vermelho. */
   concentracaoCarteiraAlertaPct: 15,
@@ -196,61 +220,115 @@ export function clientesAtivos(clientes: Cliente[]): number {
 }
 
 /**
- * Markup médio (venda/compra por produto). NÃO CALCULÁVEL com as APIs
- * atuais, e não é um caso de "ainda sem dado" — é um caso de "a API não
- * expõe o dado necessário". A fórmula original (design/CRM Hortifruti.dc
- * .html:2324-2333) precisa do preço médio de compra e de venda POR
- * PRODUTO, que só existe nos itens de cada entrada/saída
- * (entrada_itens.preco, saida_itens.preco). `GET /api/entradas` e
- * `GET /api/saidas` (listagem) só devolvem o cabeçalho agregado
- * (valor_total/peso_total ou valor/peso) — os itens só vêm em
- * `GET /.../:id`, um registro de cada vez. Buscar item a item de toda
- * entrada/saída só pra este KPI seria N+1 do tipo que o próprio
- * api/src/routes/saidas.ts (comentário da rota GET /) já recusa fazer na
- * PRÓPRIA listagem de saídas. Os parâmetros já são os dados de hoje: no dia
- * em que existir um endpoint agregado por produto, só o corpo desta função
- * precisa mudar.
+ * Markup médio (venda/compra por produto) = média simples do markup de cada
+ * produto movimentado — (preço médio de venda − preço médio de compra) /
+ * preço médio de compra × 100, só dos produtos com AMBOS os preços médios
+ * apuráveis. Porta com fidelidade design/CRM Hortifruti.dc.html:2324-2333
+ * (`markups.reduce(...)/markups.length`, média não ponderada pelo volume —
+ * um produto pequeno pesa igual a um grande na média, fidelidade ao
+ * original, não uma escolha nova).
+ *
+ * Antes disto era um caso de "a API não expõe o dado necessário" (preço por
+ * PRODUTO só existe em entrada_itens/saida_itens, e GET /api/entradas e
+ * GET /api/saidas só devolvem o cabeçalho agregado) — destravado agora que
+ * GET /api/relatorios/produtos soma isso em SQL (ver seu comentário em
+ * api/src/routes/relatorios.ts).
+ *
+ * A conta em si (preço médio de compra/venda por produto, markup%) NÃO é
+ * recalculada aqui: vem de derivarRelatorioProdutos() (derive/relatorios.ts),
+ * que já implementa exatamente essa fórmula por linha para a tela de
+ * Relatórios — reimplementá-la aqui duplicaria a mesma conta em dois
+ * módulos (o risco que este endpoint foi criado para evitar). Só a MÉDIA
+ * entre produtos é responsabilidade desta função.
  */
-export function markupMedio(_entradas: Entrada[], _saidas: Saida[]): Indicador {
-  return indisponivel('requer preço médio de compra e venda por produto (dado por item, não exposto pela API hoje)')
+export function markupMedio(agregados: ProdutoAgregado[]): Indicador {
+  const { linhas } = derivarRelatorioProdutos(agregados, agregados.length)
+  const markups = linhas.map(l => l.markupPct).filter((v): v is number => v !== null)
+  if (markups.length === 0) {
+    return indisponivel('sem produtos com preço médio de compra e venda apurável no período')
+  }
+  return disponivel(markups.reduce((s, v) => s + v, 0) / markups.length)
 }
 
 /**
- * Giro de estoque (dias). Mesma limitação estrutural do markup: a fórmula
- * original (design/CRM Hortifruti.dc.html:2338-2342) soma `kg`/`perdaKg`
- * ITEM A ITEM de toda entrada e todo pedido não cancelado/devolvido, em
- * todas as épocas — dado que só existe em `GET /.../:id`. Também indisponível
- * até existir um endpoint agregado.
+ * Giro de estoque (dias): quanto tempo o saldo atual duraria no ritmo de
+ * saída. Antes indisponível por engano — a fórmula original (design/CRM
+ * Hortifruti.dc.html:2338-2342) soma kg recebido, kg perdido e kg vendido,
+ * e esses TOTAIS já vêm no cabeçalho de GET /api/entradas (peso_total,
+ * perda_kg) e GET /api/saidas (peso); nunca precisou do detalhamento por
+ * item que bloqueava o markup. O bloqueio real era só um campo (`peso`)
+ * que faltava no tipo `Saida` local acima.
+ *
+ * A conta é IMPORTADA de derive/financeiro.ts (diasEstoque), não
+ * reimplementada aqui: é a mesma fórmula, e outro agente mexe em
+ * financeiro.ts (inclusive no ciclo de caixa, que usa este mesmo giro) ao
+ * mesmo tempo — duas cópias da mesma conta divergiriam cedo ou tarde. Ver
+ * cicloDeCaixa() abaixo para a mesma decisão. Este painel nunca teve
+ * seletor de período (opera sobre a base inteira), então chama
+ * diasEstoque() com periodo='all' — o mesmo "all" que as outras telas usam
+ * quando não há filtro ativo (ver noPeriodo em financeiro.ts).
  */
-export function giroDeEstoque(_entradas: Entrada[], _saidas: Saida[]): Indicador {
-  return indisponivel('requer o total de kg por item de todas as entradas e saídas (não exposto pela API hoje)')
+export function giroDeEstoque(entradas: Entrada[], saidas: Saida[]): Indicador {
+  const dias = diasEstoque(entradas, saidas, 'all')
+  if (dias === null) return indisponivel('sem saídas com peso registrado para estimar o giro de estoque')
+  return disponivel(dias)
 }
 
 /**
- * Ciclo de caixa (dias) = giro de estoque + ciclo de recebimento − prazo de
- * pagamento ao produtor (design/CRM Hortifruti.dc.html:2344). Recebe os dois
- * indicadores já calculados (giroDeEstoque(), cicloRecebimentoDias()) e só
- * soma quando AMBOS estão disponíveis — não dá pra somar um número real a
- * um desconhecido e mostrar o resultado como se fosse confiável. Hoje
- * giroDeEstoque() nunca devolve disponível (ver seu comentário), então esta
- * função sempre propaga esse motivo — mas já soma certo no dia em que o
- * giro virar calculável, sem precisar mexer aqui.
+ * Ciclo de caixa completo (dias). Delegado inteiramente a
+ * calcularCicloCaixa() (derive/financeiro.ts) em vez de reimplementado
+ * aqui — decisão deliberada, não a fórmula original desta tela.
+ *
+ * O protótipo (design/CRM Hortifruti.dc.html:2344) calculava
+ * `giro + recebimento − 3` (constante fixa de prazo ao produtor, nunca
+ * calculada de dado real) para ESTE painel. derive/financeiro.ts, corrigido
+ * por outro agente com autorização do dono do negócio, também SUBTRAI o
+ * prazo ao produtor (CCC padrão: quem financia o caixa nesse intervalo é o
+ * produtor) — só que com o prazo REAL (data_pag − data de cada entrada
+ * paga) em vez da constante fixa de 3 dias do protótipo. Ver o comentário
+ * de calcularCicloCaixa() para a justificativa completa da correção.
+ *
+ * Reimplementar aqui a constante fixa antiga, à parte, faria o Dashboard e
+ * a tela Financeiro mostrarem dois números diferentes de "ciclo de caixa"
+ * ao mesmo tempo — exatamente o problema que este endpoint (e a instrução
+ * desta tarefa) pediu para evitar. Por isso este painel usa a MESMA função
+ * que a tela Financeiro. Mesmo raciocínio do giro acima quanto a
+ * `periodo='all'` (esta tela não tem seletor de período).
  */
-export function cicloDeCaixa(giro: Indicador, recebimento: Indicador): Indicador {
-  if (!giro.disponivel) return giro
-  if (!recebimento.disponivel) return recebimento
-  return disponivel(giro.valor + recebimento.valor - METAS_DASHBOARD.cicloPagamentoProdutorDias)
+export function cicloDeCaixa(entradas: Entrada[], saidas: Saida[]): Indicador {
+  const { total } = calcularCicloCaixa(entradas, saidas, 'all')
+  if (total === null) {
+    return indisponivel(
+      'requer giro de estoque, recebimento e pagamento ao produtor calculáveis ao mesmo tempo (falta ao menos um)',
+    )
+  }
+  return disponivel(total)
 }
 
-/** Média de dias entre entrega e pagamento, só dos pedidos entregues com
- * ambas as datas e recebDias > 0 — mesmo filtro do protótipo (recebDias>0
- * exclui recebimento no mesmo dia da média, decisão do estudo original,
- * portada como está). Junto com giroDeEstoque(), alimenta cicloDeCaixa(). */
+/**
+ * Média de dias entre entrega e pagamento, só dos pedidos entregues com
+ * ambas as datas. NÃO alimenta mais cicloDeCaixa() (que agora importa o
+ * equivalente — diasRecebimento() — de derive/financeiro.ts junto com o
+ * resto do ciclo completo); mantida exportada e testada porque ainda é a
+ * única forma de mostrar o componente "recebimento" isolado, caso uma tela
+ * futura precise dele sem o ciclo inteiro.
+ *
+ * DEFEITO CORRIGIDO (autorizado pelo dono do negócio): esta função tinha a
+ * MESMA duplicação de defeito que diasRecebimento() em derive/financeiro.ts
+ * — filtro `recebDias > 0`, fiel ao protótipo, que excluía da média
+ * justamente os recebimentos no MESMO DIA da entrega (os clientes que pagam
+ * à vista), piorando o indicador quanto mais gente pagasse rápido. Corrigido
+ * aqui do mesmo jeito, para as duas contas não divergirem de novo: `>= 0`
+ * inclui o recebimento no mesmo dia (0) e só descarta o que der negativo
+ * (pagamento registrado antes da entrega, erro de digitação). "Sem data de
+ * pagamento" (`data_pag` nulo) já é filtrado antes, pelo `.filter(p => ...
+ * !!p.data_pag)` acima — continua de fora, não vira um 0 disfarçado.
+ */
 export function cicloRecebimentoDias(saidas: Saida[]): Indicador {
   const comRecebimento = entreguesDe(saidas)
     .filter(p => !!p.entrega && !!p.data_pag)
     .map(p => diasEntre(p.entrega as string, p.data_pag as string))
-    .filter(dias => dias > 0)
+    .filter(dias => dias >= 0)
   if (comRecebimento.length === 0) return indisponivel('sem pedidos entregues com data de recebimento registrada')
   return disponivel(comRecebimento.reduce((s, d) => s + d, 0) / comRecebimento.length)
 }

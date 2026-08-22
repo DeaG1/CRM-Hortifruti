@@ -32,13 +32,15 @@ import {
 } from './dashboard'
 import type { Cliente } from './clientes'
 import type { Lancamento } from './lancamentos'
+import type { ProdutoAgregado } from './relatorios'
 
 const saida = (over: Partial<Saida> = {}): Saida => ({
-  cliente_id: 'c1', status: 'Entregue', pag: 'Pago', entrega: '2026-06-10', data_pag: '2026-06-10',
-  valor: 1000, ...over,
+  id: 's1', cliente_id: 'c1', status: 'Entregue', pag: 'Pago', entrega: '2026-06-10', data_pag: '2026-06-10',
+  valor: 1000, peso: 100, ...over,
 })
 
 const entrada = (over: Partial<Entrada> = {}): Entrada => ({
+  id: 'e1', data: '2026-06-01', pago: 'Pago', data_pag: '2026-06-04',
   perda_kg: 0, valor_total: 0, peso_total: 0, ...over,
 })
 
@@ -255,14 +257,74 @@ describe('statusEquilibrioClientes', () => {
   })
 })
 
-describe('markupMedio / giroDeEstoque — sempre indisponiveis com a API atual', () => {
-  it('markupMedio nunca calcula, mesmo com dado presente (falta detalhamento por item)', () => {
-    const r = markupMedio([entrada({ valor_total: 1000, peso_total: 100 })], [saida({ valor: 2000 })])
+const produtoAgregado = (over: Partial<ProdutoAgregado> = {}): ProdutoAgregado => ({
+  produto_id: 'p1', nome: 'Produto', un: 'KG',
+  compra_qtd: 0, compra_valor: 0, perda_coleta_qtd: 0,
+  venda_qtd: 0, venda_valor: 0, perda_deposito_qtd: 0,
+  ...over,
+})
+
+describe('markupMedio — destravado por GET /api/relatorios/produtos', () => {
+  it('indisponivel sem nenhum produto agregado (nunca 0)', () => {
+    expect(markupMedio([])).toEqual({
+      disponivel: false, motivo: 'sem produtos com preço médio de compra e venda apurável no período',
+    })
+  })
+
+  it('indisponivel quando nenhum produto tem compra E venda no periodo', () => {
+    // so compra (nunca vendido) e so venda (nunca comprado no periodo) —
+    // markupPct fica null nos dois em derivarRelatorioProdutos, nenhum entra na media
+    const r = markupMedio([
+      produtoAgregado({ produto_id: 'so-compra', compra_qtd: 100, compra_valor: 200, venda_qtd: 0, venda_valor: 0 }),
+      produtoAgregado({ produto_id: 'so-venda', compra_qtd: 0, compra_valor: 0, venda_qtd: 10, venda_valor: 150 }),
+    ])
     expect(r.disponivel).toBe(false)
   })
 
-  it('giroDeEstoque nunca calcula, mesmo com dado presente', () => {
-    const r = giroDeEstoque([entrada({ valor_total: 1000, peso_total: 100 })], [saida({ valor: 2000 })])
+  it('media SIMPLES (nao ponderada por volume) do markup% de cada produto — fidelidade ao estudo original', () => {
+    const r = markupMedio([
+      // cm=100/10=10, vm=200/10=20 -> markup 100%
+      produtoAgregado({ produto_id: 'a', compra_qtd: 10, compra_valor: 100, venda_qtd: 10, venda_valor: 200 }),
+      // cm=10000/1000=10, vm=10000/1000=10 -> markup 0%, MUITO mais volume que 'a'
+      produtoAgregado({ produto_id: 'b', compra_qtd: 1000, compra_valor: 10000, venda_qtd: 1000, venda_valor: 10000 }),
+    ])
+    // media simples (100+0)/2=50 — se fosse ponderada por volume ficaria perto de 0
+    expect(r).toEqual({ disponivel: true, valor: 50 })
+  })
+
+  it('produto sem venda no periodo (markupPct null) fica de fora da media, nao vira 0', () => {
+    const r = markupMedio([
+      produtoAgregado({ produto_id: 'a', compra_qtd: 10, compra_valor: 100, venda_qtd: 10, venda_valor: 150 }), // markup 50%
+      produtoAgregado({ produto_id: 'parado', compra_qtd: 50, compra_valor: 500, venda_qtd: 0, venda_valor: 0 }), // null
+    ])
+    expect(r).toEqual({ disponivel: true, valor: 50 })
+  })
+})
+
+describe('giroDeEstoque — destravado, importado de derive/financeiro.ts (diasEstoque)', () => {
+  it('indisponivel (nao 0) sem nenhuma saida para estimar o ritmo', () => {
+    const r = giroDeEstoque([entrada({ peso_total: 1000, perda_kg: 0 })], [])
+    expect(r).toEqual({
+      disponivel: false, motivo: 'sem saídas com peso registrado para estimar o giro de estoque',
+    })
+  })
+
+  it('calcula os dias que o saldo atual duraria no ritmo de saida (periodo "all": dias reais entre as datas extremas)', () => {
+    // mesma massa de calcularCicloCaixa em financeiro.test.ts: entrada 05-01,
+    // saida (entrega) 05-30 -> intervalo real de 30 dias (nao 30 fixo, so
+    // coincide aqui). qEnt=1000, qPer=0, qSai=300 -> (1000-300)/(300/30) = 70
+    const r = giroDeEstoque(
+      [entrada({ data: '2026-05-01', peso_total: 1000, perda_kg: 0 })],
+      [saida({ entrega: '2026-05-30', peso: 300, status: 'Entregue' })],
+    )
+    expect(r).toEqual({ disponivel: true, valor: 70 })
+  })
+
+  it('saidas canceladas/devolvidas nao contam para o ritmo de saida', () => {
+    const r = giroDeEstoque(
+      [entrada({ data: '2026-05-01', peso_total: 1000, perda_kg: 0 })],
+      [saida({ entrega: '2026-05-30', peso: 999, status: 'Cancelado' }), saida({ entrega: '2026-05-30', peso: 999, status: 'Devolvido' })],
+    )
     expect(r.disponivel).toBe(false)
   })
 })
@@ -292,35 +354,56 @@ describe('cicloRecebimentoDias', () => {
     })
   })
 
-  it('exclui recebimento no mesmo dia (recebDias<=0), media dos demais', () => {
+  // DEFEITO 2 (corrigido, mesma duplicacao de diasRecebimento em
+  // financeiro.test.ts): o recebimento no mesmo dia da entrega (0 dias)
+  // agora ENTRA na media — antes era excluido, piorando o indicador quanto
+  // mais clientes pagassem a vista.
+  it('inclui recebimento no mesmo dia da entrega (0 dias) na media — defeito corrigido', () => {
     const r = cicloRecebimentoDias([
-      saida({ entrega: '2026-06-01', data_pag: '2026-06-01' }), // 0 dias, excluido
+      saida({ entrega: '2026-06-01', data_pag: '2026-06-01' }), // 0 dias, agora entra
       saida({ entrega: '2026-06-01', data_pag: '2026-06-05' }), // 4 dias
       saida({ entrega: '2026-06-01', data_pag: '2026-06-07' }), // 6 dias
     ])
-    expect(r).toEqual({ disponivel: true, valor: 5 })
+    // media (0+4+6)/3 = 10/3. Com o defeito antigo (filtro `> 0`), o 0 seria
+    // excluido e a media seria (4+6)/2 = 5 — diferente do valor correto.
+    expect(r).toEqual({ disponivel: true, valor: 10 / 3 })
+  })
+
+  it('nao confunde pagamento no mesmo dia (0) com ausencia de data de pagamento (null)', () => {
+    const r = cicloRecebimentoDias([
+      saida({ entrega: '2026-06-01', data_pag: '2026-06-01' }), // 0 dias, entra
+      saida({ entrega: '2026-06-01', data_pag: null }), // sem data, fica de fora
+    ])
+    expect(r).toEqual({ disponivel: true, valor: 0 })
   })
 })
 
-describe('cicloDeCaixa', () => {
-  it('propaga indisponibilidade do giro primeiro', () => {
-    const giro = { disponivel: false as const, motivo: 'sem giro' }
-    const receb = { disponivel: false as const, motivo: 'sem recebimento' }
-    expect(cicloDeCaixa(giro, receb)).toEqual(giro)
-  })
-
-  it('propaga indisponibilidade do recebimento quando o giro esta disponivel', () => {
-    const giro = { disponivel: true as const, valor: 4 }
-    const receb = { disponivel: false as const, motivo: 'sem recebimento' }
-    expect(cicloDeCaixa(giro, receb)).toEqual(receb)
-  })
-
-  it('giro + recebimento - prazo de pagamento ao produtor, quando ambos disponiveis', () => {
-    const giro = { disponivel: true as const, valor: 4 }
-    const receb = { disponivel: true as const, valor: 12 }
-    expect(cicloDeCaixa(giro, receb)).toEqual({
-      disponivel: true, valor: 4 + 12 - METAS_DASHBOARD.cicloPagamentoProdutorDias,
+describe('cicloDeCaixa — destravado, delegado a calcularCicloCaixa (derive/financeiro.ts)', () => {
+  it('indisponivel (nao 0) quando falta qualquer um dos tres componentes', () => {
+    // sem nenhuma entrada paga -> pagamentoProdutor null -> total null,
+    // mesmo com estoque e recebimento calculaveis (mesmo caso de
+    // calcularCicloCaixa em financeiro.test.ts)
+    const entradas = [entrada({ pago: 'Pendente', data_pag: null, peso_total: 1000, perda_kg: 0 })]
+    const saidas = [saida({ entrega: '2026-06-01', data_pag: '2026-06-13', status: 'Entregue', peso: 300 })]
+    expect(cicloDeCaixa(entradas, saidas)).toEqual({
+      disponivel: false,
+      motivo: 'requer giro de estoque, recebimento e pagamento ao produtor calculáveis ao mesmo tempo (falta ao menos um)',
     })
+  })
+
+  it('estoque + recebimento - pagamento ao produtor (CCC padrao), quando os tres sao calculaveis', () => {
+    // fixture IDENTICA a calcularCicloCaixa em financeiro.test.ts (mesma
+    // conta, mesma funcao importada — os dois modulos tem que bater):
+    // pagamentoProdutor=3 (05-01->05-04), estoque=70 (30 dias reais 'all'
+    // entre 05-01 e 05-30, (1000-300)/(300/30)), recebimento=12 (05-30->06-11)
+    // total = 70 + 12 - 3 = 79
+    const entradas = [
+      entrada({ data: '2026-05-01', data_pag: '2026-05-04', pago: 'Pago', peso_total: 1000, perda_kg: 0 }),
+    ]
+    const saidas = [
+      saida({ entrega: '2026-05-30', data_pag: '2026-06-11', status: 'Entregue', peso: 300 }),
+    ]
+    expect(cicloDeCaixa(entradas, saidas)).toEqual({ disponivel: true, valor: 79 })
   })
 })
 

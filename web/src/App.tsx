@@ -29,7 +29,11 @@ interface Eu {
 
 type EstadoSessao = 'verificando' | 'deslogado' | 'logado'
 
-/** Telas ainda sem implementacao nesta fase — mostram um placeholder identificado. */
+/** Rede de seguranca do `default` de `Conteudo` (abaixo) — hoje inalcancavel,
+ * ja que toda `Tela` cadastrada em telas.ts tem case proprio no switch. Fica
+ * pronta pra caso um valor novo seja acrescentado a `Tela` antes do switch
+ * ganhar o case correspondente: placeholder identificado em vez de tela
+ * em branco silenciosa. */
 function TelaPlaceholder({ tela }: { tela: Tela }) {
   return (
     <div
@@ -194,11 +198,14 @@ function App() {
 }
 
 /**
- * Escolhe a tela. As que ainda nao existem caem no placeholder — hoje sao
- * tres das quatro que nao guardam dado proprio (Saude do Negocio, Financeiro
- * completo e Relatorios): elas calculam sobre as outras, e por isso vem
- * depois delas. Estoque (a quarta) ja existe — GET /api/estoque agrega
- * entradas, perdas e saidas em SQL (ver src/screens/EstoqueLista.tsx).
+ * Escolhe a tela. As dez telas do menu (mais Veiculos) ja tem case proprio
+ * abaixo — `default` fica so como rede de seguranca caso um novo valor
+ * apareca em `Tela` (telas.ts) antes do switch ser atualizado, nao porque
+ * alguma esteja faltando hoje. Das que nao guardam dado proprio (Saude do
+ * Negocio, Financeiro completo, Relatorios e Estoque): as tres primeiras
+ * calculam sobre as outras telas, por isso vem depois delas na ordem deste
+ * comentario; Estoque agrega entradas, perdas e saidas em SQL num endpoint
+ * proprio (GET /api/estoque, ver src/screens/EstoqueLista.tsx).
  *
  * `papel` so e repassado adiante pra VeiculosLista: e a unica tela onde
  * admin e colaborador veem a MESMA tela com acoes diferentes (cadastrar e

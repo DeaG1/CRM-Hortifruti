@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { ClienteFicha } from './ClienteFicha'
 import { api, ErroApi } from '../api/client'
 import type { Cliente } from '../derive/clientes'
@@ -33,6 +33,22 @@ const cliente: Cliente = {
   obs: '',
 }
 
+function comoPromise(v: unknown): Promise<unknown> {
+  return v instanceof Error ? Promise.reject(v) : Promise.resolve(v)
+}
+
+/** Roteia `api.get` pelas duas chamadas que ClienteFicha faz (GET
+ * /api/clientes/c-1 e GET /api/saidas), cada uma com sua propria resposta —
+ * mesmo motivo do helper equivalente em ClientesLista.test.tsx. `saidasResp`
+ * default `[]` cobre os testes que nao se importam com vendas. */
+function mockRotas(clienteResp: unknown, saidasResp: unknown = []) {
+  mockGet.mockImplementation((url: string) => {
+    if (url === '/api/clientes/c-1') return comoPromise(clienteResp)
+    if (url === '/api/saidas') return comoPromise(saidasResp)
+    return Promise.reject(new Error('rota nao mockada: ' + url))
+  })
+}
+
 beforeEach(() => {
   mockGet.mockReset()
   mockDel.mockReset()
@@ -40,52 +56,91 @@ beforeEach(() => {
 
 describe('ClienteFicha — carregamento', () => {
   it('mostra indicador enquanto a chamada esta pendente', () => {
-    mockGet.mockReturnValue(new Promise(() => {}))
+    mockRotas(new Promise(() => {}))
     render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     expect(screen.getByText('Carregando…')).toBeInTheDocument()
   })
 
   it('erro != 401/404 mostra alerta generico', async () => {
-    mockGet.mockRejectedValue(new Error('falha de rede'))
+    mockRotas(new Error('falha de rede'))
     render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível carregar o cliente.')
   })
 
   it('404 mostra "cliente nao encontrado"', async () => {
-    mockGet.mockRejectedValue(new ErroApi(404, { erro: 'nao encontrado' }))
+    mockRotas(new ErroApi(404, { erro: 'nao encontrado' }))
     render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('Cliente não encontrado.')
   })
 
   it('401 chama onSessaoExpirada em vez de mostrar erro', async () => {
-    mockGet.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
+    // /api/clientes/:id e /api/saidas sao buscados em paralelo (efeitos
+    // independentes) — os dois podem devolver 401, entao a asserção e
+    // toHaveBeenCalled (nao ...Once), mesmo padrao de ClientesLista.test.tsx.
+    mockRotas(new ErroApi(401, { erro: 'sessao invalida' }), new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()
     render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} onSessaoExpirada={onSessaoExpirada} />)
-    await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalledOnce())
+    await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalled())
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
 
-describe('ClienteFicha — sem pedidos (Fase 1 ainda nao existe)', () => {
-  it('mostra nome, metricas zeradas e mensagem de historico vazio (nao um bloco vazio)', async () => {
-    mockGet.mockResolvedValue(cliente)
+describe('ClienteFicha — vendas reais (GET /api/saidas)', () => {
+  it('sem vendas no periodo, as metricas comerciais ficam em travessao (nao zeradas)', async () => {
+    mockRotas(cliente, [])
     render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
-    expect(await screen.findByText('Mercado Bom Preço')).toBeInTheDocument()
+    await screen.findByText('Mercado Bom Preço')
 
-    // faturado e ticket/entrega ficam zerados, nao em branco
-    expect(screen.getAllByText('R$ 0')).toHaveLength(2)
-    // participacao zerada
-    expect(screen.getByText('0%')).toBeInTheDocument()
-    // inadimplencia aparece duas vezes (metricas + credito), tambem zerada
-    expect(screen.getAllByText('0,0%')).toHaveLength(2)
+    // faturado, ticket/entrega, participacao e inadimplencia (bloco
+    // "Metricas comerciais") ficam em travessao — nunca "R$ 0"/"0%"/"0,0%",
+    // que fingiriam um dado apurado que nao existe.
+    const metricas = document.querySelector('.ficha-metricas') as HTMLElement
+    expect(within(metricas).getAllByText('—')).toHaveLength(4)
+    expect(within(metricas).queryByText('R$ 0')).not.toBeInTheDocument()
+
+    const taxa = screen.getByText('Taxa de inadimplência').closest('.ficha-linha') as HTMLElement
+    expect(within(taxa).getByText('—')).toBeInTheDocument()
 
     expect(screen.getByText('Nenhuma entrega registrada.')).toBeInTheDocument()
+  })
+
+  it('uma venda entregue e paga produz ticket, participacao e aparece no historico', async () => {
+    mockRotas(cliente, [
+      { id: 'sv1', cliente_id: 'c-1', entrega: '2026-06-10', valor: 900, status: 'Entregue', pag: 'Pago', venc: null },
+    ])
+    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+
+    const metricas = document.querySelector('.ficha-metricas') as HTMLElement
+    // faturado e ticket/entrega (uma so entrega = o proprio valor)
+    expect(within(metricas).getAllByText('R$ 900')).toHaveLength(2)
+    // unico cliente considerado -> 100% de participacao
+    expect(within(metricas).getByText('100%')).toBeInTheDocument()
+    // pago, sem atraso
+    expect(within(metricas).getByText('0,0%')).toBeInTheDocument()
+
+    // historico de entregas deixa de mostrar a mensagem vazia e lista a venda
+    expect(screen.queryByText('Nenhuma entrega registrada.')).not.toBeInTheDocument()
+    expect(screen.getByText('10/06 · Pago')).toBeInTheDocument()
+  })
+
+  it('falha em /api/saidas mantem a ficha visivel, com metricas comerciais indisponiveis', async () => {
+    mockRotas(cliente, new Error('falha de rede'))
+    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+
+    // a ficha aparece normalmente...
+    expect(await screen.findByText('Mercado Bom Preço')).toBeInTheDocument()
+    // ...com um aviso discreto (nao um erro que apaga a ficha)...
+    expect(await screen.findByRole('status')).toHaveTextContent(/não foi possível carregar as vendas/i)
+    // ...e as metricas comerciais em travessao
+    const metricas = document.querySelector('.ficha-metricas') as HTMLElement
+    expect(within(metricas).getAllByText('—')).toHaveLength(4)
   })
 })
 
 describe('ClienteFicha — navegacao', () => {
   it('clicar em Voltar chama onVoltar', async () => {
-    mockGet.mockResolvedValue(cliente)
+    mockRotas(cliente)
     const onVoltar = vi.fn()
     render(<ClienteFicha id="c-1" onVoltar={onVoltar} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
@@ -94,7 +149,7 @@ describe('ClienteFicha — navegacao', () => {
   })
 
   it('clicar em Editar cliente chama onEditar com os dados carregados', async () => {
-    mockGet.mockResolvedValue(cliente)
+    mockRotas(cliente)
     const onEditar = vi.fn()
     render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={onEditar} />)
     await screen.findByText('Mercado Bom Preço')
@@ -105,7 +160,7 @@ describe('ClienteFicha — navegacao', () => {
 
 describe('ClienteFicha — exclusao pede confirmacao', () => {
   it('clicar em Excluir nao chama a API imediatamente — mostra confirmacao', async () => {
-    mockGet.mockResolvedValue(cliente)
+    mockRotas(cliente)
     render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
@@ -114,7 +169,7 @@ describe('ClienteFicha — exclusao pede confirmacao', () => {
   })
 
   it('cancelar a confirmacao nao chama a API e some com o aviso', async () => {
-    mockGet.mockResolvedValue(cliente)
+    mockRotas(cliente)
     render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
@@ -124,7 +179,7 @@ describe('ClienteFicha — exclusao pede confirmacao', () => {
   })
 
   it('confirmar a exclusao chama DELETE com o id certo e depois onVoltar', async () => {
-    mockGet.mockResolvedValue(cliente)
+    mockRotas(cliente)
     mockDel.mockResolvedValue({ ok: true })
     const onVoltar = vi.fn()
     render(<ClienteFicha id="c-1" onVoltar={onVoltar} onEditar={() => {}} />)
@@ -136,7 +191,7 @@ describe('ClienteFicha — exclusao pede confirmacao', () => {
   })
 
   it('falha na exclusao mostra alerta e nao volta para a lista', async () => {
-    mockGet.mockResolvedValue(cliente)
+    mockRotas(cliente)
     mockDel.mockRejectedValue(new Error('falha'))
     const onVoltar = vi.fn()
     render(<ClienteFicha id="c-1" onVoltar={onVoltar} onEditar={() => {}} />)
@@ -148,7 +203,7 @@ describe('ClienteFicha — exclusao pede confirmacao', () => {
   })
 
   it('401 na exclusao chama onSessaoExpirada', async () => {
-    mockGet.mockResolvedValue(cliente)
+    mockRotas(cliente)
     mockDel.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()
     render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} onSessaoExpirada={onSessaoExpirada} />)

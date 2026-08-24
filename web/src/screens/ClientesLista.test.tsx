@@ -18,6 +18,30 @@ const cliente = (over: Partial<Cliente> = {}): Cliente => ({
   status: 'ativo', tend: '→', limite: 0, prazo: 14, ...over,
 })
 
+/** Uma linha crua de GET /api/saidas — so os campos que ClientesLista usa
+ * (ver `SaidaBruta`/`paraPedidos` em ClientesLista.tsx). */
+const saida = (over: Record<string, unknown> = {}) => ({
+  id: 's1', cliente_id: '1', entrega: '2026-06-10', valor: 1000,
+  status: 'Entregue', pag: 'Pago', venc: null, ...over,
+})
+
+function comoPromise(v: unknown): Promise<unknown> {
+  return v instanceof Error ? Promise.reject(v) : Promise.resolve(v)
+}
+
+/** Roteia `api.get` pelas duas chamadas que ClientesLista faz (GET
+ * /api/clientes e GET /api/saidas), cada uma com sua propria resposta —
+ * `mockResolvedValue` sozinho nao da pra isso porque as duas chamadas
+ * compartilham o mesmo mock. `saidasResp` default `[]` cobre os testes que
+ * nao se importam com vendas. */
+function mockRotas(clientesResp: unknown, saidasResp: unknown = []) {
+  mockGet.mockImplementation((url: string) => {
+    if (url === '/api/clientes') return comoPromise(clientesResp)
+    if (url === '/api/saidas') return comoPromise(saidasResp)
+    return Promise.reject(new Error('rota nao mockada: ' + url))
+  })
+}
+
 function botaoFiltro(rotulo: string) {
   return screen.getByRole('button', { name: new RegExp('^' + rotulo) })
 }
@@ -28,26 +52,26 @@ beforeEach(() => {
 
 describe('ClientesLista — os quatro estados', () => {
   it('carregando: mostra indicador enquanto a chamada esta pendente', () => {
-    mockGet.mockReturnValue(new Promise(() => {})) // nunca resolve nesta suite
+    mockRotas(new Promise(() => {})) // nunca resolve nesta suite
     render(<ClientesLista onAbrir={() => {}} />)
     expect(screen.getByText('Carregando…')).toBeInTheDocument()
   })
 
   it('erro: mostra alerta quando a API falha por motivo != sessao expirada', async () => {
-    mockGet.mockRejectedValue(new Error('falha de rede'))
+    mockRotas(new Error('falha de rede'))
     render(<ClientesLista onAbrir={() => {}} />)
     const alerta = await screen.findByRole('alert')
     expect(alerta).toHaveTextContent('Não foi possível carregar os clientes.')
   })
 
   it('vazio: mostra "nenhum cliente cadastrado" quando a API devolve lista vazia', async () => {
-    mockGet.mockResolvedValue([])
+    mockRotas([])
     render(<ClientesLista onAbrir={() => {}} />)
     expect(await screen.findByText(/nenhum cliente cadastrado/i)).toBeInTheDocument()
   })
 
   it('com dados: lista os clientes recebidos', async () => {
-    mockGet.mockResolvedValue([
+    mockRotas([
       cliente({ id: '1', nome: 'Mercado A' }),
       cliente({ id: '2', nome: 'Mercado B' }),
     ])
@@ -59,10 +83,14 @@ describe('ClientesLista — os quatro estados', () => {
 
 describe('ClientesLista — sessao expirada (401)', () => {
   it('chama onSessaoExpirada em vez de mostrar a mensagem de erro generica', async () => {
-    mockGet.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
+    // /api/clientes e /api/saidas sao buscados em paralelo (efeitos
+    // independentes) — os dois podem devolver 401, entao a asserção e
+    // toHaveBeenCalled (nao ...Once), mesmo padrao de RelatoriosTela.test.tsx
+    // e SaidasLista.test.tsx pra telas com mais de uma chamada paralela.
+    mockRotas(new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()
     render(<ClientesLista onAbrir={() => {}} onSessaoExpirada={onSessaoExpirada} />)
-    await vi.waitFor(() => expect(onSessaoExpirada).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(onSessaoExpirada).toHaveBeenCalled())
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
@@ -75,7 +103,7 @@ describe('ClientesLista — filtro por status', () => {
   ]
 
   it('conta cada status corretamente, inclusive os que nao aparecem na lista', async () => {
-    mockGet.mockResolvedValue(trio())
+    mockRotas(trio())
     render(<ClientesLista onAbrir={() => {}} />)
     await screen.findByText('Mercado A')
 
@@ -87,7 +115,7 @@ describe('ClientesLista — filtro por status', () => {
   })
 
   it('clicar num filtro mostra so os clientes daquele status', async () => {
-    mockGet.mockResolvedValue(trio())
+    mockRotas(trio())
     render(<ClientesLista onAbrir={() => {}} />)
     await screen.findByText('Mercado A')
 
@@ -98,7 +126,7 @@ describe('ClientesLista — filtro por status', () => {
   })
 
   it('voltar para "Todos" mostra todos os clientes de novo', async () => {
-    mockGet.mockResolvedValue(trio())
+    mockRotas(trio())
     render(<ClientesLista onAbrir={() => {}} />)
     await screen.findByText('Mercado A')
 
@@ -110,22 +138,62 @@ describe('ClientesLista — filtro por status', () => {
   })
 })
 
-describe('ClientesLista — sem pedidos (Fase 1 ainda nao existe)', () => {
-  it('ticket, participacao e inadimplencia aparecem zerados sem quebrar o layout', async () => {
-    mockGet.mockResolvedValue([cliente()])
+describe('ClientesLista — vendas reais (GET /api/saidas)', () => {
+  it('busca as vendas do periodo junto dos clientes', async () => {
+    mockRotas([cliente()], [saida({ cliente_id: '1', valor: 900 })])
     render(<ClientesLista onAbrir={() => {}} />)
     await screen.findByText('Mercado A')
 
-    // ticket do mes e ticket/entrega ficam em travessao (sem faturamento ainda)
-    expect(screen.getAllByText('—')).toHaveLength(2)
-    // participacao e inadimplencia aparecem como zero, nao em branco
-    expect(screen.getByText('0%')).toBeInTheDocument()
+    expect(mockGet).toHaveBeenCalledWith('/api/saidas')
+    // faturado e ticket/entrega refletem a venda real, nao mais travessao
+    expect(screen.getAllByText('R$ 900')).toHaveLength(2)
+  })
+
+  it('uma venda entregue e paga produz ticket e participacao (nao mais tudo zerado)', async () => {
+    mockRotas(
+      [cliente({ id: '1', nome: 'Mercado A' })],
+      [saida({ cliente_id: '1', valor: 900, status: 'Entregue', pag: 'Pago' })],
+    )
+    render(<ClientesLista onAbrir={() => {}} />)
+    await screen.findByText('Mercado A')
+
+    // ticket do mes e ticket/entrega (uma so entrega = o proprio valor)
+    expect(screen.getAllByText('R$ 900')).toHaveLength(2)
+    // unico cliente com faturamento no periodo -> 100% de participacao
+    expect(screen.getByText('100%')).toBeInTheDocument()
+    // pago, sem vencimento vencido -> 0% de inadimplencia (dado real, nao travessao)
     expect(screen.getByText('0,0%')).toBeInTheDocument()
+  })
+
+  it('falha em /api/saidas mantem a lista de clientes visivel, com metricas indisponiveis', async () => {
+    mockRotas([cliente()], new Error('falha de rede'))
+    render(<ClientesLista onAbrir={() => {}} />)
+
+    // a carteira aparece normalmente...
+    expect(await screen.findByText('Mercado A')).toBeInTheDocument()
+    // ...com um aviso discreto (nao um erro que apaga a lista)...
+    expect(await screen.findByRole('status')).toHaveTextContent(/não foi possível carregar as vendas/i)
+    // ...e as quatro metricas de venda em travessao, nao "0%"/"0,0%"
+    expect(screen.getAllByText('—')).toHaveLength(4)
+  })
+
+  it('cliente sem venda no periodo continua com travessao, nao com zero', async () => {
+    mockRotas(
+      [cliente({ id: '1', nome: 'Mercado A' }), cliente({ id: '2', nome: 'Mercado B' })],
+      [saida({ cliente_id: '1', valor: 1000 })], // so Mercado A vendeu
+    )
+    render(<ClientesLista onAbrir={() => {}} />)
+    await screen.findByText('Mercado B')
+
+    const linhaB = screen.getByText('Mercado B').closest('.clientes-linha') as HTMLElement
+    expect(within(linhaB).getAllByText('—')).toHaveLength(4)
+    expect(within(linhaB).queryByText('0%')).not.toBeInTheDocument()
+    expect(within(linhaB).queryByText('0,0%')).not.toBeInTheDocument()
   })
 
   it('clicar numa linha chama onAbrir com o id do cliente', async () => {
     const onAbrir = vi.fn()
-    mockGet.mockResolvedValue([cliente({ id: 'abc-123' })])
+    mockRotas([cliente({ id: 'abc-123' })])
     render(<ClientesLista onAbrir={onAbrir} />)
     const linha = await screen.findByText('Mercado A')
     fireEvent.click(linha)

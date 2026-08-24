@@ -34,6 +34,18 @@
   max-width: 1800px;
 }
 
+/* Aviso discreto (nao bloqueante) de que /api/saidas falhou — a carteira de
+   clientes continua visivel, so os numeros do periodo ficam indisponiveis. */
+.clientes-aviso-vendas {
+  background: #f6efd8;
+  border: 1px solid #e8dcae;
+  border-radius: 9px;
+  padding: 8px 13px;
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  color: #8a6a1f;
+}
+
 /* ---------- filtros ---------- */
 
 .clientes-filtros {

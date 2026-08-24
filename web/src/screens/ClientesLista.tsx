@@ -60,6 +60,50 @@ function corInadimplencia(pct: number): string {
   return HEALTH_INFO.red.cor
 }
 
+/** Cabeçalho de uma saída (venda), como GET /api/saidas devolve — ver
+ * api/src/routes/saidas.ts (paraJson). Só os campos que `paraPedidos`
+ * (abaixo) usa; mesmo padrão de tipo raso por consumidor que
+ * derive/relatorios.ts (SaidaResumo) e derive/financeiro.ts (SaidaFin) já
+ * seguem — não é o tipo "cheio" de ModalSaida.tsx de propósito. */
+interface SaidaBruta {
+  id: string
+  cliente_id: string | null
+  entrega: string | null
+  valor: number
+  status: 'Pendente' | 'Em rota' | 'Entregue' | 'Cancelado' | 'Devolvido'
+  pag: 'Pago' | 'Pendente' | 'Atrasado' | '—'
+  venc: string | null
+}
+
+/**
+ * Converte o formato bruto de GET /api/saidas (`cliente_id`, chave
+ * estrangeira real) para o `Pedido` que `derivarClientes` espera
+ * (`cliente`, o NOME do cliente) — `Pedido` é o tipo herdado do protótipo,
+ * de antes de existir schema/API, e as demais funções de derive/clientes.ts
+ * (ticketPorEntrega, inadimplenciaPorCliente) já dependem de `cliente` ser
+ * o nome pra agrupar via `p.cliente === c.nome`. É a resposta que se adapta
+ * aqui — não o tipo que se renomeia pra bater com o banco (`Pedido` é usado
+ * só aqui hoje, mas nao deveria virar `cliente_id` por isso).
+ *
+ * Sem `cliente_id` (venda avulsa) ou com um `cliente_id` que não bate com
+ * nenhum cliente carregado (cadastro excluído depois da venda), usa o
+ * próprio `cliente_id` (ou '' se nulo) como `cliente`: nunca é igual a um
+ * nome real, então a venda ainda entra no faturamento total do período
+ * (como toda venda real deveria) mas não fica atribuída a cliente nenhum.
+ */
+function paraPedidos(saidasBrutas: SaidaBruta[], clientes: Cliente[]): Pedido[] {
+  const nomePorId = new Map(clientes.map(c => [c.id, c.nome]))
+  return saidasBrutas.map(s => ({
+    id: s.id,
+    cliente: (s.cliente_id && nomePorId.get(s.cliente_id)) || s.cliente_id || '',
+    entrega: s.entrega ?? '',
+    valor: s.valor,
+    status: s.status,
+    pag: s.pag,
+    venc: s.venc,
+  }))
+}
+
 interface ClientesListaProps {
   onAbrir: (id: string) => void
   /** Sessão expirou (401 da API) — a tela volta ao login em vez de mostrar erro. */
@@ -68,22 +112,17 @@ interface ClientesListaProps {
 
 export function ClientesLista({ onAbrir, onSessaoExpirada }: ClientesListaProps) {
   const [clientes, setClientes] = useState<Cliente[]>([])
-  const [pedidos, setPedidos] = useState<Pedido[]>([])
+  const [saidasBrutas, setSaidasBrutas] = useState<SaidaBruta[]>([])
   const [periodo] = useState('all')
   const [filtro, setFiltro] = useState<Filtro>('Todos')
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
+  const [erroVendas, setErroVendas] = useState('')
 
   useEffect(() => {
     let cancelado = false
-    Promise.all([
-      api.get<Cliente[]>('/api/clientes'),
-      // Pedidos ainda nao tem endpoint (Fase 1). Ate la, lista vazia:
-      // as derivacoes tratam ausencia de pedido sem quebrar (ticket,
-      // inadimplencia e participacao aparecem zerados, health nao penaliza).
-      Promise.resolve<Pedido[]>([]),
-    ])
-      .then(([cs, ps]) => { if (!cancelado) { setClientes(cs); setPedidos(ps) } })
+    api.get<Cliente[]>('/api/clientes')
+      .then(cs => { if (!cancelado) setClientes(cs) })
       .catch((err: unknown) => {
         if (cancelado) return
         if (err instanceof ErroApi && err.status === 401) {
@@ -96,6 +135,32 @@ export function ClientesLista({ onAbrir, onSessaoExpirada }: ClientesListaProps)
     return () => { cancelado = true }
   }, [onSessaoExpirada])
 
+  // Vendas do período: busca separada da lista de clientes acima, e falha
+  // SOZINHA — se /api/saidas cair, a carteira de clientes (o que esta tela
+  // existe pra mostrar) continua visível, so com as metricas que dependem
+  // de venda indisponiveis (ver `erroVendas` e o aviso discreto abaixo, e
+  // o travessao no lugar de zero nas celulas). Sem filtro de periodo na
+  // API porque esta tela nunca oferece um seletor de periodo (so 'all') —
+  // RelatoriosTela/DashboardTela ja buscam a lista inteira do mesmo jeito;
+  // se o volume de saidas crescer a ponto de isso pesar (aproximando de
+  // dezenas de milhares de linhas), a resposta e um endpoint agregado por
+  // periodo, igual ao que ja existe para /api/relatorios/produtos.
+  useEffect(() => {
+    let cancelado = false
+    api.get<SaidaBruta[]>('/api/saidas')
+      .then(ss => { if (!cancelado) setSaidasBrutas(ss) })
+      .catch((err: unknown) => {
+        if (cancelado) return
+        if (err instanceof ErroApi && err.status === 401) {
+          onSessaoExpirada?.()
+          return
+        }
+        setErroVendas('Não foi possível carregar as vendas do período — os números da carteira ficam indisponíveis.')
+      })
+    return () => { cancelado = true }
+  }, [onSessaoExpirada])
+
+  const pedidos = paraPedidos(saidasBrutas, clientes)
   const derivados: ClienteDerivado[] = derivarClientes(clientes, pedidos, periodo, hojeIsoLocal())
   const visiveis = filtro === 'Todos'
     ? derivados
@@ -119,6 +184,10 @@ export function ClientesLista({ onAbrir, onSessaoExpirada }: ClientesListaProps)
 
   return (
     <div className="clientes-lista">
+      {erroVendas && (
+        <p className="clientes-aviso-vendas" role="status">{erroVendas}</p>
+      )}
+
       <div className="clientes-filtros">
         {FILTROS.map(f => (
           <button
@@ -169,9 +238,18 @@ export function ClientesLista({ onAbrir, onSessaoExpirada }: ClientesListaProps)
               <div className="clientes-col-num clientes-mono" style={{ color: corTicketEntrega(c.ticketEntrega) }}>
                 {c.ticketEntrega ? money(c.ticketEntrega) : '—'}
               </div>
-              <div className="clientes-col-num clientes-mono">{c.participacao}%</div>
-              <div className="clientes-col-num clientes-mono" style={{ color: corInadimplencia(c.inadimplencia) }}>
-                {c.inadimplencia.toFixed(1).replace('.', ',')}%
+              {/* Sem faturado no periodo (cliente sem venda, OU vendas
+                  indisponiveis por falha de /api/saidas), participacao e
+                  inadimplencia ficam em travessao — nao "0%"/"0,0%", que
+                  fingiria ser um dado real (0% de atraso de quem nao
+                  vendeu nada e diferente de 0% de atraso de quem vendeu e
+                  pagou tudo em dia). */}
+              <div className="clientes-col-num clientes-mono">{c.faturado ? `${c.participacao}%` : '—'}</div>
+              <div
+                className="clientes-col-num clientes-mono"
+                style={{ color: c.faturado ? corInadimplencia(c.inadimplencia) : NEUTRO }}
+              >
+                {c.faturado ? c.inadimplencia.toFixed(1).replace('.', ',') + '%' : '—'}
               </div>
               <div className="clientes-col-num">
                 <span className="clientes-health-badge" style={{ color: health.cor, background: health.bg }}>

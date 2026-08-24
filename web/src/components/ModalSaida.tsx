@@ -463,12 +463,16 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
                           aria-label="Quantidade"
                         />
                         {/* Aviso de "quantidade acima do estoque disponivel"
-                            (existe no protótipo, modal-pedido.html) fica para
-                            quando existir um endpoint de estoque — Fase 2,
-                            calculado como entradas - perdas - saidas, ainda
-                            nao implementado. Sem esse numero real nao ha o
-                            que comparar aqui: nao inventar calculo nem valor
-                            de disponibilidade nesta fase. */}
+                            (existe no protótipo, modal-pedido.html) continua
+                            sem implementar aqui — mas nao mais por falta de
+                            dado: GET /api/estoque ja existe e agrega
+                            entradas - perdas - saidas por produto+unidade
+                            (ver api/src/routes/estoque.ts e
+                            screens/EstoqueLista.tsx). Falta so buscar esse
+                            saldo neste modal e comparar contra `it.qtd`;
+                            nao fizemos isso aqui ainda, entao nenhum calculo
+                            e nenhum valor de disponibilidade sao inventados
+                            nesta interface por enquanto. */}
                       </div>
                       <input
                         className="modal-input modal-input--mono modal-input--linha"

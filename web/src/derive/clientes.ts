@@ -55,7 +55,17 @@ export interface Pedido {
   cliente: string
   entrega: string          // ISO: aaaa-mm-dd
   valor: number
-  status: 'Entregue' | 'Em rota' | 'Cancelado' | 'Devolvido'
+  /** 'Pendente' (pedido lançado, ainda não entregue) foi acrescentado aqui
+   * quando as telas passaram a alimentar `Pedido` com GET /api/saidas de
+   * verdade (ver ClientesLista.tsx/ClienteFicha.tsx): o union original,
+   * herdado do protótipo, não previa esse valor porque não existia dado
+   * real pra testar contra. Nenhuma função deste arquivo faz switch
+   * exaustivo sobre `status` (todas comparam só com `=== 'Entregue'`), e
+   * `inadimplenciaPorCliente` PRECISA que pedidos 'Pendente' continuem no
+   * array (o numerador dela conta atraso de QUALQUER status, de propósito —
+   * ver o comentário grande na função) — descartá-los antes de chegar aqui
+   * quebraria esse comportamento em silêncio. */
+  status: 'Pendente' | 'Entregue' | 'Em rota' | 'Cancelado' | 'Devolvido'
   pag: 'Pago' | 'Pendente' | 'Atrasado' | '—'
   /** Vencimento (ISO), usado por `situacaoExibidaSaida` (derive/pagamento.ts)
    * pra derivar 'Atrasado' quando `pag` gravado é 'Pendente'. Já vem de

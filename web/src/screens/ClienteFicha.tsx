@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, ErroApi } from '../api/client'
-import { derivarClientes, type Cliente, type StatusCliente, type Health } from '../derive/clientes'
+import { derivarClientes, type Cliente, type Pedido, type StatusCliente, type Health } from '../derive/clientes'
+import { situacaoExibidaSaida } from '../derive/pagamento'
 import './ClienteFicha.css'
 
 const STATUS_LABEL: Record<StatusCliente, string> = {
@@ -27,6 +28,57 @@ function hojeIsoLocal(): string {
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
 }
 
+/** Mesma dupla de RelatoriosTela.tsx/AbaClientes: valor em R$, ou travessao
+ * quando nao ha dado real por tras (nunca "R$ 0", que fingiria um zero
+ * apurado). */
+const moneyOuTraco = (n: number) => (n ? money(n) : '—')
+
+/** 'AAAA-MM-DD' -> 'DD/MM'. Mesmo formato de dataBr em SaidasLista.tsx/
+ * RelatoriosTela.tsx. Travessao sem data valida. */
+function dataBr(iso: string | null | undefined): string {
+  if (!iso || iso.length < 10) return '—'
+  const [, mes, dia] = iso.split('-')
+  return `${dia}/${mes}`
+}
+
+/** Cabeçalho de uma saída (venda), como GET /api/saidas devolve — ver
+ * api/src/routes/saidas.ts (paraJson) e o mesmo tipo em
+ * ClientesLista.tsx (par desta tela, mesma justificativa de tipo raso
+ * duplicado por consumidor). */
+interface SaidaBruta {
+  id: string
+  cliente_id: string | null
+  entrega: string | null
+  valor: number
+  status: 'Pendente' | 'Em rota' | 'Entregue' | 'Cancelado' | 'Devolvido'
+  pag: 'Pago' | 'Pendente' | 'Atrasado' | '—'
+  venc: string | null
+}
+
+/**
+ * Converte o formato bruto de GET /api/saidas para o `Pedido` que
+ * `derivarClientes` espera — mesma ideia de `paraPedidos` em
+ * ClientesLista.tsx, mas sem precisar da lista inteira de clientes: aqui só
+ * um cliente importa (`alvo`), então basta marcar como dele as saídas cujo
+ * `cliente_id` bate com o id da ficha; as demais recebem o próprio
+ * `cliente_id` (ou '' se nulo) — nunca igual a `alvo.nome`, então continuam
+ * fora de `alvo`, mas ainda contam no faturamento total do período
+ * (`derivarClientes` usa TODAS as saídas passadas pra calcular a
+ * participação, não só as do cliente da ficha — daí buscar a lista inteira
+ * de /api/saidas aqui, não uma rota filtrada por cliente).
+ */
+function paraPedidos(saidasBrutas: SaidaBruta[], alvo: Cliente): Pedido[] {
+  return saidasBrutas.map(s => ({
+    id: s.id,
+    cliente: s.cliente_id === alvo.id ? alvo.nome : (s.cliente_id || ''),
+    entrega: s.entrega ?? '',
+    valor: s.valor,
+    status: s.status,
+    pag: s.pag,
+    venc: s.venc,
+  }))
+}
+
 function iniciais(nome: string): string {
   return nome
     .split(' ')
@@ -49,6 +101,8 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
+  const [saidasBrutas, setSaidasBrutas] = useState<SaidaBruta[]>([])
+  const [erroVendas, setErroVendas] = useState('')
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false)
   const [excluindo, setExcluindo] = useState(false)
   const [erroExclusao, setErroExclusao] = useState('')
@@ -78,6 +132,26 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
     return () => { cancelado = true }
   }, [id, onSessaoExpirada])
 
+  // Vendas (todas, nao so as deste cliente — derivarClientes precisa do
+  // total pra calcular a participacao dele no faturamento) — busca separada
+  // da ficha em si, e falha SOZINHA: mesmo espirito de ClientesLista.tsx,
+  // uma falha aqui nao pode apagar a ficha do cliente que ja carregou, so
+  // deixa as metricas comerciais indisponiveis (ver `erroVendas`).
+  useEffect(() => {
+    let cancelado = false
+    api.get<SaidaBruta[]>('/api/saidas')
+      .then(ss => { if (!cancelado) setSaidasBrutas(ss) })
+      .catch((err: unknown) => {
+        if (cancelado) return
+        if (err instanceof ErroApi && err.status === 401) {
+          onSessaoExpirada?.()
+          return
+        }
+        setErroVendas('Não foi possível carregar as vendas — as métricas comerciais ficam indisponíveis.')
+      })
+    return () => { cancelado = true }
+  }, [id, onSessaoExpirada])
+
   async function excluir() {
     setErroExclusao('')
     setExcluindo(true)
@@ -99,14 +173,29 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
   if (erro) return <p className="ficha-estado ficha-estado--erro" role="alert">{erro}</p>
   if (!cliente) return null
 
-  // Ainda nao ha endpoint de pedidos (Fase 1): lista vazia, mesma convencao
-  // de ClientesLista — as derivacoes tratam ausencia de pedido sem quebrar.
-  const [derivado] = derivarClientes([cliente], [], 'all', hojeIsoLocal())
+  const pedidos = paraPedidos(saidasBrutas, cliente)
+  const [derivado] = derivarClientes([cliente], pedidos, 'all', hojeIsoLocal())
   const health = HEALTH_INFO[derivado.health]
   const statusLabel = STATUS_LABEL[cliente.status] ?? cliente.status
+  // Mesmo sinal de "sem dado real" que ClientesLista.tsx usa por linha:
+  // sem faturado no periodo (cliente sem venda, ou vendas indisponiveis por
+  // falha de /api/saidas), participacao e inadimplencia viram travessao —
+  // nao um zero que fingiria ser apurado.
+  const temVendas = derivado.faturado > 0
+  // Entregas deste cliente, mais recente primeiro — alimenta o bloco
+  // "Histórico de entregas". So as ja entregues (mesmo recorte de
+  // `derivado.entregas`/faturado, que tambem so contam status 'Entregue');
+  // um pedido cancelado/em rota nao e uma "entrega" no sentido do bloco.
+  const entregasCliente = pedidos
+    .filter(p => p.cliente === cliente.nome && p.status === 'Entregue')
+    .sort((a, b) => (b.entrega || '').localeCompare(a.entrega || ''))
 
   return (
     <div className="ficha">
+      {erroVendas && (
+        <p className="ficha-aviso-vendas" role="status">{erroVendas}</p>
+      )}
+
       <div className="ficha-topo">
         <button type="button" className="ficha-voltar" onClick={onVoltar}>← Voltar para lista</button>
         <div className="ficha-topo-spacer" />
@@ -167,28 +256,41 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
             <div className="ficha-metricas">
               <div className="ficha-metrica">
                 <div className="ficha-metrica-label">Faturado / mês</div>
-                <div className="ficha-metrica-valor">{money(derivado.faturado)}</div>
+                <div className="ficha-metrica-valor">{moneyOuTraco(derivado.faturado)}</div>
               </div>
               <div className="ficha-metrica">
                 <div className="ficha-metrica-label">Ticket / entrega</div>
-                <div className="ficha-metrica-valor">{money(derivado.ticketEntrega)}</div>
+                <div className="ficha-metrica-valor">{moneyOuTraco(derivado.ticketEntrega)}</div>
               </div>
               <div className="ficha-metrica">
                 <div className="ficha-metrica-label">% do faturamento</div>
-                <div className="ficha-metrica-valor">{derivado.participacao}%</div>
+                <div className="ficha-metrica-valor">{temVendas ? `${derivado.participacao}%` : '—'}</div>
               </div>
               <div className="ficha-metrica">
                 <div className="ficha-metrica-label">Inadimplência</div>
-                <div className="ficha-metrica-valor">{derivado.inadimplencia.toFixed(1).replace('.', ',')}%</div>
+                <div className="ficha-metrica-valor">
+                  {temVendas ? derivado.inadimplencia.toFixed(1).replace('.', ',') + '%' : '—'}
+                </div>
               </div>
             </div>
           </div>
 
           <div className="ficha-bloco">
             <h3 className="ficha-bloco-titulo">Histórico de entregas</h3>
-            {/* Sem endpoint de pedidos ainda (Fase 1): mensagem explicita em
-                vez de renderizar uma tabela vazia. */}
-            <p className="ficha-historico-vazio">Nenhuma entrega registrada.</p>
+            {entregasCliente.length === 0 ? (
+              <p className="ficha-historico-vazio">Nenhuma entrega registrada.</p>
+            ) : (
+              <div className="ficha-historico">
+                {entregasCliente.map(p => (
+                  <div key={p.id} className="ficha-linha">
+                    <span className="ficha-linha-chave">
+                      {dataBr(p.entrega)} · {situacaoExibidaSaida(p.pag, p.venc, hojeIsoLocal())}
+                    </span>
+                    <span className="ficha-linha-valor">{money(p.valor)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -233,7 +335,9 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
             </div>
             <div className="ficha-linha">
               <span className="ficha-linha-chave">Taxa de inadimplência</span>
-              <span className="ficha-linha-valor">{derivado.inadimplencia.toFixed(1).replace('.', ',')}%</span>
+              <span className="ficha-linha-valor">
+                {temVendas ? derivado.inadimplencia.toFixed(1).replace('.', ',') + '%' : '—'}
+              </span>
             </div>
           </div>
 

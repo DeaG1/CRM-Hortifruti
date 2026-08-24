@@ -252,3 +252,33 @@ describe('EntradasLista — pagamento editável na linha (chip vira seletor)', (
     await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalled())
   })
 })
+
+/**
+ * `peso_total` chega da API em kg, com cada item convertido pela unidade
+ * dele (KG conta direto, caixa conta qtd * produtos.peso_medio). Item em
+ * unidade nao-KG cujo produto nao tem peso medio cadastrado nao e
+ * convertivel: a API o deixa de fora e diz quantos foram em
+ * `itens_sem_conversao`, em vez de inventar fator 1. A tela precisa dizer
+ * isso — um peso silenciosamente menor que a realidade seria pior que um
+ * peso marcado como incompleto.
+ */
+describe('EntradasLista — peso incompleto (itens sem peso medio cadastrado)', () => {
+  it('entrada 100% convertivel: peso sai limpo, sem marca', async () => {
+    mockRotasPadrao([entrada({ peso_total: 30 })])
+    render(<EntradasLista />)
+    // Duas ocorrencias: a celula da linha e o card "PESO RECEBIDO" no topo.
+    expect(await screen.findAllByText('30 kg')).toHaveLength(2)
+    expect(screen.queryByText('30 kg*')).not.toBeInTheDocument()
+  })
+
+  it('entrada com item nao convertivel: peso marcado com * e explicacao no title', async () => {
+    mockRotasPadrao([entrada({ peso_total: 30, itens_sem_conversao: 1 })])
+    render(<EntradasLista />)
+    // Duas ocorrencias: a celula da linha e o card "PESO RECEBIDO" no topo,
+    // ambos somando o mesmo peso incompleto.
+    const marcados = await screen.findAllByText('30 kg*')
+    expect(marcados).toHaveLength(2)
+    expect(marcados[0].getAttribute('title')).toContain('peso médio')
+    expect(marcados[0].getAttribute('title')).toContain('1 item')
+  })
+})

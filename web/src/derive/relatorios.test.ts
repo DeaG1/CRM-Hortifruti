@@ -618,6 +618,72 @@ describe('derivarRelatorioCompras', () => {
     const { totais } = derivarRelatorioCompras(fornecedores, entradas, '2026-06', '2026-06')
     expect(totais.totalComprado).toBe(1000)
   })
+
+  // ---- quantidade incompleta (itens sem peso medio cadastrado) ----
+  //
+  // `peso_total` chega da API ja em kg, com cada item convertido pela
+  // unidade dele. Item em unidade nao-KG cujo produto nao tem peso_medio
+  // nao e convertivel: a API o deixa FORA do peso e conta quantos foram em
+  // `itens_sem_conversao`, em vez de inventar fator 1. Como o valor desses
+  // itens continua inteiro em `valor_total`, o precoMedio (valor/qtd) sai
+  // para cima — por isso a contagem tem que chegar ate a linha do
+  // fornecedor, para a tela poder marcar a celula.
+
+  it('sem itens fora da conversao, o contador e 0 (nada a sinalizar)', () => {
+    const entradas = [entrada({ fornecedor_id: 'f1', peso_total: 1000, valor_total: 2000 })]
+    const { linhas, totais } = derivarRelatorioCompras(fornecedores, entradas, '', '')
+    expect(linhas[0].itensSemConversao).toBe(0)
+    expect(totais.itensSemConversao).toBe(0)
+    expect(linhas[0].precoMedio).toBe(2)
+  })
+
+  it('entrada com item sem peso medio: o contador chega na linha do fornecedor e no total', () => {
+    const entradas = [
+      entrada({ fornecedor_id: 'f1', peso_total: 1000, valor_total: 2000, itens_sem_conversao: 2 }),
+    ]
+    const { linhas, totais } = derivarRelatorioCompras(fornecedores, entradas, '', '')
+    expect(linhas[0].itensSemConversao).toBe(2)
+    expect(totais.itensSemConversao).toBe(2)
+    // O preco medio continua saindo — mas sobre uma qtd incompleta, e por
+    // isso a tela o marca em vez de exibi-lo limpo.
+    expect(linhas[0].precoMedio).toBe(2)
+  })
+
+  it('soma o contador de varias entradas do mesmo fornecedor', () => {
+    const entradas = [
+      entrada({ fornecedor_id: 'f1', peso_total: 1000, valor_total: 2000, itens_sem_conversao: 1 }),
+      entrada({ fornecedor_id: 'f1', peso_total: 500, valor_total: 1000, itens_sem_conversao: 3 }),
+      entrada({ fornecedor_id: 'f1', peso_total: 500, valor_total: 1000 }),
+    ]
+    const { linhas, totais } = derivarRelatorioCompras(fornecedores, entradas, '', '')
+    expect(linhas[0].itensSemConversao).toBe(4)
+    expect(totais.itensSemConversao).toBe(4)
+  })
+
+  it('o contador e por fornecedor: um marcado nao contamina o outro', () => {
+    const doisFornecedores = [
+      fornecedor({ id: 'f1', nome: 'Com caixa sem peso' }),
+      fornecedor({ id: 'f2', nome: 'So quilo' }),
+    ]
+    const entradas = [
+      entrada({ fornecedor_id: 'f1', peso_total: 1000, valor_total: 2000, itens_sem_conversao: 1 }),
+      entrada({ fornecedor_id: 'f2', peso_total: 1000, valor_total: 3000 }),
+    ]
+    const { linhas } = derivarRelatorioCompras(doisFornecedores, entradas, '', '')
+    const f1 = linhas.find(l => l.fornecedorId === 'f1')!
+    const f2 = linhas.find(l => l.fornecedorId === 'f2')!
+    expect(f1.itensSemConversao).toBe(1)
+    expect(f2.itensSemConversao).toBe(0)
+  })
+
+  it('so conta itens de entradas DENTRO do periodo', () => {
+    const entradas = [
+      entrada({ fornecedor_id: 'f1', data: '2026-06-08', itens_sem_conversao: 1 }),
+      entrada({ fornecedor_id: 'f1', data: '2026-05-08', itens_sem_conversao: 5 }),
+    ]
+    const { totais } = derivarRelatorioCompras(fornecedores, entradas, '2026-06', '2026-06')
+    expect(totais.itensSemConversao).toBe(1)
+  })
 })
 
 // ------------------------------------------------------------ 5. ranking de produtos

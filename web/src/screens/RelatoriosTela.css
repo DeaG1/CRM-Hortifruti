@@ -298,6 +298,29 @@
   color: #2a2a24;
 }
 
+/* Aviso de total incompleto (itens sem peso médio, aba Compras): visível o
+   bastante para ninguém ler o preço médio como número fechado, discreto o
+   bastante para não competir com a tabela. Mesmo âmbar de "atenção" usado
+   nos indicadores. */
+.relatorios-nota--incompleto {
+  color: #8a6a12;
+  background: #f6efd8;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-top: 8px;
+}
+
+.relatorios-nota--incompleto strong {
+  color: #8a6a12;
+}
+
+/* A célula marcada: o asterisco basta como sinal, o `title` explica. O
+   pontilhado sob o número avisa que há explicação sem gritar. */
+.relatorios-incompleto {
+  border-bottom: 1px dotted #c79320;
+  cursor: help;
+}
+
 /* grids por relatório — mesmas frações de coluna do protótipo */
 
 .relatorios-grid-clientes {

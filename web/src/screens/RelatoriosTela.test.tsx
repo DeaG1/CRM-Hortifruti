@@ -297,6 +297,48 @@ describe('RelatoriosTela — compras', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Compras' }))
     expect(await screen.findByText('Fazenda Boa Terra')).toBeInTheDocument()
   })
+
+  // `peso_total` vem da API em kg, mas item em unidade nao-KG sem peso
+  // medio cadastrado nao e convertivel e fica de fora (a API conta quantos
+  // em itens_sem_conversao). O valor desses itens continua no numerador do
+  // preco medio e o peso deles nao entra no denominador: o numero sai para
+  // cima e nao pode aparecer como se fosse fechado.
+  it('quantidade completa: preco medio sai limpo, sem marca nem aviso', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ valor_total: 4000, peso_total: 2000 })],
+      '/api/fornecedores': [fornecedor()],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Compras' }))
+
+    expect(await screen.findByText('R$ 2,00')).toBeInTheDocument()
+    expect(screen.queryByText('R$ 2,00*')).not.toBeInTheDocument()
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
+  it('quantidade incompleta: preco medio marcado com * e nota explicando o que ficou de fora', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ valor_total: 4000, peso_total: 2000, itens_sem_conversao: 2 })],
+      '/api/fornecedores': [fornecedor()],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Compras' }))
+
+    const marcado = await screen.findByText('R$ 2,00*')
+    expect(marcado).toBeInTheDocument()
+    // A explicacao vive no title da propria celula — o asterisco sozinho
+    // sinalizaria sem dizer o que falta.
+    expect(marcado).toHaveAttribute('title', expect.stringContaining('2 itens lançados'))
+    expect(marcado.getAttribute('title')).toContain('peso médio')
+
+    const nota = screen.getByRole('note')
+    expect(nota).toHaveTextContent('fora da quantidade')
+    expect(nota).toHaveTextContent('Cadastre o peso médio da embalagem')
+  })
 })
 
 describe('RelatoriosTela — lançamentos (livro-caixa)', () => {

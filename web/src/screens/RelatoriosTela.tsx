@@ -108,6 +108,26 @@ const qtd = (n: number) => n.toLocaleString('pt-BR')
 const pct1 = (n: number) => n.toFixed(1).replace('.', ',') + '%'
 const pctInt = (n: number) => Math.round(n) + '%'
 
+/**
+ * Texto do aviso de quantidade incompleta na aba Compras. `peso_total` (e
+ * portanto a QTD e o PREÇO MÉD. do relatório) sai da API em quilos, com
+ * cada item convertido pela unidade dele — mas item lançado em unidade
+ * diferente de KG cujo produto não tem peso médio cadastrado NÃO é
+ * convertível, e a API prefere deixá-lo de fora a inventar um fator (ver
+ * `itens_sem_conversao` em api/src/routes/entradas.ts). Quando isso
+ * acontece o preço médio ainda sai — mas sai para cima, porque o valor
+ * desses itens continua no numerador e o peso deles não entra no
+ * denominador. Por isso a célula é marcada com `*` e este texto explica o
+ * que falta: um número errado é pior que um número faltando, e um número
+ * incompleto exibido limpo é a pior das três opções. */
+function avisoSemConversao(n: number): string {
+  const itens = n === 1 ? '1 item lançado' : `${n} itens lançados`
+  const verbo = n === 1 ? 'ficou' : 'ficaram'
+  return `${itens} em unidade diferente de KG, sem peso médio cadastrado no produto, ${verbo} `
+    + 'fora da quantidade — sem o peso da embalagem não há como somar em quilos. '
+    + 'O preço médio acima está calculado sobre uma quantidade incompleta.'
+}
+
 /** 'AAAA-MM-DD' -> 'DD/MM'. Travessão sem data válida — mesmo `_fmtDM` do protótipo. */
 function dataBr(iso: string | null): string {
   const m = String(iso ?? '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
@@ -298,7 +318,12 @@ export function RelatoriosTela({ onSessaoExpirada }: RelatoriosTelaProps) {
         return {
           header: ['Fornecedor', 'Coletas', 'Qtd', 'Preço médio', 'Valor', 'Perda', 'Aproveitamento', 'A pagar'],
           rows: relCompras.linhas.map(l => [
-            l.fornecedor, l.coletas, qtd(l.qtd), l.precoMedio != null ? moneyDetalhado(l.precoMedio) : '—',
+            l.fornecedor, l.coletas, qtd(l.qtd),
+            l.precoMedio == null
+              ? '—'
+              // Mesmo asterisco da tela: o CSV sai da mesma leitura, não de
+              // uma versão "limpa" que esconderia a quantidade incompleta.
+              : moneyDetalhado(l.precoMedio) + (l.itensSemConversao > 0 ? '*' : ''),
             money(l.valor), pct1(l.perdaPct), pctInt(l.aproveitPct), moneyOuTraco(l.aPagar),
           ]),
         }
@@ -575,7 +600,17 @@ function AbaCompras({ dados }: { dados: ReturnType<typeof derivarRelatorioCompra
             <div className="relatorios-forte">{l.fornecedor}</div>
             <div className="relatorios-num relatorios-mono">{l.coletas}</div>
             <div className="relatorios-num relatorios-mono">{qtd(l.qtd)}</div>
-            <div className="relatorios-num relatorios-mono relatorios-suave">{l.precoMedio != null ? moneyDetalhado(l.precoMedio) : '—'}</div>
+            <div className="relatorios-num relatorios-mono relatorios-suave">
+              {l.precoMedio == null
+                ? '—'
+                : l.itensSemConversao > 0
+                  ? (
+                    <span className="relatorios-incompleto" title={avisoSemConversao(l.itensSemConversao)}>
+                      {moneyDetalhado(l.precoMedio)}*
+                    </span>
+                  )
+                  : moneyDetalhado(l.precoMedio)}
+            </div>
             <div className="relatorios-num relatorios-mono relatorios-forte">{money(l.valor)}</div>
             <div className="relatorios-num relatorios-mono" style={{ color: corPerda(l.perdaPct) }}>{pct1(l.perdaPct)}</div>
             <div className="relatorios-num relatorios-mono relatorios-suave">{pctInt(l.aproveitPct)}</div>
@@ -585,8 +620,15 @@ function AbaCompras({ dados }: { dados: ReturnType<typeof derivarRelatorioCompra
         {linhas.length === 0 && <div className="relatorios-tabela-vazia">Nenhuma compra no período.</div>}
       </div>
       <div className="relatorios-nota">
-        Ordenado por valor comprado. <strong>Aproveitamento</strong> = quanto da carga chegou em condição de venda.
+        Ordenado por valor comprado. Quantidades em <strong>kg</strong> (caixas convertidas pelo peso médio do
+        produto). <strong>Aproveitamento</strong> = quanto da carga chegou em condição de venda.
       </div>
+      {totais.itensSemConversao > 0 && (
+        <div className="relatorios-nota relatorios-nota--incompleto" role="note">
+          <strong>*</strong> {avisoSemConversao(totais.itensSemConversao)} Cadastre o peso médio da embalagem
+          em Produtos para que entrem na conta.
+        </div>
+      )}
     </>
   )
 }

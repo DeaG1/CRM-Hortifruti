@@ -286,3 +286,12 @@
 .entradas-rodape-nota strong {
   color: #2a2a24;
 }
+
+/* Peso incompleto: a entrada tem item em unidade não-KG sem peso médio
+   cadastrado, então o total em quilos ignora esse item (a API nunca inventa
+   o fator — ver itens_sem_conversao em api/src/routes/entradas.ts). O
+   asterisco sinaliza e o `title` explica. */
+.entradas-incompleto {
+  border-bottom: 1px dotted #c79320;
+  cursor: help;
+}

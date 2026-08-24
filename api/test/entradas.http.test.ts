@@ -39,6 +39,8 @@ let outroTenantId: string
 let tokenAdmin: string
 let tokenColab: string
 let produtoId: string
+let produtoCaixaComPeso: string
+let produtoCaixaSemPeso: string
 let fornecedorId: string
 let produtoOutroTenantId: string
 let fornecedorOutroTenantId: string
@@ -78,6 +80,21 @@ beforeAll(async () => {
   const [produto] = await admin`
     insert into produtos (tenant_id, nome) values (${tenantId}, 'Produto Entrada Http') returning id`
   produtoId = produto.id
+  // Fixtures da conversao para KG do peso_total (GET /): um produto vendido
+  // em caixa COM peso medio cadastrado (1 CX = 20 kg) e outro em caixa sem
+  // peso medio (0 = "nao informado", ver migration 009) — o segundo nao e
+  // convertivel e por isso fica de fora do total, contado em
+  // itens_sem_conversao. `produtoId` acima fica com o default (un 'KG',
+  // peso_medio 0) de proposito: e o caso "so KG", onde a conversao e no-op.
+  const [produtoCx] = await admin`
+    insert into produtos (tenant_id, nome, un, peso_medio)
+    values (${tenantId}, 'Caixa Com Peso Http', 'CX', 20) returning id`
+  produtoCaixaComPeso = produtoCx.id
+  const [produtoCxSemPeso] = await admin`
+    insert into produtos (tenant_id, nome, un, peso_medio)
+    values (${tenantId}, 'Caixa Sem Peso Http', 'CX', 0) returning id`
+  produtoCaixaSemPeso = produtoCxSemPeso.id
+
   const [fornecedor] = await admin`
     insert into fornecedores (tenant_id, nome) values (${tenantId}, 'Fornecedor Entrada Http') returning id`
   fornecedorId = fornecedor.id
@@ -327,6 +344,134 @@ describe('conversao numerica (paraJson)', () => {
     // divergencia sao os relatorios/estoque, nao esta rota).
     expect(linha.perda_kg).toBe(3)
     expect(linha.perda_itens_qtd).toBe(2)
+  })
+})
+
+/**
+ * peso_total de GET / sai em KG, nao na soma crua das qtd. `entrada_itens.un`
+ * aceita 'KG','CX','UN','DZ','MC' e somar tudo junto produzia um numero sem
+ * significado fisico (30 KG + 12 CX = "42") que ainda alimenta
+ * `precoMedio = valor / qtd` no relatorio de compras. A regra e a mesma de
+ * api/src/routes/estoque.ts (paraJson/equivalente_kg): 'KG' conta qtd, o
+ * resto conta qtd * produtos.peso_medio, e so quando peso_medio > 0.
+ */
+describe('peso_total em KG (conversao por produtos.peso_medio)', () => {
+  async function linhaDaLista(id: string) {
+    const res = await pedir('/api/entradas', comoAdmin())
+    const lista = await res.json()
+    return lista.find((e: { id: string }) => e.id === id)
+  }
+
+  it('so KG: peso_total e a soma crua das qtd (a conversao e no-op) e nada fica de fora', async () => {
+    const res = await pedir('/api/entradas', comoAdmin(json({
+      numero: 'UN-KG-1', data: '2026-02-01',
+      itens: [umItem({ qtd: 30, preco: 2 }), umItem({ qtd: 12, preco: 3 })],
+    })))
+    expect(res.status).toBe(201)
+    const criado = await res.json()
+
+    const linha = await linhaDaLista(criado.id)
+    // Identico ao que a rota ja devolvia antes da conversao existir: quem
+    // lanca tudo em KG nao pode ver numero nenhum mudar.
+    expect(linha.peso_total).toBe(42)
+    expect(linha.valor_total).toBe(96)
+    expect(linha.itens_sem_conversao).toBe(0)
+  })
+
+  it('CX com peso medio cadastrado: peso_total = qtd * peso_medio (1 CX = 20 kg)', async () => {
+    const res = await pedir('/api/entradas', comoAdmin(json({
+      numero: 'UN-CX-1', data: '2026-02-02',
+      itens: [{ produto_id: produtoCaixaComPeso, un: 'CX', qtd: 12, preco: 45, perda_kg: 0 }],
+    })))
+    expect(res.status).toBe(201)
+    const criado = await res.json()
+
+    const linha = await linhaDaLista(criado.id)
+    // 12 caixas x 20 kg = 240 kg — nao "12".
+    expect(linha.peso_total).toBe(240)
+    expect(linha.itens_sem_conversao).toBe(0)
+    // valor_total nao muda com unidade nenhuma: reais sao reais.
+    expect(linha.valor_total).toBe(540)
+  })
+
+  it('CX com peso medio zero: o item fica FORA do peso_total e e contado em itens_sem_conversao', async () => {
+    const res = await pedir('/api/entradas', comoAdmin(json({
+      numero: 'UN-CX-SEM-1', data: '2026-02-03',
+      itens: [{ produto_id: produtoCaixaSemPeso, un: 'CX', qtd: 12, preco: 45, perda_kg: 0 }],
+    })))
+    expect(res.status).toBe(201)
+    const criado = await res.json()
+
+    const linha = await linhaDaLista(criado.id)
+    // Sem peso_medio nao ha como converter caixa em quilo — e o fator NAO e
+    // inventado como 1 (uma caixa nao pesa um quilo). A contribuicao sai do
+    // total e o contador denuncia a falta, em vez de o total ficar
+    // silenciosamente incompleto.
+    expect(linha.peso_total).toBe(0)
+    expect(linha.itens_sem_conversao).toBe(1)
+    // O valor continua inteiro: o que falta e o peso, nao o dinheiro.
+    expect(linha.valor_total).toBe(540)
+  })
+
+  it('mistura KG + CX na mesma entrada: soma so depois de converter cada item', async () => {
+    const res = await pedir('/api/entradas', comoAdmin(json({
+      numero: 'UN-MIX-1', data: '2026-02-04',
+      itens: [
+        umItem({ qtd: 30, preco: 2 }),
+        { produto_id: produtoCaixaComPeso, un: 'CX', qtd: 12, preco: 45, perda_kg: 0 },
+      ],
+    })))
+    expect(res.status).toBe(201)
+    const criado = await res.json()
+
+    const linha = await linhaDaLista(criado.id)
+    // 30 kg + (12 CX x 20 kg) = 270 kg. Antes da correcao: 30 + 12 = "42".
+    expect(linha.peso_total).toBe(270)
+    expect(linha.itens_sem_conversao).toBe(0)
+  })
+
+  it('mistura convertivel + nao convertivel: soma o que da e conta o que ficou de fora', async () => {
+    const res = await pedir('/api/entradas', comoAdmin(json({
+      numero: 'UN-MIX-2', data: '2026-02-05',
+      itens: [
+        umItem({ qtd: 30, preco: 2 }),
+        { produto_id: produtoCaixaComPeso, un: 'CX', qtd: 12, preco: 45, perda_kg: 0 },
+        { produto_id: produtoCaixaSemPeso, un: 'CX', qtd: 5, preco: 40, perda_kg: 0 },
+      ],
+    })))
+    expect(res.status).toBe(201)
+    const criado = await res.json()
+
+    const linha = await linhaDaLista(criado.id)
+    // 30 + 240 = 270 kg; as 5 caixas sem peso medio nao entram (e nao viram
+    // 5 "quilos"), mas o R$ 200 delas continua no valor_total.
+    expect(linha.peso_total).toBe(270)
+    expect(linha.itens_sem_conversao).toBe(1)
+    expect(linha.valor_total).toBe(30 * 2 + 12 * 45 + 5 * 40)
+  })
+
+  it('itens_sem_conversao sai como number (count e bigint no Postgres)', async () => {
+    const res = await pedir('/api/entradas', comoAdmin(json({
+      numero: 'UN-TIPO-1', data: '2026-02-06',
+      itens: [{ produto_id: produtoCaixaSemPeso, un: 'CX', qtd: 1, preco: 1, perda_kg: 0 }],
+    })))
+    const criado = await res.json()
+    const linha = await linhaDaLista(criado.id)
+    expect(typeof linha.itens_sem_conversao).toBe('number')
+  })
+
+  it('perda_itens_qtd NAO e convertida — e KG por contrato, em item de qualquer unidade', async () => {
+    const res = await pedir('/api/entradas', comoAdmin(json({
+      numero: 'UN-PERDA-CX', data: '2026-02-07',
+      itens: [{ produto_id: produtoCaixaComPeso, un: 'CX', qtd: 10, preco: 45, perda_kg: 6 }],
+    })))
+    const criado = await res.json()
+    const linha = await linhaDaLista(criado.id)
+    // O rotulo do formulario (ModalEntrada.tsx) diz kg no cabecalho e no
+    // total dos itens; multiplicar por peso_medio aqui viraria 6*20=120 e
+    // estragaria um numero que ja esta certo. So o peso muda de unidade.
+    expect(linha.perda_itens_qtd).toBe(6)
+    expect(linha.peso_total).toBe(200)
   })
 })
 

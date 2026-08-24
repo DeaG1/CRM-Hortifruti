@@ -20,12 +20,30 @@ interface Entrada {
   forma_pag: string
   obs: string
   valor_total: number
+  /** Em kg — a API converte cada item pela unidade dele (KG conta direto,
+   * caixa conta qtd * produtos.peso_medio). Ver `itens_sem_conversao`. */
   peso_total: number
+  /** Itens desta entrada que ficaram FORA de `peso_total` por não serem
+   * convertíveis em quilos (unidade ≠ KG sem peso médio cadastrado no
+   * produto). A API não inventa fator; a tela avisa que o peso está
+   * incompleto em vez de mostrar um número menor sem dizer nada. Ver o
+   * comentário grande em api/src/routes/entradas.ts (GET /). */
+  itens_sem_conversao?: number
 }
 
 const money = (n: number) =>
   'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const peso = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' kg'
+
+/** Aviso da célula/estatística de peso incompleto — mesmo texto e mesma
+ * regra do relatório de compras (RelatoriosTela.tsx, avisoSemConversao). */
+function avisoSemConversao(n: number): string {
+  const itens = n === 1 ? '1 item' : `${n} itens`
+  const verbo = n === 1 ? 'está' : 'estão'
+  return `${itens} em unidade diferente de KG sem peso médio cadastrado no produto: `
+    + `${verbo} fora deste peso, porque sem o peso da embalagem não há como converter em quilos. `
+    + 'Cadastre o peso médio em Produtos para que entrem na conta.'
+}
 
 type Modal = { modo: 'novo' } | { modo: 'editar'; entrada: EntradaComItens } | null
 
@@ -158,6 +176,7 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
   if (erro) return <p className="entradas-estado entradas-estado--erro" role="alert">{erro}</p>
 
   const totalPeso = entradas.reduce((s, e) => s + e.peso_total, 0)
+  const totalSemConversao = entradas.reduce((s, e) => s + (e.itens_sem_conversao || 0), 0)
   const totalPerda = entradas.reduce((s, e) => s + e.perda_kg, 0)
   const totalValor = entradas.reduce((s, e) => s + e.valor_total, 0)
 
@@ -182,7 +201,15 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
           </div>
           <div className="entradas-stat">
             <div className="entradas-stat-label">PESO RECEBIDO</div>
-            <div className="entradas-stat-valor">{peso(totalPeso)}</div>
+            <div className="entradas-stat-valor">
+              {totalSemConversao > 0
+                ? (
+                  <span className="entradas-incompleto" title={avisoSemConversao(totalSemConversao)}>
+                    {peso(totalPeso)}*
+                  </span>
+                )
+                : peso(totalPeso)}
+            </div>
           </div>
           <div className="entradas-stat">
             <div className="entradas-stat-label">PERDA (COLETA/TRANSPORTE)</div>
@@ -257,7 +284,15 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
                   <div className="entradas-data">{e.data}</div>
                 </div>
                 <div className="entradas-motivo">{e.motivo || '—'}</div>
-                <div className="entradas-col-num entradas-mono">{peso(e.peso_total)}</div>
+                <div className="entradas-col-num entradas-mono">
+                  {e.itens_sem_conversao
+                    ? (
+                      <span className="entradas-incompleto" title={avisoSemConversao(e.itens_sem_conversao)}>
+                        {peso(e.peso_total)}*
+                      </span>
+                    )
+                    : peso(e.peso_total)}
+                </div>
                 <div
                   className="entradas-col-num entradas-mono"
                   style={{ color: e.perda_kg > 0 ? '#c2502f' : '#2a2a24' }}

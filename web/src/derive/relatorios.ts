@@ -48,7 +48,8 @@ export interface SaidaResumo {
 
 /** Cabeçalho de uma entrada (compra), como GET /api/entradas devolve — ver
  * api/src/routes/entradas.ts (paraJsonLista). `valor_total`/`peso_total`
- * são os totais agregados dos itens.
+ * são os totais agregados dos itens — `peso_total` SEMPRE em kg (a API
+ * converte cada item pela unidade dele, ver `itens_sem_conversao` abaixo).
  *
  * `perda_kg` (cabeçalho) e `perda_itens_qtd` (soma de entrada_itens.perda_kg
  * dessa entrada) descrevem o MESMO evento de perda na coleta em duas
@@ -70,6 +71,21 @@ export interface EntradaResumo {
   data_pag: string | null
   valor_total: number
   peso_total: number
+  /**
+   * Quantos itens desta entrada ficaram FORA de `peso_total`: produto
+   * lançado em unidade diferente de KG sem `produtos.peso_medio` cadastrado
+   * (0 = não informado), portanto não convertível em quilos. A API não
+   * inventa fator nenhum (uma caixa não pesa um quilo) e não some com o
+   * problema: exclui a contribuição do item e conta quantos foram, para a
+   * tela poder dizer que o total está incompleto em vez de exibir um número
+   * silenciosamente menor do que a realidade. Ver o comentário grande em
+   * api/src/routes/entradas.ts (GET /).
+   *
+   * Opcional pelo mesmo motivo dos campos de perdaColetaEfetiva: a API
+   * sempre envia, mas fixtures de teste montam entradas parciais e ausente
+   * tem exatamente o mesmo significado que 0 (nada ficou de fora).
+   */
+  itens_sem_conversao?: number
 }
 
 /**
@@ -501,10 +517,24 @@ export interface LinhaCompraFornecedor {
   fornecedorId: string | null
   fornecedor: string
   coletas: number
+  /** Em kg — a API já converte cada item pela unidade dele. Incompleta
+   * quando `itensSemConversao > 0`. */
   qtd: number
   valor: number
-  /** null quando qtd===0 (evita divisão por zero — vira '—' na tela). */
+  /** null quando qtd===0 (evita divisão por zero — vira '—' na tela).
+   *
+   * Quando `itensSemConversao > 0` este preço é por quilo de uma quantidade
+   * INCOMPLETA — o valor dos itens sem peso médio entra no numerador (reais
+   * são reais, independem da unidade) mas o peso deles não entra no
+   * denominador, então o preço médio sai para cima. Não é um número para
+   * exibir limpo: a tela marca a célula e explica o que ficou de fora. */
   precoMedio: number | null
+  /**
+   * Itens deste fornecedor, no período, que ficaram fora de `qtd` por não
+   * serem convertíveis em quilos (unidade ≠ KG sem `produtos.peso_medio`).
+   * 0 = o total está completo. Ver `EntradaResumo.itens_sem_conversao`.
+   */
+  itensSemConversao: number
   perdaPct: number
   aproveitPct: number
   aPagar: number
@@ -517,7 +547,12 @@ export interface RelatorioComprasTotais {
   fornecedoresCadastrados: number
   perdaNaColetaPct: number
   perdaQtd: number
+  /** Em kg, igual a `LinhaCompraFornecedor.qtd` — incompleta quando
+   * `itensSemConversao > 0`. */
   compradoQtd: number
+  /** Total de itens do período que ficaram fora de `compradoQtd` (soma do
+   * `itensSemConversao` de todas as linhas). */
+  itensSemConversao: number
   aPagarAoProdutor: number
 }
 
@@ -530,6 +565,15 @@ export interface RelatorioComprasTotais {
  * e soma dos itens da entrada), não `en.perda_kg` cru — ver o comentário em
  * EntradaResumo/perdaColetaEfetiva, acima: os dois campos descrevem o mesmo
  * evento de perda, somar contaria em dobro.
+ *
+ * `qtd` (e portanto `precoMedio = valor / qtd`) vem de `peso_total`, que a
+ * API entrega em kg. Nem toda entrada é 100% conversível: item em unidade
+ * diferente de KG cujo produto não tem `peso_medio` cadastrado fica de fora
+ * do peso — a API conta esses itens em `itens_sem_conversao` em vez de
+ * inventar um fator. Aqui esse contador é somado por fornecedor e no total,
+ * para a tela marcar o preço médio afetado em vez de exibi-lo como número
+ * limpo (ele sai para cima: o valor do item incomparável continua no
+ * numerador, o peso dele não entra no denominador).
  */
 export function derivarRelatorioCompras(
   fornecedores: Fornecedor[],
@@ -540,14 +584,17 @@ export function derivarRelatorioCompras(
   const doPeriodo = entradas.filter(e => noPeriodo(e.data, de, ate))
 
   const SEM_FORNECEDOR = '—'
-  const agg = new Map<string, { coletas: number; qtd: number; valor: number; perda: number; aPagar: number }>()
+  const agg = new Map<string, {
+    coletas: number; qtd: number; valor: number; perda: number; aPagar: number; semConversao: number
+  }>()
   doPeriodo.forEach(en => {
     const k = en.fornecedor_id ?? SEM_FORNECEDOR
-    const o = agg.get(k) ?? { coletas: 0, qtd: 0, valor: 0, perda: 0, aPagar: 0 }
+    const o = agg.get(k) ?? { coletas: 0, qtd: 0, valor: 0, perda: 0, aPagar: 0, semConversao: 0 }
     o.coletas++
     o.qtd += en.peso_total || 0
     o.valor += en.valor_total || 0
     o.perda += perdaColetaEfetiva(en)
+    o.semConversao += en.itens_sem_conversao || 0
     if (en.pago !== 'Pago') o.aPagar += en.valor_total || 0
     agg.set(k, o)
   })
@@ -563,6 +610,7 @@ export function derivarRelatorioCompras(
       qtd: o.qtd,
       valor: o.valor,
       precoMedio: o.qtd > 0 ? o.valor / o.qtd : null,
+      itensSemConversao: o.semConversao,
       perdaPct: pp,
       aproveitPct: 100 - pp,
       aPagar: o.aPagar,
@@ -582,6 +630,7 @@ export function derivarRelatorioCompras(
       perdaNaColetaPct: compradoQtd > 0 ? (perdaQtd / compradoQtd) * 100 : 0,
       perdaQtd,
       compradoQtd,
+      itensSemConversao: linhas.reduce((s, l) => s + l.itensSemConversao, 0),
       aPagarAoProdutor: linhas.reduce((s, l) => s + l.aPagar, 0),
     },
   }

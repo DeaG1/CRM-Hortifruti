@@ -79,8 +79,10 @@ function paraJsonItem<T extends Record<string, unknown>>(linha: T) {
 
 /**
  * Para a listagem (GET /): a linha vem de uma agregacao (sum sobre os
- * itens), entao alem de perda_kg tambem converte valor_total/peso_total e
- * perda_itens_qtd.
+ * itens), entao alem de perda_kg tambem converte valor_total/peso_total,
+ * itens_sem_conversao e perda_itens_qtd. `itens_sem_conversao` e um
+ * count(), que o Postgres devolve como bigint (string no postgres.js) —
+ * mesma conversao na borda que os numeric recebem.
  */
 function paraJsonLista<T extends Record<string, unknown>>(linha: T) {
   const { tenant_id: _tenantId, ...resto } = linha
@@ -89,6 +91,7 @@ function paraJsonLista<T extends Record<string, unknown>>(linha: T) {
     perda_kg: Number(linha.perda_kg ?? 0),
     valor_total: Number(linha.valor_total ?? 0),
     peso_total: Number(linha.peso_total ?? 0),
+    itens_sem_conversao: Number(linha.itens_sem_conversao ?? 0),
     perda_itens_qtd: Number(linha.perda_itens_qtd ?? 0),
   }
   converterDatas(convertido, linha)
@@ -286,13 +289,61 @@ entradas.get('/', async (c) => {
   // CABECALHO da entrada, no do produto — por isso nao precisam do rateio
   // proporcional que buscarEstoque faz, so do maximo). Ver o comentario
   // grande em buscarEstoque pra o raciocinio completo.
+  //
+  // peso_total sai SEMPRE EM KG. `entrada_itens.un` aceita
+  // 'KG','CX','UN','DZ','MC' (produtos.un, migration 009) e por muito tempo
+  // esta soma era `sum(i.qtd)` cru: 30 KG + 12 CX viravam "42", um numero
+  // sem significado fisico que ainda por cima alimenta
+  // `precoMedio = valor / qtd` em web/src/derive/relatorios.ts
+  // (derivarRelatorioCompras) — dividir reais por "42 do que quer que seja"
+  // nao da preco por quilo. O proprio comentario de `produtos.peso_medio`
+  // na migration 009 previu isto ("Peso medio da embalagem, para converter
+  // CX em KG. O To Do do cliente registra que sem isso caixas e quilos sao
+  // somados no mesmo total").
+  //
+  // A regra de conversao e a MESMA de api/src/routes/estoque.ts (paraJson,
+  // `equivalente_kg`), de proposito — duas regras divergentes seriam pior
+  // que o bug: item em 'KG' conta `qtd`; item em qualquer outra unidade
+  // conta `qtd * produtos.peso_medio` (peso de UMA embalagem, em kg), e a
+  // conversao so vale quando peso_medio > 0.
+  //
+  // itens_sem_conversao: produto lancado em unidade nao-KG com peso_medio
+  // = 0 (zero = "nao informado", ver a migration) nao e convertivel. O
+  // `case` acima nao tem `else`, entao esse item vira NULL e `sum` o ignora
+  // — a contribuicao dele fica FORA do peso_total, nunca convertida por um
+  // fator inventado (1 seria mentira: uma caixa nao pesa um quilo). Um
+  // numero errado e pior que um numero faltando (mesma regra do resto do
+  // projeto: travessao nunca vira zero), mas faltando EM SILENCIO tambem
+  // nao serve — por isso o contador sai junto na resposta, pra a tela poder
+  // dizer "este total ignora N itens sem peso cadastrado" em vez de exibir
+  // um total silenciosamente incompleto. `i.id is not null` no filter
+  // exclui a linha fantasma do left join (entrada sem nenhum item, so
+  // possivel por insert direto no banco — a API exige >= 1 item).
+  //
+  // perda_itens_qtd (sum(i.perda_kg)) NAO passa por conversao nenhuma: e
+  // KG por contrato — o nome da coluna, o rotulo do cabecalho em
+  // ModalEntrada.tsx ("Perda na coleta/transporte (kg)") e o total dos
+  // itens no rodape do mesmo modal ("{totalPerda} kg") dizem kg
+  // explicitamente, para item em qualquer unidade. Converter aqui
+  // transformaria kg em kg*peso_medio, ou seja, estragaria um numero que
+  // ja esta certo — e o `perdaPct` do relatorio de compras (perda / qtd)
+  // so passa a comparar kg com kg justamente por causa desta correcao.
   const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx => tx`
     select e.*,
       coalesce(sum(i.qtd * i.preco), 0) as valor_total,
-      coalesce(sum(i.qtd), 0) as peso_total,
+      coalesce(sum(
+        case
+          when i.un = 'KG' then i.qtd
+          when coalesce(p.peso_medio, 0) > 0 then i.qtd * p.peso_medio
+        end
+      ), 0) as peso_total,
+      count(*) filter (
+        where i.id is not null and i.un <> 'KG' and coalesce(p.peso_medio, 0) = 0
+      ) as itens_sem_conversao,
       coalesce(sum(i.perda_kg), 0) as perda_itens_qtd
     from entradas e
     left join entrada_itens i on i.entrada_id = e.id
+    left join produtos p on p.id = i.produto_id
     group by e.id
     order by e.data desc, e.numero desc`)
   return c.json(linhas.map(paraJsonLista))

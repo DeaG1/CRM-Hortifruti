@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { healthDoCliente, inadimplenciaPorCliente, ticketPorEntrega, derivarClientes } from './clientes'
+import {
+  healthDoCliente,
+  inadimplenciaPorCliente,
+  ticketPorEntrega,
+  derivarClientes,
+  statusCobrancaCliente,
+} from './clientes'
 import type { Cliente, Pedido } from './clientes'
 
 const cliente = (over: Partial<Cliente> = {}): Cliente => ({
@@ -126,5 +132,76 @@ describe('derivarClientes', () => {
       pedido({ cliente: 'A', entrega: '2026-05-10', valor: 9999 }),
     ]
     expect(derivarClientes(clientes, pedidos, '06', '2026-06-15')[0].faturado).toBe(1000)
+  })
+})
+
+describe('statusCobrancaCliente', () => {
+  const HOJE = '2026-06-15'
+
+  it('venda vencida e nao paga deixa o cliente Atrasado', () => {
+    // `pag` GRAVADO e 'Pendente' — o atraso vem do vencimento decorrido,
+    // via situacaoExibidaSaida. Comparar com o campo cru daria "Em dia".
+    const pedidos = [pedido({ pag: 'Pendente', venc: '2026-06-01' })]
+    expect(statusCobrancaCliente(pedidos, 'Mercado A', HOJE)).toBe('Atrasado')
+  })
+
+  it('venda gravada como Atrasado (dado legado) tambem conta', () => {
+    expect(statusCobrancaCliente([pedido({ pag: 'Atrasado' })], 'Mercado A', HOJE)).toBe('Atrasado')
+  })
+
+  it('tudo pago fica Em dia', () => {
+    const pedidos = [pedido({ pag: 'Pago' }), pedido({ id: '#2', pag: 'Pago' })]
+    expect(statusCobrancaCliente(pedidos, 'Mercado A', HOJE)).toBe('Em dia')
+  })
+
+  it('venda pendente ainda NAO vencida fica Em dia — pendente nao e atraso', () => {
+    const pedidos = [pedido({ pag: 'Pendente', venc: '2026-07-01' })]
+    expect(statusCobrancaCliente(pedidos, 'Mercado A', HOJE)).toBe('Em dia')
+  })
+
+  it('venda que vence HOJE ainda nao esta atrasada', () => {
+    const pedidos = [pedido({ pag: 'Pendente', venc: HOJE })]
+    expect(statusCobrancaCliente(pedidos, 'Mercado A', HOJE)).toBe('Em dia')
+  })
+
+  it('venda pendente SEM vencimento fica Em dia — nao ha data pra vencer', () => {
+    const pedidos = [pedido({ pag: 'Pendente', venc: null })]
+    expect(statusCobrancaCliente(pedidos, 'Mercado A', HOJE)).toBe('Em dia')
+  })
+
+  it('uma unica venda atrasada no meio de varias pagas ja deixa Atrasado', () => {
+    const pedidos = [
+      pedido({ id: '#1', pag: 'Pago' }),
+      pedido({ id: '#2', pag: 'Pendente', venc: '2026-05-30' }),
+      pedido({ id: '#3', pag: 'Pago' }),
+    ]
+    expect(statusCobrancaCliente(pedidos, 'Mercado A', HOJE)).toBe('Atrasado')
+  })
+
+  it('atraso conta em pedido de qualquer status, nao so entregue', () => {
+    const pedidos = [pedido({ status: 'Em rota', pag: 'Pendente', venc: '2026-06-01' })]
+    expect(statusCobrancaCliente(pedidos, 'Mercado A', HOJE)).toBe('Atrasado')
+  })
+
+  it('cliente SEM venda nenhuma devolve null (travessao), nunca "Em dia"', () => {
+    expect(statusCobrancaCliente([], 'Mercado A', HOJE)).toBeNull()
+  })
+
+  it('vendas so de OUTROS clientes tambem devolvem null para este', () => {
+    const pedidos = [pedido({ cliente: 'Outro', pag: 'Pendente', venc: '2026-01-01' })]
+    expect(statusCobrancaCliente(pedidos, 'Mercado A', HOJE)).toBeNull()
+  })
+
+  it('vendas so com pagamento nao aplicavel (cancelada/devolvida) devolvem null', () => {
+    const pedidos = [pedido({ status: 'Cancelado', pag: '—', venc: '2026-01-01' })]
+    expect(statusCobrancaCliente(pedidos, 'Mercado A', HOJE)).toBeNull()
+  })
+
+  it('venda cancelada nao apaga o atraso de outra venda real', () => {
+    const pedidos = [
+      pedido({ id: '#1', status: 'Cancelado', pag: '—' }),
+      pedido({ id: '#2', pag: 'Pendente', venc: '2026-06-01' }),
+    ]
+    expect(statusCobrancaCliente(pedidos, 'Mercado A', HOJE)).toBe('Atrasado')
   })
 })

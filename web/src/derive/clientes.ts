@@ -4,6 +4,16 @@ export type StatusCliente = 'ativo' | 'negociacao' | 'inadimplente' | 'inativo'
 export type Tendencia = '↑' | '→' | '↓'
 export type Health = 'green' | 'amber' | 'red'
 
+/**
+ * Status de cobranca DERIVADO das vendas do cliente (`statusCobrancaCliente`)
+ * — nao confundir com a coluna de cadastro `clientes.cobranca`, que ninguem
+ * escreve nem le mais (ver o comentario no campo `cobranca` da interface
+ * abaixo). A AUSENCIA de status (`null`, devolvido por
+ * `statusCobrancaCliente`) e um terceiro estado legitimo, nao um erro:
+ * significa "nao ha o que cobrar" e vira travessao na tela.
+ */
+export type StatusCobranca = 'Em dia' | 'Atrasado'
+
 export interface Cliente {
   id: string
   nome: string
@@ -22,6 +32,16 @@ export interface Cliente {
   tel?: string
   email?: string
   endereco?: string
+  /** CAMPO FANTASMA — nao usar para decidir nada. A coluna
+   * `clientes.cobranca` existe (`db/migrations/004_clientes.sql`), nasce
+   * 'Em dia' por default e NENHUMA tela a escreve: nao ha campo pra ela no
+   * ModalCliente. Ate a correcao do achado CF-1 da auditoria, a ficha do
+   * cliente exibia este valor cru como "Status de cobranca" — ou seja,
+   * "Em dia" para todo cliente, para sempre, inclusive inadimplente. O
+   * status agora vem de `statusCobrancaCliente` (derivado das vendas). O
+   * campo continua declarado aqui so porque GET/POST/PUT /api/clientes
+   * ainda o trafega (`CAMPOS` em api/src/routes/clientes.ts); a remocao da
+   * coluna e uma migracao de esquema a decidir a parte. */
   cobranca?: string
   forma?: string
   obs?: string
@@ -47,6 +67,11 @@ export interface Cliente {
 export const CLIENTE_NOVO = {
   nome: '', resp: '', cnpj: '', tel: '', email: '', endereco: '',
   rota: 'Sul A', freq: '2×/sem · Seg e Qui', status: 'ativo',
+  // `cobranca` continua no rascunho so pra manter o corpo do POST/PUT igual
+  // ao que a API aceita hoje (`CAMPOS` em api/src/routes/clientes.ts) — ela
+  // nao tem campo no formulario e nao alimenta mais nenhuma tela: o status
+  // de cobranca exibido vem de `statusCobrancaCliente`. Ver o comentario no
+  // campo `cobranca` da interface `Cliente`.
   cobranca: 'Em dia', forma: 'PIX', limite: '' as number | string, prazo: 14, tend: '→', obs: '',
 }
 
@@ -134,6 +159,57 @@ export function inadimplenciaPorCliente(pedidos: Pedido[], nome: string, hojeIso
     .filter(p => situacaoExibidaSaida(p.pag, p.venc, hojeIso) === 'Atrasado')
     .reduce((s, p) => s + (p.valor || 0), 0)
   return (atrasado / faturado) * 100
+}
+
+/**
+ * Status de cobrança do cliente — DERIVADO das vendas dele, nunca lido de
+ * um campo de cadastro.
+ *
+ * Portado de `cCobranca = cAtrasados.length>0 ? 'Atrasado' : 'Em dia'`
+ * (protótipo, `design/CRM Hortifruti.dc.html` ~2223), com duas diferenças
+ * deliberadas:
+ *
+ *  1. O protótipo filtra `p.pag==='Atrasado'` (o campo gravado). Aqui vale
+ *     `situacaoExibidaSaida` (derive/pagamento.ts), pela mesma razão já
+ *     documentada em `inadimplenciaPorCliente`: 'Atrasado' deixou de ser um
+ *     valor que alguém digita e passou a ser calculado do vencimento.
+ *     Comparar com o `pag` cru deixaria o status cego a toda venda vencida
+ *     gravada como 'Pendente' — que é o caso NORMAL hoje — e ele voltaria a
+ *     dizer "Em dia" para quem deve.
+ *
+ *  2. O protótipo devolve 'Em dia' também para cliente sem venda nenhuma
+ *     (`cAtrasados.length>0` é falso quando não há pedido algum). Aqui esse
+ *     caso devolve `null` — "não há o que cobrar" — e a tela mostra
+ *     travessão. Cliente sem venda não está em dia com coisa alguma, e o
+ *     defeito que esta função corrige (CF-1 da auditoria) foi exatamente um
+ *     "Em dia" verde exibido sem apuração nenhuma por trás: um travessão faz
+ *     o usuário procurar o dado, um "Em dia" falso faz ele parar de
+ *     procurar. Vale também quando as vendas não puderam ser carregadas
+ *     (lista vazia por falha de GET /api/saidas): travessão, nunca "Em dia"
+ *     por omissão.
+ *
+ * Vendas com situação '—' ("pagamento não se aplica" — pedido cancelado ou
+ * devolvido, ver SaidasLista.tsx) não contam nem como dívida nem como
+ * adimplência, mesma exclusão que `valorEmAbertoCliente` faz: um cliente
+ * cujos únicos pedidos foram cancelados também cai no `null`.
+ *
+ * Não é filtrada por período de propósito — o protótipo usa `pedidosRaw`
+ * (todos), não os do período (`pedidosPeriodo`): dívida vencida em maio
+ * continua sendo dívida em agosto, some do recorte mas não do caixa.
+ *
+ * `hojeIso` é parâmetro (não `new Date()` interno) pelo mesmo motivo das
+ * vizinhas: função pura, testável sem mockar relógio.
+ */
+export function statusCobrancaCliente(
+  pedidos: Pedido[],
+  nome: string,
+  hojeIso: string,
+): StatusCobranca | null {
+  const cobraveis = doCliente(pedidos, nome)
+    .map(p => situacaoExibidaSaida(p.pag, p.venc, hojeIso))
+    .filter(situacao => situacao !== '—')
+  if (cobraveis.length === 0) return null
+  return cobraveis.some(situacao => situacao === 'Atrasado') ? 'Atrasado' : 'Em dia'
 }
 
 /**

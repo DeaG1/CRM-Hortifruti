@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 import { api, ErroApi } from '../api/client'
-import { derivarClientes, type Cliente, type Pedido, type StatusCliente, type Health } from '../derive/clientes'
+import {
+  derivarClientes,
+  statusCobrancaCliente,
+  type Cliente,
+  type Pedido,
+  type StatusCliente,
+  type Health,
+  type StatusCobranca,
+} from '../derive/clientes'
 import { situacaoExibidaSaida } from '../derive/pagamento'
 import './ClienteFicha.css'
 
@@ -15,6 +23,16 @@ const HEALTH_INFO: Record<Health, { cor: string; bg: string; label: string }> = 
   green: { cor: '#3f8f5b', bg: '#e7f1e8', label: 'Saudável' },
   amber: { cor: '#c79320', bg: '#f6efd8', label: 'Atenção' },
   red: { cor: '#c2502f', bg: '#f6e4dc', label: 'Risco' },
+}
+
+/** Cor do status de cobranca — o prototipo pinta este campo de verde ou
+ * vermelho (`design/CRM Hortifruti.dc.html` ~2249). Reaproveita os mesmos
+ * hex do HEALTH_INFO acima pra tela nao ganhar um terceiro verde. Sem
+ * entrada para a ausencia de status: travessao fica na cor normal do valor,
+ * porque "nao ha o que cobrar" nao e nem boa nem ma noticia. */
+const COBRANCA_COR: Record<StatusCobranca, string> = {
+  'Em dia': '#3f8f5b',
+  'Atrasado': '#c2502f',
 }
 
 const money = (n: number) => 'R$ ' + n.toLocaleString('pt-BR')
@@ -173,8 +191,12 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
   if (erro) return <p className="ficha-estado ficha-estado--erro" role="alert">{erro}</p>
   if (!cliente) return null
 
+  // Uma unica leitura do relogio por render: `derivarClientes`, o status de
+  // cobranca e o historico abaixo tem que concordar sobre que dia e hoje —
+  // duas chamadas separadas podem cair em lados opostos da virada da meia-noite.
+  const hoje = hojeIsoLocal()
   const pedidos = paraPedidos(saidasBrutas, cliente)
-  const [derivado] = derivarClientes([cliente], pedidos, 'all', hojeIsoLocal())
+  const [derivado] = derivarClientes([cliente], pedidos, 'all', hoje)
   const health = HEALTH_INFO[derivado.health]
   const statusLabel = STATUS_LABEL[cliente.status] ?? cliente.status
   // Mesmo sinal de "sem dado real" que ClientesLista.tsx usa por linha:
@@ -182,6 +204,13 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
   // falha de /api/saidas), participacao e inadimplencia viram travessao —
   // nao um zero que fingiria ser apurado.
   const temVendas = derivado.faturado > 0
+  // Status de cobranca DERIVADO das vendas (achado CF-1 da auditoria). Ate
+  // aqui a tela exibia `cliente.cobranca`, campo de cadastro que nasce
+  // 'Em dia' e que nenhum formulario altera — dizia "Em dia" para todo
+  // cliente, para sempre, poucas linhas acima da taxa de inadimplencia real
+  // dele. `null` (cliente sem venda cobravel, ou /api/saidas fora do ar e
+  // `saidasBrutas` vazio) vira travessao: nunca "Em dia" por omissao.
+  const cobranca = statusCobrancaCliente(pedidos, cliente.nome, hoje)
   // Entregas deste cliente, mais recente primeiro — alimenta o bloco
   // "Histórico de entregas". So as ja entregues (mesmo recorte de
   // `derivado.entregas`/faturado, que tambem so contam status 'Entregue');
@@ -284,7 +313,7 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
                 {entregasCliente.map(p => (
                   <div key={p.id} className="ficha-linha">
                     <span className="ficha-linha-chave">
-                      {dataBr(p.entrega)} · {situacaoExibidaSaida(p.pag, p.venc, hojeIsoLocal())}
+                      {dataBr(p.entrega)} · {situacaoExibidaSaida(p.pag, p.venc, hoje)}
                     </span>
                     <span className="ficha-linha-valor">{money(p.valor)}</span>
                   </div>
@@ -331,7 +360,12 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
             </div>
             <div className="ficha-linha">
               <span className="ficha-linha-chave">Status de cobrança</span>
-              <span className="ficha-linha-valor">{cliente.cobranca || '—'}</span>
+              <span
+                className="ficha-linha-valor"
+                style={cobranca ? { color: COBRANCA_COR[cobranca] } : undefined}
+              >
+                {cobranca ?? '—'}
+              </span>
             </div>
             <div className="ficha-linha">
               <span className="ficha-linha-chave">Taxa de inadimplência</span>

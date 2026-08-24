@@ -11,6 +11,17 @@ create table clientes (
   freq       text not null default '',
   status     text not null default 'ativo'
              check (status in ('ativo','negociacao','inadimplente','inativo')),
+  -- CAMPO FANTASMA (substituido por derivacao, nao remover sem migracao
+  -- propria): nenhuma tela escreve nesta coluna — o ModalCliente nunca
+  -- teve campo pra ela, entao todo cliente fica com o default 'Em dia'
+  -- para sempre. A ficha do cliente exibia esse valor cru como
+  -- "Status de cobranca" e por isso afirmava "Em dia" ate para
+  -- inadimplente (achado CF-1 da auditoria). O status passou a ser
+  -- DERIVADO das vendas em atraso do cliente
+  -- (`statusCobrancaCliente`, web/src/derive/clientes.ts), e ninguem
+  -- mais LE esta coluna. Ela segue aqui porque dropar coluna e mudanca
+  -- de esquema com decisao propria (e GET/POST/PUT /api/clientes ainda
+  -- trafegam o campo, via `CAMPOS` em api/src/routes/clientes.ts).
   cobranca   text not null default 'Em dia',
   forma      text not null default 'PIX',
   limite     numeric(12,2) not null default 0,

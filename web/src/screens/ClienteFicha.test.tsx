@@ -138,6 +138,81 @@ describe('ClienteFicha — vendas reais (GET /api/saidas)', () => {
   })
 })
 
+describe('ClienteFicha — status de cobranca e derivado das vendas (CF-1)', () => {
+  // Mesma convencao de SaidasLista.test.tsx: datas absurdamente longe pros
+  // dois lados, pra o teste nao depender do dia em que roda (o componente le
+  // o relogio de verdade em `hojeIsoLocal`).
+  const VENCIDO = '2020-01-01'
+  const A_VENCER = '2099-01-01'
+
+  /** A linha "Status de cobranca" do bloco Credito & inadimplencia. */
+  function linhaCobranca(): HTMLElement {
+    return screen.getByText('Status de cobrança').closest('.ficha-linha') as HTMLElement
+  }
+
+  const venda = (over: Record<string, unknown> = {}) => ({
+    id: 'sv1', cliente_id: 'c-1', entrega: '2026-06-10', valor: 900,
+    status: 'Entregue', pag: 'Pago', venc: null, ...over,
+  })
+
+  it('venda vencida e nao paga mostra Atrasado — mesmo com o cadastro dizendo "Em dia"', async () => {
+    // `cliente.cobranca` e 'Em dia' na fixture (e sempre sera: nenhum campo
+    // do ModalCliente altera essa coluna). Se a tela voltar a ler o campo
+    // cru, este teste quebra.
+    mockRotas(cliente, [venda({ pag: 'Pendente', venc: VENCIDO })])
+    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+    expect(within(linhaCobranca()).getByText('Atrasado')).toBeInTheDocument()
+    expect(within(linhaCobranca()).queryByText('Em dia')).not.toBeInTheDocument()
+  })
+
+  it('venda gravada como Atrasado (dado legado) tambem mostra Atrasado', async () => {
+    mockRotas(cliente, [venda({ pag: 'Atrasado' })])
+    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+    expect(within(linhaCobranca()).getByText('Atrasado')).toBeInTheDocument()
+  })
+
+  it('tudo pago mostra Em dia — mesmo com o cadastro dizendo "Atrasado"', async () => {
+    mockRotas({ ...cliente, cobranca: 'Atrasado' }, [venda({ pag: 'Pago' })])
+    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+    expect(within(linhaCobranca()).getByText('Em dia')).toBeInTheDocument()
+    expect(within(linhaCobranca()).queryByText('Atrasado')).not.toBeInTheDocument()
+  })
+
+  it('venda pendente ainda NAO vencida mostra Em dia — pendente nao e atraso', async () => {
+    mockRotas(cliente, [venda({ pag: 'Pendente', venc: A_VENCER })])
+    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+    expect(within(linhaCobranca()).getByText('Em dia')).toBeInTheDocument()
+  })
+
+  it('cliente sem venda nenhuma mostra travessao, nunca "Em dia"', async () => {
+    mockRotas(cliente, [])
+    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+    expect(within(linhaCobranca()).getByText('—')).toBeInTheDocument()
+    expect(within(linhaCobranca()).queryByText('Em dia')).not.toBeInTheDocument()
+  })
+
+  it('vendas so de outro cliente nao viram "Em dia" nesta ficha', async () => {
+    mockRotas(cliente, [venda({ id: 'sv9', cliente_id: 'c-99', pag: 'Pago' })])
+    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+    expect(within(linhaCobranca()).getByText('—')).toBeInTheDocument()
+  })
+
+  it('falha em /api/saidas deixa o status em travessao, com o aviso — nao "Em dia" por omissao', async () => {
+    mockRotas(cliente, new Error('falha de rede'))
+    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+    expect(await screen.findByRole('status')).toHaveTextContent(/não foi possível carregar as vendas/i)
+    expect(within(linhaCobranca()).getByText('—')).toBeInTheDocument()
+    expect(within(linhaCobranca()).queryByText('Em dia')).not.toBeInTheDocument()
+  })
+})
+
 describe('ClienteFicha — navegacao', () => {
   it('clicar em Voltar chama onVoltar', async () => {
     mockRotas(cliente)

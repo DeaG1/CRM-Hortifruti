@@ -38,5 +38,6 @@ export const api = {
   get: <T>(rota: string) => requisicao<T>('GET', rota),
   post: <T>(rota: string, corpo?: unknown) => requisicao<T>('POST', rota, corpo),
   put: <T>(rota: string, corpo: unknown) => requisicao<T>('PUT', rota, corpo),
+  patch: <T>(rota: string, corpo: unknown) => requisicao<T>('PATCH', rota, corpo),
   del: <T>(rota: string) => requisicao<T>('DELETE', rota),
 }

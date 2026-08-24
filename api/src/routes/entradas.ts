@@ -24,6 +24,35 @@ function sanear(corpo: Record<string, unknown>): Partial<Entrada> {
   return saida as Partial<Entrada>
 }
 
+const CAMPOS_DATA = ['data', 'data_pag'] as const
+
+/**
+ * `data`/`data_pag` sao colunas `date` — o postgres.js devolve isso como
+ * objeto JS `Date`, e o JSON.stringify padrao do Hono serializa `Date` como
+ * timestamp ISO completo ("2026-08-20T00:00:00.000Z"), nao a data pura
+ * ("2026-08-20") que a API recebeu e que um `<input type="date">` (ou o
+ * `data_pag` que alimenta web/src/derive/financeiro.ts) espera. Sem
+ * normalizar de volta aqui o round-trip quebra (POST com data:"2026-08-20",
+ * GET devolveria "2026-08-20T00:00:00.000Z") — mesmo defeito que
+ * api/src/routes/saidas.ts (dataParaTexto/CAMPOS_DATA) ja corrige do lado
+ * das saidas; entradas nunca teve um teste comparando a string exata pra
+ * revelar isso (descoberto ao escrever o teste do novo PATCH /:id/pago, que
+ * PRECISA de `data_pag` correto pra alimentar o ciclo de caixa). `null`
+ * passa direto (coluna vazia); `criado_em`/`alterado_em` (timestamptz) NAO
+ * entram aqui de proposito — esses devem mesmo continuar com hora.
+ */
+function dataParaTexto(v: unknown): string | null {
+  if (v === null || v === undefined) return null
+  const d = v instanceof Date ? v : new Date(v as string)
+  return d.toISOString().slice(0, 10)
+}
+
+function converterDatas(alvo: Record<string, unknown>, linha: Record<string, unknown>) {
+  for (const campo of CAMPOS_DATA) {
+    if (campo in linha) alvo[campo] = dataParaTexto(linha[campo])
+  }
+}
+
 /**
  * numeric vem como string do postgres.js — converter na borda da API.
  * `tenant_id` sai do corpo pelo mesmo motivo do molde (clientes.ts): e
@@ -32,7 +61,9 @@ function sanear(corpo: Record<string, unknown>): Partial<Entrada> {
  */
 function paraJson<T extends Record<string, unknown>>(linha: T) {
   const { tenant_id: _tenantId, ...resto } = linha
-  return { ...resto, perda_kg: Number(linha.perda_kg ?? 0) }
+  const convertido: Record<string, unknown> = { ...resto, perda_kg: Number(linha.perda_kg ?? 0) }
+  converterDatas(convertido, linha)
+  return convertido
 }
 
 /** Mesma conversao de paraJson, para uma linha de `entrada_itens`. */
@@ -53,13 +84,15 @@ function paraJsonItem<T extends Record<string, unknown>>(linha: T) {
  */
 function paraJsonLista<T extends Record<string, unknown>>(linha: T) {
   const { tenant_id: _tenantId, ...resto } = linha
-  return {
+  const convertido: Record<string, unknown> = {
     ...resto,
     perda_kg: Number(linha.perda_kg ?? 0),
     valor_total: Number(linha.valor_total ?? 0),
     peso_total: Number(linha.peso_total ?? 0),
     perda_itens_qtd: Number(linha.perda_itens_qtd ?? 0),
   }
+  converterDatas(convertido, linha)
+  return convertido
 }
 
 /** true so quando o valor existe e converte pra um numero finito negativo —
@@ -371,6 +404,41 @@ entradas.put('/:id', async (c) => {
     if (mapeado) return c.json(mapeado.corpo, mapeado.status)
     throw err
   }
+})
+
+/**
+ * PATCH /:id/pago — atalho para a acao mais repetida da tela de Entradas:
+ * marcar pagamento direto na linha da tabela (chip editavel), sem abrir o
+ * modal nem reenviar `itens` (que o PUT completo exige sempre — ver
+ * comentario no handler PUT acima). So aceita 'Pago'/'Pendente': 'Atrasado'
+ * nao e mais uma escolha por aqui (decisao do dono do produto — ver
+ * web/src/derive/pagamento.ts). Um registro ja gravado como 'Atrasado' antes
+ * desta mudanca continua saindo assim de GET/GET-lista ate alguem trocar
+ * pra Pago/Pendente (por este PATCH ou pelo PUT completo, que ainda aceita
+ * os tres valores do CHECK) — nao migramos dado nenhum.
+ *
+ * Marcar 'Pago' grava `data_pag` = hoje (data do SERVIDOR, nao a que o
+ * cliente mandar — o corpo da requisicao nem tem esse campo). Voltar para
+ * 'Pendente' LIMPA `data_pag`: um registro pendente com data de pagamento
+ * preenchida contaria, sem nunca ter acontecido, no calculo de dias de
+ * pagamento ao produtor (web/src/derive/financeiro.ts, diasPagamentoProdutor).
+ */
+entradas.patch('/:id/pago', async (c) => {
+  const id = c.req.param('id')
+  if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
+
+  const corpo = await c.req.json()
+  const pago = (corpo as Record<string, unknown>).pago
+  if (pago !== 'Pago' && pago !== 'Pendente') {
+    return c.json({ erro: 'pago deve ser "Pago" ou "Pendente"' }, 400)
+  }
+  const dataPag = pago === 'Pago' ? new Date().toISOString().slice(0, 10) : null
+
+  const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx => tx`
+    update entradas set pago = ${pago}, data_pag = ${dataPag}, alterado_em = ${new Date()}
+    where id = ${id} returning *`)
+  if (!linhas.length) return c.json({ erro: 'nao encontrado' }, 404)
+  return c.json(paraJson(linhas[0]))
 })
 
 entradas.delete('/:id', async (c) => {

@@ -372,6 +372,42 @@ saidas.put('/:id', async (c) => {
   }
 })
 
+/**
+ * PATCH /:id/pag — atalho para a acao mais repetida da tela de Saidas:
+ * marcar pagamento direto na linha da tabela (chip editavel), sem abrir o
+ * modal nem reenviar `itens` (que o PUT completo exige sempre). So aceita
+ * 'Pago'/'Pendente': nem 'Atrasado' nem '—' sao escolhas por aqui —
+ * 'Atrasado' passou a ser CALCULADO no front a partir de `pag`+`venc`
+ * (web/src/derive/pagamento.ts, decisao do dono do produto: um status
+ * escolhido a mao contradiz a data), e '—' ("nao aplicavel", tipico de
+ * pedido cancelado/devolvido) so continua alcancavel pelo PUT completo
+ * (modal), que ainda aceita os quatro valores do CHECK. Um registro ja
+ * gravado como 'Atrasado' ou '—' antes desta mudanca continua saindo assim
+ * ate alguem trocar por um dos dois caminhos — nao migramos dado nenhum.
+ *
+ * Marcar 'Pago' grava `data_pag` = hoje (data do SERVIDOR). Voltar para
+ * 'Pendente' LIMPA `data_pag` — um registro pendente com data de pagamento
+ * preenchida contaria, sem nunca ter acontecido, na media de dias de
+ * recebimento (web/src/derive/financeiro.ts, diasRecebimento).
+ */
+saidas.patch('/:id/pag', async (c) => {
+  const id = c.req.param('id')
+  if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
+
+  const corpo = await c.req.json()
+  const pag = (corpo as Record<string, unknown>).pag
+  if (pag !== 'Pago' && pag !== 'Pendente') {
+    return c.json({ erro: 'pag deve ser "Pago" ou "Pendente"' }, 400)
+  }
+  const dataPag = pag === 'Pago' ? new Date().toISOString().slice(0, 10) : null
+
+  const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx => tx`
+    update saidas set pag = ${pag}, data_pag = ${dataPag}, alterado_em = ${new Date()}
+    where id = ${id} returning *`)
+  if (!linhas.length) return c.json({ erro: 'nao encontrado' }, 404)
+  return c.json(paraJson(linhas[0]))
+})
+
 saidas.delete('/:id', async (c) => {
   const id = c.req.param('id')
   if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)

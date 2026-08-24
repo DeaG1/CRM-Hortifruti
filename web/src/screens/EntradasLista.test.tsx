@@ -3,15 +3,17 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { EntradasLista } from './EntradasLista'
 import { api, ErroApi } from '../api/client'
 
-// Mock so de `api.get/del` — mantem a classe ErroApi real (o componente faz
-// `err instanceof ErroApi`, precisa ser o mesmo construtor dos dois lados).
+// Mock so de `api.get/del/patch` — mantem a classe ErroApi real (o
+// componente faz `err instanceof ErroApi`, precisa ser o mesmo construtor
+// dos dois lados).
 vi.mock('../api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client')>()
-  return { ...actual, api: { ...actual.api, get: vi.fn(), del: vi.fn() } }
+  return { ...actual, api: { ...actual.api, get: vi.fn(), del: vi.fn(), patch: vi.fn() } }
 })
 
 const mockGet = api.get as unknown as ReturnType<typeof vi.fn>
 const mockDel = api.del as unknown as ReturnType<typeof vi.fn>
+const mockPatch = api.patch as unknown as ReturnType<typeof vi.fn>
 
 const FORNECEDORES = [{ id: 'f-1', nome: 'Fazenda Boa Terra', regiao: 'Sul', contato: '' }]
 
@@ -52,6 +54,7 @@ function mockRotasPadrao(entradas: unknown[] = [entrada()]) {
 beforeEach(() => {
   mockGet.mockReset()
   mockDel.mockReset()
+  mockPatch.mockReset()
 })
 
 describe('EntradasLista — os quatro estados', () => {
@@ -178,5 +181,74 @@ describe('EntradasLista — confirmação antes de excluir', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Excluir' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Confirmar exclusão' }))
     expect(await screen.findByText(/n[aã]o foi poss[ií]vel excluir/i)).toBeInTheDocument()
+  })
+})
+
+describe('EntradasLista — pagamento editável na linha (chip vira seletor)', () => {
+  it('o seletor nunca oferece "Atrasado" como opção — so Pendente/Pago', async () => {
+    mockRotasPadrao([entrada({ pago: 'Atrasado' })])
+    render(<EntradasLista />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+    const valores = [...select.options].map(o => o.value)
+    expect(valores).toEqual(['Pendente', 'Pago'])
+  })
+
+  it('marcar Pago chama o PATCH e a data de pagamento vem da resposta da API', async () => {
+    mockRotasPadrao([entrada({ id: 'e-1', numero: 'C-1040', pago: 'Pendente', data_pag: null })])
+    mockPatch.mockResolvedValue({ pago: 'Pago', data_pag: '2026-08-24' })
+    render(<EntradasLista />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+
+    fireEvent.change(select, { target: { value: 'Pago' } })
+
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/api/entradas/e-1/pago', { pago: 'Pago' }))
+    // a tela nao inventa a data — so espelha o que a API devolveu (a API e
+    // quem grava "hoje" no servidor)
+    await waitFor(() => expect(select.value).toBe('Pago'))
+  })
+
+  it('voltar para Pendente chama o PATCH com "Pendente" (a API e quem limpa data_pag)', async () => {
+    mockRotasPadrao([entrada({ id: 'e-1', numero: 'C-1040', pago: 'Pago', data_pag: '2026-08-11' })])
+    mockPatch.mockResolvedValue({ pago: 'Pendente', data_pag: null })
+    render(<EntradasLista />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+    expect(select.value).toBe('Pago')
+
+    fireEvent.change(select, { target: { value: 'Pendente' } })
+
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/api/entradas/e-1/pago', { pago: 'Pendente' }))
+    await waitFor(() => expect(select.value).toBe('Pendente'))
+  })
+
+  it('clicar no seletor NAO abre o modal de edição da linha (stopPropagation)', async () => {
+    mockRotasPadrao([entrada()])
+    render(<EntradasLista />)
+    const select = await screen.findByRole('combobox')
+    fireEvent.click(select)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('falha do PATCH reverte o chip pro valor anterior e mostra aviso', async () => {
+    mockRotasPadrao([entrada({ id: 'e-1', pago: 'Pendente', data_pag: null })])
+    mockPatch.mockRejectedValue(new Error('falha de rede'))
+    render(<EntradasLista />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+
+    fireEvent.change(select, { target: { value: 'Pago' } })
+
+    await screen.findByRole('alert')
+    expect(select.value).toBe('Pendente')
+  })
+
+  it('sessao expirada (401) no PATCH chama onSessaoExpirada', async () => {
+    mockRotasPadrao([entrada({ id: 'e-1', pago: 'Pendente' })])
+    mockPatch.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
+    const onSessaoExpirada = vi.fn()
+    render(<EntradasLista onSessaoExpirada={onSessaoExpirada} />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+
+    fireEvent.change(select, { target: { value: 'Pago' } })
+
+    await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalled())
   })
 })

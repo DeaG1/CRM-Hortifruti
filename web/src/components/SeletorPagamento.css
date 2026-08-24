@@ -1,0 +1,47 @@
+.seletor-pagamento-bloco {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Mesma pílula visual do badge estático que este seletor substitui
+   (entradas-pago-badge/saidas-badge): font-size 11.5px, padding 3px 9px,
+   radius 14px, weight 600. `appearance: none` + reset de borda tira a seta
+   nativa do navegador e o visual de campo de formulário, mantendo só a
+   pílula colorida — o <select> continua 100% funcional (teclado, leitor de
+   tela), só a aparência padrão do controle é que é removida. */
+.seletor-pagamento {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  border-radius: 14px;
+  padding: 3px 22px 3px 9px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: 'Public Sans', sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+  /* seta pequena à direita, desenhada em CSS puro (sem imagem externa) —
+     mesma cor do texto do próprio chip, herdada via currentColor. */
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 11px top 55%, right 7px top 55%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+
+.seletor-pagamento:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+.seletor-pagamento:focus-visible {
+  outline: 2px solid #5a7d3a;
+  outline-offset: 2px;
+}
+
+.seletor-pagamento-erro {
+  font-size: 10.5px;
+  color: #9a4a2e;
+  font-weight: 600;
+}

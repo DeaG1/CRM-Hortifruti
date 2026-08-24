@@ -5,15 +5,16 @@ import { api, ErroApi } from '../api/client'
 import type { Saida } from '../components/ModalSaida'
 import type { Cliente } from '../derive/clientes'
 
-// Mock so de `api.get` — mantem a classe ErroApi real (o componente faz
-// `err instanceof ErroApi`, precisa ser o mesmo construtor dos dois lados).
-// Mesmo padrao de ClientesLista.test.tsx.
+// Mock so de `api.get/patch` — mantem a classe ErroApi real (o componente
+// faz `err instanceof ErroApi`, precisa ser o mesmo construtor dos dois
+// lados). Mesmo padrao de ClientesLista.test.tsx.
 vi.mock('../api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client')>()
-  return { ...actual, api: { ...actual.api, get: vi.fn() } }
+  return { ...actual, api: { ...actual.api, get: vi.fn(), patch: vi.fn() } }
 })
 
 const mockGet = api.get as unknown as ReturnType<typeof vi.fn>
+const mockPatch = api.patch as unknown as ReturnType<typeof vi.fn>
 
 const saida = (over: Partial<Saida> = {}): Saida => ({
   id: '1',
@@ -60,6 +61,7 @@ function botaoFiltro(grupo: string, rotulo: string) {
 
 beforeEach(() => {
   mockGet.mockReset()
+  mockPatch.mockReset()
 })
 
 describe('SaidasLista — os quatro estados', () => {
@@ -218,6 +220,127 @@ describe('SaidasLista — filtro por pagamento', () => {
 
     fireEvent.click(botaoFiltro('Filtrar por status', 'Cancelado'))
     expect(screen.getByText('Nenhuma saída com estes filtros.')).toBeInTheDocument()
+  })
+})
+
+describe('SaidasLista — pagamento editável na linha (chip vira seletor, Atrasado calculado)', () => {
+  // Datas bem no passado/futuro de proposito — o teste nao pode depender de
+  // qual e o "hoje" real de quem roda a suite.
+  const VENCIDO = '2020-01-01'
+  const A_VENCER = '2099-01-01'
+
+  it('pag=Pendente com vencimento no passado exibe Atrasado (calculado, nao gravado)', async () => {
+    mockGetPadrao([saida({ pag: 'Pendente', venc: VENCIDO })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+    // valor selecionavel continua Pendente (e a mesma opcao "ainda nao
+    // pago"), so o ROTULO exibido muda pra Atrasado.
+    expect(select.value).toBe('Pendente')
+    expect(select.selectedOptions[0].text).toBe('Atrasado')
+  })
+
+  it('pag=Pendente com vencimento no futuro exibe Pendente', async () => {
+    mockGetPadrao([saida({ pag: 'Pendente', venc: A_VENCER })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+    expect(select.value).toBe('Pendente')
+    expect(select.selectedOptions[0].text).toBe('Pendente')
+  })
+
+  it('pag gravado como Atrasado (dado legado) continua exibindo Atrasado, mesmo com vencimento no futuro', async () => {
+    mockGetPadrao([saida({ pag: 'Atrasado', venc: A_VENCER })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+    expect(select.selectedOptions[0].text).toBe('Atrasado')
+  })
+
+  it('o seletor nunca oferece "Atrasado" como valor escolhivel — so Pendente/Pago', async () => {
+    mockGetPadrao([saida({ pag: 'Pendente', venc: VENCIDO })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+    const valores = [...select.options].map(o => o.value)
+    expect(valores).toEqual(['Pendente', 'Pago'])
+  })
+
+  it('pag="—" (nao aplicavel) continua um badge estatico, sem virar seletor', async () => {
+    // cliente_id resolvido (clienteA) pra so existir UM travessao na linha
+    // — o do badge de pagamento — e a asserção abaixo ficar sem ambiguidade.
+    mockGetPadrao([saida({ pag: '—', cliente_id: 'cli-1' })], [clienteA])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    expect(screen.getByText('—')).toBeInTheDocument()
+  })
+
+  it('marcar Pago chama PATCH /api/saidas/:id/pag e atualiza a linha com a resposta', async () => {
+    mockGetPadrao([saida({ id: 'sa-1', numero: 'S-0001', pag: 'Pendente', data_pag: null })])
+    mockPatch.mockResolvedValue({ pag: 'Pago', data_pag: '2026-08-24' })
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+
+    fireEvent.change(select, { target: { value: 'Pago' } })
+
+    await vi.waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/api/saidas/sa-1/pag', { pag: 'Pago' }))
+    await vi.waitFor(() => expect(select.value).toBe('Pago'))
+  })
+
+  it('voltar para Pendente chama PATCH com "Pendente" (a API e quem limpa data_pag)', async () => {
+    mockGetPadrao([saida({ id: 'sa-1', numero: 'S-0001', pag: 'Pago', data_pag: '2026-08-01' })])
+    mockPatch.mockResolvedValue({ pag: 'Pendente', data_pag: null })
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+    expect(select.value).toBe('Pago')
+
+    fireEvent.change(select, { target: { value: 'Pendente' } })
+
+    await vi.waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/api/saidas/sa-1/pag', { pag: 'Pendente' }))
+    await vi.waitFor(() => expect(select.value).toBe('Pendente'))
+  })
+
+  it('clicar no seletor NAO abre o modal de edição da linha (stopPropagation)', async () => {
+    mockGetPadrao([saida()])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    const select = await screen.findByRole('combobox')
+    fireEvent.click(select)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('falha do PATCH reverte o chip pro valor anterior e mostra aviso', async () => {
+    mockGetPadrao([saida({ id: 'sa-1', pag: 'Pendente', venc: A_VENCER })])
+    mockPatch.mockRejectedValue(new Error('falha de rede'))
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+
+    fireEvent.change(select, { target: { value: 'Pago' } })
+
+    await screen.findByRole('alert')
+    expect(select.value).toBe('Pendente')
+  })
+
+  it('sessao expirada (401) no PATCH chama onSessaoExpirada', async () => {
+    mockGetPadrao([saida({ id: 'sa-1', pag: 'Pendente' })])
+    mockPatch.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
+    const onSessaoExpirada = vi.fn()
+    render(<SaidasLista onSessaoExpirada={onSessaoExpirada} />)
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+
+    fireEvent.change(select, { target: { value: 'Pago' } })
+
+    await vi.waitFor(() => expect(onSessaoExpirada).toHaveBeenCalled())
+  })
+
+  it('filtro "Atrasado" inclui saida Pendente com vencimento vencido (situacao calculada, nao o pag cru)', async () => {
+    mockGetPadrao([
+      saida({ id: '1', numero: 'S-1', pag: 'Pendente', venc: VENCIDO }),
+      saida({ id: '2', numero: 'S-2', pag: 'Pendente', venc: A_VENCER }),
+    ])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+
+    expect(within(botaoFiltro('Filtrar por pagamento', 'Atrasado')).getByText('1')).toBeInTheDocument()
+    fireEvent.click(botaoFiltro('Filtrar por pagamento', 'Atrasado'))
+    expect(screen.getByText('S-1')).toBeInTheDocument()
+    expect(screen.queryByText('S-2')).not.toBeInTheDocument()
   })
 })
 

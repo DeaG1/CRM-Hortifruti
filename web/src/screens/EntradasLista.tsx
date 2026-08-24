@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { api, ErroApi } from '../api/client'
 import { ModalEntrada, type EntradaComItens, type Fornecedor } from '../components/ModalEntrada'
+import { SeletorPagamento } from '../components/SeletorPagamento'
+import type { SituacaoPagamentoEscolhivel } from '../derive/pagamento'
 import './EntradasLista.css'
 
 /** Forma de um item de GET /api/entradas (api/src/routes/entradas.ts,
@@ -19,12 +21,6 @@ interface Entrada {
   obs: string
   valor_total: number
   peso_total: number
-}
-
-const PAGO_INFO: Record<string, { cor: string; bg: string }> = {
-  Pago: { cor: '#3f8f5b', bg: '#e7f1e8' },
-  Pendente: { cor: '#c79320', bg: '#f6efd8' },
-  Atrasado: { cor: '#c2502f', bg: '#f6e4dc' },
 }
 
 const money = (n: number) =>
@@ -132,6 +128,32 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
     }
   }
 
+  /**
+   * Chip de pagamento editável direto na linha (PATCH /api/entradas/:id/pago
+   * — não reenvia `itens`, ao contrário do PUT completo do modal). A API já
+   * grava/limpa `data_pag` sozinha (hoje ao marcar Pago, null ao voltar pra
+   * Pendente — ver comentário na rota); aqui só espelha a resposta na linha
+   * local, sem precisar de outro round-trip (`versao`) pra tela inteira.
+   *
+   * Rejeita (deixa o erro subir) em qualquer falha — inclusive 401 — pro
+   * SeletorPagamento reverter o valor sozinho; sessão expirada tem um
+   * tratamento extra aqui (volta ao login) além da reversão do chip.
+   */
+  async function alterarPagamento(id: string, pago: SituacaoPagamentoEscolhivel) {
+    try {
+      const atualizada = await api.patch<{ pago: string; data_pag: string | null }>(
+        `/api/entradas/${id}/pago`,
+        { pago },
+      )
+      setEntradas(es => es.map(e => (
+        e.id === id ? { ...e, pago: atualizada.pago as Entrada['pago'], data_pag: atualizada.data_pag } : e
+      )))
+    } catch (err) {
+      if (err instanceof ErroApi && err.status === 401) onSessaoExpirada?.()
+      throw err
+    }
+  }
+
   if (carregando) return <p className="entradas-estado">Carregando…</p>
   if (erro) return <p className="entradas-estado entradas-estado--erro" role="alert">{erro}</p>
 
@@ -221,47 +243,55 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
               <div className="entradas-col-num">AÇÃO</div>
             </div>
 
-            {entradas.map(e => {
-              const pagoInfo = PAGO_INFO[e.pago] ?? PAGO_INFO.Pendente
-              return (
-                <div
-                  key={e.id}
-                  className="entradas-linha entradas-linha--dados"
-                  onClick={() => abrirEdicao(e.id)}
-                >
-                  <div className="entradas-mono entradas-numero">
-                    {abrindoId === e.id ? '…' : e.numero}
-                  </div>
-                  <div className="entradas-fornecedor-bloco">
-                    <div className="entradas-fornecedor-nome">{nomeFornecedor(e.fornecedor_id)}</div>
-                    <div className="entradas-data">{e.data}</div>
-                  </div>
-                  <div className="entradas-motivo">{e.motivo || '—'}</div>
-                  <div className="entradas-col-num entradas-mono">{peso(e.peso_total)}</div>
-                  <div
-                    className="entradas-col-num entradas-mono"
-                    style={{ color: e.perda_kg > 0 ? '#c2502f' : '#2a2a24' }}
-                  >
-                    {peso(e.perda_kg)}
-                  </div>
-                  <div className="entradas-col-num entradas-mono entradas-valor">{money(e.valor_total)}</div>
-                  <div>
-                    <span className="entradas-pago-badge" style={{ color: pagoInfo.cor, background: pagoInfo.bg }}>
-                      {e.pago}
-                    </span>
-                  </div>
-                  <div className="entradas-col-num">
-                    <button
-                      type="button"
-                      className="entradas-excluir"
-                      onClick={ev => { ev.stopPropagation(); setConfirmando({ id: e.id, numero: e.numero }) }}
-                    >
-                      Excluir
-                    </button>
-                  </div>
+            {entradas.map(e => (
+              <div
+                key={e.id}
+                className="entradas-linha entradas-linha--dados"
+                onClick={() => abrirEdicao(e.id)}
+              >
+                <div className="entradas-mono entradas-numero">
+                  {abrindoId === e.id ? '…' : e.numero}
                 </div>
-              )
-            })}
+                <div className="entradas-fornecedor-bloco">
+                  <div className="entradas-fornecedor-nome">{nomeFornecedor(e.fornecedor_id)}</div>
+                  <div className="entradas-data">{e.data}</div>
+                </div>
+                <div className="entradas-motivo">{e.motivo || '—'}</div>
+                <div className="entradas-col-num entradas-mono">{peso(e.peso_total)}</div>
+                <div
+                  className="entradas-col-num entradas-mono"
+                  style={{ color: e.perda_kg > 0 ? '#c2502f' : '#2a2a24' }}
+                >
+                  {peso(e.perda_kg)}
+                </div>
+                <div className="entradas-col-num entradas-mono entradas-valor">{money(e.valor_total)}</div>
+                <div>
+                  {/* Entradas não têm vencimento (a tabela `entradas` não
+                      tem coluna `venc` — é uma compra do produtor, não uma
+                      venda a prazo), então "Atrasado" aqui NUNCA é
+                      calculado, ao contrário de Saídas (ver
+                      derive/pagamento.ts e SaidasLista.tsx). O seletor só
+                      oferece Pendente/Pago; um `pago` já gravado como
+                      'Atrasado' (dado anterior a esta mudança de
+                      comportamento) continua sendo exibido tal qual, sem
+                      nenhuma tentativa de recalculá-lo. */}
+                  <SeletorPagamento
+                    situacao={e.pago}
+                    aoEscolher={pago => alterarPagamento(e.id, pago)}
+                    rotulo={`Pagamento da entrada ${e.numero}`}
+                  />
+                </div>
+                <div className="entradas-col-num">
+                  <button
+                    type="button"
+                    className="entradas-excluir"
+                    onClick={ev => { ev.stopPropagation(); setConfirmando({ id: e.id, numero: e.numero }) }}
+                  >
+                    Excluir
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 

@@ -139,6 +139,11 @@ const put = (corpo: unknown): RequestInit => ({
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify(corpo),
 })
+const patch = (corpo: unknown): RequestInit => ({
+  method: 'PATCH',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(corpo),
+})
 
 function umItem(sobrescreve: Record<string, unknown> = {}) {
   return { produto_id: produtoId, un: 'KG', qtd: 10, preco: 2.5, perda_kg: 0, ...sobrescreve }
@@ -608,5 +613,107 @@ describe('codigos de status dos handlers', () => {
       expect(res.headers.get('content-type')).toMatch(/application\/json/)
       expect(await res.json()).toEqual({ erro: 'id invalido' })
     }
+  })
+})
+
+// Chip de pagamento editável direto na linha da tabela (EntradasLista) —
+// atalho pra acao mais repetida da tela, sem reenviar `itens` (que o PUT
+// completo sempre exige, ver describe acima "PUT com corpo sem itens").
+describe('PATCH /:id/pago — atalho de pagamento sem reenviar itens', () => {
+  async function criarEntrada(numero: string, extra: Record<string, unknown> = {}) {
+    const res = await pedir('/api/entradas', comoAdmin(json({
+      numero, data: '2026-01-10', itens: [umItem()], ...extra,
+    })))
+    return res.json()
+  }
+
+  it('marcar Pago grava pago=Pago e data_pag=hoje (data do servidor)', async () => {
+    const criada = await criarEntrada('PATCH-1', { pago: 'Pendente' })
+    expect(criada.data_pag).toBeNull()
+
+    const res = await pedir(`/api/entradas/${criada.id}/pago`, comoAdmin(patch({ pago: 'Pago' })))
+    expect(res.status).toBe(200)
+    const atualizada = await res.json()
+    expect(atualizada.pago).toBe('Pago')
+    const hoje = new Date().toISOString().slice(0, 10)
+    expect(atualizada.data_pag).toBe(hoje)
+
+    const [linha] = await admin`select pago, data_pag from entradas where id = ${criada.id}`
+    expect(linha.pago).toBe('Pago')
+    // linha.data_pag e um Date (driver cru, sem passar por paraJson) — compara
+    // pelos componentes UTC (mesma convencao de dataParaTexto), nao por
+    // String(date), que imprime no fuso LOCAL da maquina rodando o teste e
+    // pode "voltar" um dia dependendo do fuso.
+    expect((linha.data_pag as Date).toISOString().slice(0, 10)).toBe(hoje)
+  })
+
+  it('voltar para Pendente LIMPA data_pag (nao deixa um pendente com data de pagamento gravada)', async () => {
+    const criada = await criarEntrada('PATCH-2', { pago: 'Pago', data_pag: '2026-01-15' })
+    expect(criada.data_pag).toBe('2026-01-15')
+
+    const res = await pedir(`/api/entradas/${criada.id}/pago`, comoAdmin(patch({ pago: 'Pendente' })))
+    expect(res.status).toBe(200)
+    const atualizada = await res.json()
+    expect(atualizada.pago).toBe('Pendente')
+    expect(atualizada.data_pag).toBeNull()
+
+    const [linha] = await admin`select pago, data_pag from entradas where id = ${criada.id}`
+    expect(linha.pago).toBe('Pendente')
+    expect(linha.data_pag).toBeNull()
+  })
+
+  it('nao mexe nos itens da entrada (continuam os mesmos depois do PATCH)', async () => {
+    const criada = await criarEntrada('PATCH-3')
+    expect(criada.itens).toHaveLength(1)
+    const idItemAntes = criada.itens[0].id
+
+    await pedir(`/api/entradas/${criada.id}/pago`, comoAdmin(patch({ pago: 'Pago' })))
+
+    const itensDepois = await admin`select id from entrada_itens where entrada_id = ${criada.id}`
+    expect(itensDepois).toHaveLength(1)
+    expect(itensDepois[0].id).toBe(idItemAntes)
+  })
+
+  it('pago="Atrasado" -> 400 (nao e mais uma escolha por este atalho)', async () => {
+    const criada = await criarEntrada('PATCH-4')
+    const res = await pedir(`/api/entradas/${criada.id}/pago`, comoAdmin(patch({ pago: 'Atrasado' })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'pago deve ser "Pago" ou "Pendente"' })
+  })
+
+  it('pago invalido/ausente -> 400', async () => {
+    const criada = await criarEntrada('PATCH-5')
+    const res = await pedir(`/api/entradas/${criada.id}/pago`, comoAdmin(patch({})))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'pago deve ser "Pago" ou "Pendente"' })
+  })
+
+  it('id inexistente (uuid valido) -> 404', async () => {
+    const res = await pedir(
+      '/api/entradas/00000000-0000-0000-0000-000000000000/pago',
+      comoAdmin(patch({ pago: 'Pago' })),
+    )
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ erro: 'nao encontrado' })
+  })
+
+  it('id malformado -> 400 JSON, nunca 500', async () => {
+    const res = await pedir('/api/entradas/nao-e-um-uuid/pago', comoAdmin(patch({ pago: 'Pago' })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'id invalido' })
+  })
+
+  it('colaborador tambem pode usar o atalho (mesma permissao de escrita da tela)', async () => {
+    const criada = await criarEntrada('PATCH-6')
+    const res = await pedir(`/api/entradas/${criada.id}/pago`, comoColab(patch({ pago: 'Pago' })))
+    expect(res.status).toBe(200)
+  })
+
+  it('sem cookie -> 401', async () => {
+    const res = await pedir(
+      '/api/entradas/00000000-0000-0000-0000-000000000000/pago',
+      patch({ pago: 'Pago' }),
+    )
+    expect(res.status).toBe(401)
   })
 })

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api, ErroApi } from '../api/client'
 import type { Cliente } from '../derive/clientes'
+import { situacaoExibidaSaida, type SituacaoPagamentoEscolhivel } from '../derive/pagamento'
 import { ModalSaida, type Saida, type StatusSaida, type PagSaida } from '../components/ModalSaida'
+import { SeletorPagamento } from '../components/SeletorPagamento'
 import './SaidasLista.css'
 
 const STATUS_FILTROS = ['Todos', 'Pendente', 'Em rota', 'Entregue', 'Devolvido', 'Cancelado'] as const
@@ -61,6 +63,16 @@ function dataBr(iso: string | null): string {
   return `${dia}/${mes}`
 }
 
+/** Data de hoje em 'AAAA-MM-DD', usando os componentes LOCAIS (não UTC) —
+ * mesmo `hojeIsoLocal()` de RelatoriosTela.tsx/`hojeIso()` de
+ * ModalLancamento.tsx. Fica na tela (não em derive/pagamento.ts) porque
+ * toca `new Date()`: a função pura (`situacaoExibidaSaida`) recebe isso
+ * como parâmetro, pra continuar testável sem mockar relógio. */
+function hojeIsoLocal(): string {
+  const n = new Date()
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
+}
+
 interface SaidasListaProps {
   onSessaoExpirada: () => void
 }
@@ -118,6 +130,34 @@ export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
     setVersao(v => v + 1)
   }
 
+  /**
+   * Chip de pagamento editável direto na linha (PATCH /api/saidas/:id/pag —
+   * não reenvia `itens`, ao contrário do PUT completo do modal). A API já
+   * grava/limpa `data_pag` sozinha (hoje ao marcar Pago, null ao voltar pra
+   * Pendente); aqui só espelha a resposta na linha local. `venc` nunca muda
+   * por este caminho (só pag/data_pag), então não precisa vir na resposta
+   * pra recalcular a exibição — a derivação usa o `venc` que a linha já
+   * tinha.
+   *
+   * Rejeita em qualquer falha — inclusive 401 — pro SeletorPagamento
+   * reverter o valor sozinho; sessão expirada tem tratamento extra (volta
+   * ao login) além da reversão do chip.
+   */
+  async function alterarPagamento(id: string, pag: SituacaoPagamentoEscolhivel) {
+    try {
+      const atualizada = await api.patch<{ pag: string; data_pag: string | null }>(
+        `/api/saidas/${id}/pag`,
+        { pag },
+      )
+      setSaidas(ss => ss.map(s => (
+        s.id === id ? { ...s, pag: atualizada.pag as PagSaida, data_pag: atualizada.data_pag } : s
+      )))
+    } catch (err) {
+      if (err instanceof ErroApi && err.status === 401) onSessaoExpirada()
+      throw err
+    }
+  }
+
   function aoExcluir() {
     setModal(undefined)
     setVersao(v => v + 1)
@@ -153,15 +193,27 @@ export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
     )
   }
 
+  // 'hoje' calculado uma vez por render (nao dentro do filtro/contagem, que
+  // rodam por saida) — evita `new Date()` repetido, e mantem a mesma
+  // referencia de "hoje" pro filtro E pra cada chip da tabela concordarem
+  // entre si na mesma renderizacao.
+  const hojeIso = hojeIsoLocal()
+
+  // Filtro e contagem usam a situacao EXIBIDA (com Atrasado derivado — ver
+  // derive/pagamento.ts), nao o `pag` cru: senao filtrar por "Atrasado"
+  // deixaria de fora exatamente as saidas que a propria tabela mostra como
+  // atrasadas (Pendente + vencimento vencido), e filtrar por "Pendente"
+  // incluiria saidas que a tabela mostra como Atrasado — os dois
+  // discordando na mesma tela.
   const visiveis = saidas.filter(s =>
     (filtroStatus === 'Todos' || s.status === filtroStatus)
-    && (filtroPag === 'Todos' || s.pag === filtroPag),
+    && (filtroPag === 'Todos' || situacaoExibidaSaida(s.pag, s.venc, hojeIso) === filtroPag),
   )
 
   const contagemStatus = (f: FiltroStatus) =>
     f === 'Todos' ? saidas.length : saidas.filter(s => s.status === f).length
   const contagemPag = (f: FiltroPag) =>
-    f === 'Todos' ? saidas.length : saidas.filter(s => s.pag === f).length
+    f === 'Todos' ? saidas.length : saidas.filter(s => situacaoExibidaSaida(s.pag, s.venc, hojeIso) === f).length
 
   return (
     <div className="saidas-lista">
@@ -215,29 +267,45 @@ export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
           <div>PAGAMENTO</div>
         </div>
 
-        {visiveis.map(s => (
-          <div key={s.id} className="saidas-linha saidas-linha--dados" onClick={() => setModal(s.id)}>
-            <div className="saidas-numero">{s.numero}</div>
-            <div className="saidas-cliente">
-              <div className="saidas-cliente-nome">{nomeCliente(s.cliente_id)}</div>
-              <div className="saidas-rota">{s.rota || '—'}</div>
+        {visiveis.map(s => {
+          const situacao = situacaoExibidaSaida(s.pag, s.venc, hojeIso)
+          return (
+            <div key={s.id} className="saidas-linha saidas-linha--dados" onClick={() => setModal(s.id)}>
+              <div className="saidas-numero">{s.numero}</div>
+              <div className="saidas-cliente">
+                <div className="saidas-cliente-nome">{nomeCliente(s.cliente_id)}</div>
+                <div className="saidas-rota">{s.rota || '—'}</div>
+              </div>
+              <div className="saidas-entrega">{dataBr(s.entrega)}</div>
+              <div className="saidas-col-num saidas-mono">{pesoTxt(s.peso ?? 0)}</div>
+              <div className="saidas-col-num saidas-mono saidas-valor">{money(s.valor ?? 0)}</div>
+              <div>
+                <span className="saidas-badge" style={{ color: COR_STATUS[s.status], background: BG_STATUS[s.status] }}>
+                  {s.status}
+                </span>
+              </div>
+              <div>
+                {s.pag === '—' ? (
+                  // '—' ("nao aplicavel", tipico de pedido cancelado/
+                  // devolvido) fica de fora do seletor de duas opcoes
+                  // (Pendente/Pago) de proposito: nao ha como representar
+                  // "pagamento nao se aplica" nesse toggle sem ambiguidade.
+                  // Só o modal completo (PUT, que ainda aceita os quatro
+                  // valores do CHECK) alcança esse valor — o chip da linha
+                  // continua so um badge estatico neste caso.
+                  <span className="saidas-badge" style={{ color: COR_PAG['—'], background: BG_PAG['—'] }}>—</span>
+                ) : (
+                  <SeletorPagamento
+                    situacao={situacao}
+                    aoEscolher={pag => alterarPagamento(s.id, pag)}
+                    rotulo={`Pagamento do pedido ${s.numero}`}
+                  />
+                )}
+                {s.venc && <div className="saidas-venc">venc. {dataBr(s.venc)}</div>}
+              </div>
             </div>
-            <div className="saidas-entrega">{dataBr(s.entrega)}</div>
-            <div className="saidas-col-num saidas-mono">{pesoTxt(s.peso ?? 0)}</div>
-            <div className="saidas-col-num saidas-mono saidas-valor">{money(s.valor ?? 0)}</div>
-            <div>
-              <span className="saidas-badge" style={{ color: COR_STATUS[s.status], background: BG_STATUS[s.status] }}>
-                {s.status}
-              </span>
-            </div>
-            <div>
-              <span className="saidas-badge" style={{ color: COR_PAG[s.pag], background: BG_PAG[s.pag] }}>
-                {s.pag}
-              </span>
-              {s.venc && <div className="saidas-venc">venc. {dataBr(s.venc)}</div>}
-            </div>
-          </div>
-        ))}
+          )
+        })}
 
         {visiveis.length === 0 && (
           <div className="saidas-sem-filtro">Nenhuma saída com estes filtros.</div>

@@ -124,6 +124,11 @@ const jsonPut = (corpo: unknown): RequestInit => ({
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify(corpo),
 })
+const jsonPatch = (corpo: unknown): RequestInit => ({
+  method: 'PATCH',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(corpo),
+})
 
 /** Payload minimo valido de POST — numero precisa ser unico por teste. */
 function corpoValido(numero: string, extra: Record<string, unknown> = {}) {
@@ -537,5 +542,110 @@ describe('codigos de status dos handlers', () => {
     const res = await pedir(`/api/saidas/${criado.id}`, comoAdmin(jsonPut({ obs: 'x' })))
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ erro: 'pelo menos um item e obrigatorio' })
+  })
+})
+
+// Chip de pagamento editável direto na linha da tabela (SaidasLista) —
+// atalho pra acao mais repetida da tela, sem reenviar `itens` (que o PUT
+// completo sempre exige, ver "PUT sem itens -> 400" acima).
+describe('PATCH /:id/pag — atalho de pagamento sem reenviar itens', () => {
+  async function criarSaida(numero: string, extra: Record<string, unknown> = {}) {
+    const res = await pedir('/api/saidas', comoAdmin(json(corpoValido(numero, extra))))
+    return res.json()
+  }
+
+  it('marcar Pago grava pag=Pago e data_pag=hoje (data do servidor)', async () => {
+    const criada = await criarSaida('PATCH-S-1', { pag: 'Pendente' })
+    expect(criada.data_pag).toBeNull()
+
+    const res = await pedir(`/api/saidas/${criada.id}/pag`, comoAdmin(jsonPatch({ pag: 'Pago' })))
+    expect(res.status).toBe(200)
+    const atualizada = await res.json()
+    expect(atualizada.pag).toBe('Pago')
+    const hoje = new Date().toISOString().slice(0, 10)
+    expect(atualizada.data_pag).toBe(hoje)
+
+    const [linha] = await admin`select pag, data_pag from saidas where id = ${criada.id}`
+    expect(linha.pag).toBe('Pago')
+    expect((linha.data_pag as Date).toISOString().slice(0, 10)).toBe(hoje)
+  })
+
+  it('voltar para Pendente LIMPA data_pag (nao deixa um pendente com data de pagamento gravada)', async () => {
+    const criada = await criarSaida('PATCH-S-2', { pag: 'Pago', data_pag: '2026-01-15' })
+    expect(criada.data_pag).toBe('2026-01-15')
+
+    const res = await pedir(`/api/saidas/${criada.id}/pag`, comoAdmin(jsonPatch({ pag: 'Pendente' })))
+    expect(res.status).toBe(200)
+    const atualizada = await res.json()
+    expect(atualizada.pag).toBe('Pendente')
+    expect(atualizada.data_pag).toBeNull()
+
+    const [linha] = await admin`select pag, data_pag from saidas where id = ${criada.id}`
+    expect(linha.pag).toBe('Pendente')
+    expect(linha.data_pag).toBeNull()
+  })
+
+  it('nao mexe em venc nem nos itens da saida', async () => {
+    const criada = await criarSaida('PATCH-S-3', { venc: '2026-03-01' })
+    expect(criada.itens).toHaveLength(1)
+    const idItemAntes = criada.itens[0].id
+
+    const res = await pedir(`/api/saidas/${criada.id}/pag`, comoAdmin(jsonPatch({ pag: 'Pago' })))
+    const atualizada = await res.json()
+    expect(atualizada.venc).toBe('2026-03-01')
+
+    const itensDepois = await admin`select id from saida_itens where saida_id = ${criada.id}`
+    expect(itensDepois).toHaveLength(1)
+    expect(itensDepois[0].id).toBe(idItemAntes)
+  })
+
+  it('pag="Atrasado" -> 400 (nao e mais uma escolha por este atalho, so pelo PUT completo)', async () => {
+    const criada = await criarSaida('PATCH-S-4')
+    const res = await pedir(`/api/saidas/${criada.id}/pag`, comoAdmin(jsonPatch({ pag: 'Atrasado' })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'pag deve ser "Pago" ou "Pendente"' })
+  })
+
+  it('pag="—" -> 400 (nao e mais uma escolha por este atalho)', async () => {
+    const criada = await criarSaida('PATCH-S-5')
+    const res = await pedir(`/api/saidas/${criada.id}/pag`, comoAdmin(jsonPatch({ pag: '—' })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'pag deve ser "Pago" ou "Pendente"' })
+  })
+
+  it('pag invalido/ausente -> 400', async () => {
+    const criada = await criarSaida('PATCH-S-6')
+    const res = await pedir(`/api/saidas/${criada.id}/pag`, comoAdmin(jsonPatch({})))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'pag deve ser "Pago" ou "Pendente"' })
+  })
+
+  it('id inexistente (uuid valido) -> 404', async () => {
+    const res = await pedir(
+      '/api/saidas/00000000-0000-0000-0000-000000000000/pag',
+      comoAdmin(jsonPatch({ pag: 'Pago' })),
+    )
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ erro: 'nao encontrado' })
+  })
+
+  it('id malformado -> 400 JSON, nunca 500', async () => {
+    const res = await pedir('/api/saidas/nao-e-um-uuid/pag', comoAdmin(jsonPatch({ pag: 'Pago' })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'id invalido' })
+  })
+
+  it('colaborador tambem pode usar o atalho (mesma permissao de escrita da tela)', async () => {
+    const criada = await criarSaida('PATCH-S-7')
+    const res = await pedir(`/api/saidas/${criada.id}/pag`, comoColab(jsonPatch({ pag: 'Pago' })))
+    expect(res.status).toBe(200)
+  })
+
+  it('sem cookie -> 401', async () => {
+    const res = await pedir(
+      '/api/saidas/00000000-0000-0000-0000-000000000000/pag',
+      jsonPatch({ pag: 'Pago' }),
+    )
+    expect(res.status).toBe(401)
   })
 })

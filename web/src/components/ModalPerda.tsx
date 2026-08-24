@@ -209,6 +209,7 @@ export function ModalPerda({ perda, onSalvo, onFechar, onSessaoExpirada }: Modal
                 type="number"
                 min="0"
                 step="0.001"
+                placeholder="Ex.: 8"
                 {...campo('qtd')}
               />
               {erroQtd && <p className="modal-perda-erro" role="alert">{erroQtd}</p>}

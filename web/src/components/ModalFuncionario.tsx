@@ -178,6 +178,7 @@ export function ModalFuncionario({ funcionario, onSalvo, onExcluido, onFechar, o
                     type="number"
                     min="0"
                     step="0.01"
+                    placeholder="Ex.: 2200"
                     {...campo('salario')}
                   />
                   {erroSalario && <p className="modal-erro" role="alert">{erroSalario}</p>}

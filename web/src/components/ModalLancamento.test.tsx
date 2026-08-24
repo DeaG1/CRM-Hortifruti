@@ -76,9 +76,13 @@ describe('ModalLancamento — criação (valores padrão)', () => {
     expect(opcoes).toEqual(['Frete', 'Gasolina'])
   })
 
-  it('valor comeca em 0 e descricao vazia', () => {
+  it('valor comeca vazio (nao 0), com placeholder, e descricao vazia', () => {
     renderModal()
-    expect(screen.getByLabelText(/valor/i)).toHaveValue(0)
+    // valor comeca vazio (nao 0) — abrir com 0 ja escrito faz quem digita
+    // esquecer de apagar o zero e gravar "0250" em vez de "250" (bug real
+    // reportado pelo dono do produto).
+    expect(screen.getByLabelText(/valor/i)).toHaveValue(null)
+    expect(screen.getByLabelText(/valor/i)).toHaveAttribute('placeholder', 'Ex.: 350,00')
     expect(screen.getByLabelText(/descrição/i)).toHaveValue('')
   })
 
@@ -161,12 +165,16 @@ describe('ModalLancamento — validação', () => {
     expect(mockPost).not.toHaveBeenCalled()
   })
 
-  it('valor zero e valido (nao dispara erro)', async () => {
+  it('campo valor vazio vira 0 ao enviar, sem disparar erro de negativo', async () => {
     mockPost.mockResolvedValue({ ...lancamentoExistente, id: 'novo', valor: 0 })
     renderModal()
+    // nao toca no campo valor — ele comeca vazio
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     await waitFor(() => expect(mockPost).toHaveBeenCalled())
     expect(screen.queryByText(/não pode ser negativo/i)).not.toBeInTheDocument()
+    const corpo = mockPost.mock.calls[0][1] as { valor: unknown }
+    expect(corpo.valor).toBe(0)
+    expect(typeof corpo.valor).toBe('number')
   })
 
   it('form tem noValidate — quem bloqueia o submit e a validacao em JS, nao o navegador', () => {
@@ -253,6 +261,11 @@ describe('ModalLancamento — edição', () => {
   it('titulo do dialogo indica edicao', () => {
     renderModal({ lancamento: lancamentoExistente })
     expect(screen.getByRole('dialog', { name: 'Editar lançamento' })).toBeInTheDocument()
+  })
+
+  it('lancamento existente com valor 0 mostra 0, nao vazio — zero gravado e intencional, diferente do vazio inicial', () => {
+    renderModal({ lancamento: { ...lancamentoExistente, valor: 0 } })
+    expect(screen.getByLabelText(/valor/i)).toHaveValue(0)
   })
 
   it('usa PUT com o id do lancamento ao salvar', async () => {

@@ -39,6 +39,7 @@ describe('ModalVeiculo — criação (valores padrao)', () => {
     expect(screen.getByLabelText(/marca/i)).toHaveValue('')
     expect(screen.getByLabelText(/modelo/i)).toHaveValue('')
     expect(screen.getByLabelText(/ano/i)).toHaveValue(null)
+    expect(screen.getByLabelText(/ano/i)).toHaveAttribute('placeholder', 'Ex.: 2019')
     expect(screen.getByLabelText(/veículo ativo/i)).toBeChecked()
   })
 
@@ -195,6 +196,13 @@ describe('ModalVeiculo — edição', () => {
       <ModalVeiculo veiculo={veiculoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />,
     )
     expect(screen.getByRole('dialog', { name: 'Editar veículo' })).toBeInTheDocument()
+  })
+
+  it('veiculo existente com ano 0 mostra 0, nao vazio — zero gravado e intencional, diferente do vazio inicial', () => {
+    render(
+      <ModalVeiculo veiculo={{ ...veiculoExistente, ano: 0 }} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />,
+    )
+    expect(screen.getByLabelText(/ano/i)).toHaveValue(0)
   })
 
   it('usa PUT com o id do veiculo ao salvar', async () => {

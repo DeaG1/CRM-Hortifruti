@@ -15,10 +15,15 @@ export interface Funcionario {
  * derive/clientes.ts: um arquivo de componente só pode exportar componentes
  * sem quebrar o fast refresh. `dia_pag: 5` é o mesmo default de
  * newFuncionario() no protótipo (design/CRM Hortifruti.dc.html:1931) e da
- * coluna no banco (`db/migrations/009_entidades_fase1.sql`).
+ * coluna no banco (`db/migrations/009_entidades_fase1.sql`) — é uma sugestão
+ * útil, mantida como está (é um `<select>`, não sofre do problema de "0"
+ * pré-digitado). `salario: ''` (não 0), mesmo motivo de CLIENTE_NOVO.limite
+ * (derive/clientes.ts): campo numérico começa vazio com placeholder, não
+ * com 0 pré-escrito — `as number | string` porque o spread ao editar
+ * sobrescreve com o número real vindo da API.
  */
 export const FUNCIONARIO_NOVO = {
-  nome: '', cargo: '', tel: '', salario: 0, dia_pag: 5, ativo: true,
+  nome: '', cargo: '', tel: '', salario: '' as number | string, dia_pag: 5, ativo: true,
 }
 
 /**

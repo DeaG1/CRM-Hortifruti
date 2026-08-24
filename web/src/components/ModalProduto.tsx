@@ -150,6 +150,7 @@ export function ModalProduto({ produto, onSalvo, onExcluido, onFechar, onSessaoE
                     type="number"
                     min="0"
                     step="0.001"
+                    placeholder="Ex.: 20"
                     {...campo('peso_medio')}
                   />
                   {erroPesoMedio && <p className="modal-erro" role="alert">{erroPesoMedio}</p>}

@@ -26,7 +26,12 @@ export const CATEGORIAS_COM_FUNCIONARIO = new Set(['Salário', 'Adiantamento de 
  * `GET /api/lancamentos/categorias` — de novo, pra não fixar um nome de
  * categoria específico no front (nem repetir a lista, nem escolher um valor
  * arbitrário dela).
+ *
+ * `valor: ''` (não 0), mesmo motivo de CLIENTE_NOVO.limite
+ * (derive/clientes.ts): campo numérico começa vazio com placeholder, não
+ * com 0 pré-escrito — `as number | string` porque o spread ao editar
+ * sobrescreve com o número real vindo da API.
  */
 export const LANCAMENTO_NOVO_BASE = {
-  descricao: '', valor: 0, funcionario_id: '',
+  descricao: '', valor: '' as number | string, funcionario_id: '',
 }

@@ -32,10 +32,20 @@ export interface Cliente {
  * componentes sem quebrar o fast refresh — mesma razão que levou
  * `Papel`/`Tela`/`ADMIN_ONLY_SCREENS` para `telas.ts` na Task 9.
  */
+// `limite: ''` (nao 0), igual a VEICULO_NOVO.ano em derive/veiculos.ts: campo
+// numerico comeca vazio (com placeholder) em vez de 0 pre-preenchido — abrir
+// com 0 ja escrito faz quem digita esquecer de apagar o zero primeiro e
+// gravar "0250" em vez de "250" (bug real reportado pelo dono do produto).
+// `as number | string` pela mesma razao do comentario em VEICULO_NOVO: ao
+// editar, o spread `{ ...CLIENTE_NOVO, ...cliente }` sobrescreve com o
+// numero real vindo da API, entao o campo precisa aceitar os dois tipos.
+// `prazo` continua com o default 14 — e uma sugestao util (prazo comum de
+// pagamento), nao um zero atrapalhando; so campos cujo default e 0 viram
+// vazio.
 export const CLIENTE_NOVO = {
   nome: '', resp: '', cnpj: '', tel: '', email: '', endereco: '',
   rota: 'Sul A', freq: '2×/sem · Seg e Qui', status: 'ativo',
-  cobranca: 'Em dia', forma: 'PIX', limite: 0, prazo: 14, tend: '→', obs: '',
+  cobranca: 'Em dia', forma: 'PIX', limite: '' as number | string, prazo: 14, tend: '→', obs: '',
 }
 
 export interface Pedido {

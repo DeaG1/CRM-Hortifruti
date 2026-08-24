@@ -191,6 +191,7 @@ export function ModalLancamento({
                     type="number"
                     min="0"
                     step="0.01"
+                    placeholder="Ex.: 350,00"
                     {...campo('valor')}
                   />
                   {erroValor && <p className="modal-erro" role="alert">{erroValor}</p>}

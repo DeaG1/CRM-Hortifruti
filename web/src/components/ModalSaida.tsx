@@ -83,12 +83,21 @@ const UNIDADES = ['KG', 'CX', 'UN', 'DZ', 'MC'] as const
  * aparecer em duas linhas), e o indice do array muda ao remover uma linha
  * do meio (perderia o estado de foco/digitacao das linhas seguintes). */
 let proximaChaveItem = 0
-interface ItemLinha extends ItemSaida {
+// `qtd`/`preco` sao `number | string` (nao so `number` como em ItemSaida):
+// uma linha nova comeca com os dois campos vazios ('') — mesmo motivo de
+// CLIENTE_NOVO.limite (derive/clientes.ts) — e o usuario digita ali dentro,
+// entao o estado precisa aceitar tanto o numero vindo da API (ao editar,
+// ver o useEffect de carregar a saida) quanto a string vazia/em digitacao.
+// Convertidos para numero so no calculo do total/subtotal e no envio
+// (`salvar`, abaixo).
+interface ItemLinha extends Omit<ItemSaida, 'qtd' | 'preco'> {
   chave: number
+  qtd: number | string
+  preco: number | string
 }
 
 function linhaNova(): ItemLinha {
-  return { chave: proximaChaveItem++, produto_id: '', un: 'KG', qtd: 0, preco: 0, perda_kg: 0 }
+  return { chave: proximaChaveItem++, produto_id: '', un: 'KG', qtd: '', preco: '', perda_kg: 0 }
 }
 
 const money = (n: number) =>
@@ -200,17 +209,18 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
     setItens(is => is.filter(it => it.chave !== chave))
   }
 
+  // Guarda a string digitada como veio do input — sem converter pra numero
+  // aqui. Convertendo cada tecla (o que o codigo antigo fazia: '' virava 0
+  // no meio da digitacao) o campo "pisca" de volta pra "0" toda vez que o
+  // usuario apaga tudo, reproduzindo o mesmo bug do 0 pre-preenchido: a
+  // pessoa apaga, ve "0" nao vazio, e digita em cima gravando "01"/"05" sem
+  // perceber. A conversao pra numero acontece so onde o valor e usado de
+  // fato — total/subtotal abaixo, e no corpo do envio em `salvar`.
   function atualizarItem(chave: number, campoItem: 'produto_id' | 'un' | 'qtd' | 'preco', valor: string) {
-    setItens(is => is.map((it) => {
-      if (it.chave !== chave) return it
-      if (campoItem === 'qtd' || campoItem === 'preco') {
-        return { ...it, [campoItem]: valor === '' ? 0 : Number(valor) }
-      }
-      return { ...it, [campoItem]: valor }
-    }))
+    setItens(is => is.map((it) => (it.chave === chave ? { ...it, [campoItem]: valor } : it)))
   }
 
-  const total = itens.reduce((soma, it) => soma + it.qtd * it.preco, 0)
+  const total = itens.reduce((soma, it) => soma + (Number(it.qtd) || 0) * (Number(it.preco) || 0), 0)
 
   async function salvar(e: FormEvent) {
     e.preventDefault()
@@ -253,7 +263,16 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
         data_pag: rascunho.data_pag || null,
         forma_pag: rascunho.forma_pag,
         obs: rascunho.obs,
-        itens: itens.map(({ chave: _chave, id: _id, ...item }) => item),
+        // qtd/preco: campo vazio vira 0 no envio (mesma regra dos demais
+        // campos numericos do sistema) — nao ha validacao de "obrigatorio"
+        // pra esses dois nesta tela hoje (so produto_id e checado acima),
+        // entao converter '' pra 0 aqui nao afrouxa nenhuma validacao
+        // existente.
+        itens: itens.map(({ chave: _chave, id: _id, qtd, preco, ...item }) => ({
+          ...item,
+          qtd: Number(qtd) || 0,
+          preco: Number(preco) || 0,
+        })),
       }
       // venc so entra no corpo se o usuario digitou algo — campo vazio
       // significa "deixa a API calcular entrega + prazo do cliente" (ver
@@ -438,6 +457,7 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
                           type="number"
                           min="0"
                           step="0.001"
+                          placeholder="Ex.: 1450"
                           value={it.qtd}
                           onChange={e => atualizarItem(it.chave, 'qtd', e.target.value)}
                           aria-label="Quantidade"
@@ -455,11 +475,14 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
                         type="number"
                         min="0"
                         step="0.01"
+                        placeholder="Ex.: 3,20"
                         value={it.preco}
                         onChange={e => atualizarItem(it.chave, 'preco', e.target.value)}
                         aria-label="Preço por unidade"
                       />
-                      <div className="modal-itens-subtotal">{money(it.qtd * it.preco)}</div>
+                      <div className="modal-itens-subtotal">
+                        {money((Number(it.qtd) || 0) * (Number(it.preco) || 0))}
+                      </div>
                       <button
                         type="button"
                         className="modal-itens-remover"

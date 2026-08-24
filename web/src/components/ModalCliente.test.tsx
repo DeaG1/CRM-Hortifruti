@@ -45,7 +45,14 @@ describe('ModalCliente — criação (valores padrão)', () => {
     expect(screen.getByLabelText(/frequ[eê]ncia/i)).toHaveValue('2×/sem · Seg e Qui')
     expect(screen.getByLabelText(/^status$/i)).toHaveValue('ativo')
     expect(screen.getByLabelText(/forma de pagamento/i)).toHaveValue('PIX')
-    expect(screen.getByLabelText(/limite de cr[eé]dito/i)).toHaveValue(0)
+    // limite comeca vazio (nao 0) — abrir com 0 ja escrito faz quem digita
+    // esquecer de apagar o zero primeiro e gravar "0250" em vez de "250"
+    // (bug real reportado pelo dono do produto). O placeholder ensina o
+    // formato/grandeza esperada no lugar do zero.
+    expect(screen.getByLabelText(/limite de cr[eé]dito/i)).toHaveValue(null)
+    expect(screen.getByLabelText(/limite de cr[eé]dito/i)).toHaveAttribute('placeholder', 'Ex.: 5000')
+    // prazo mantem o default 14 — e uma sugestao util (prazo comum de
+    // pagamento), nao um zero atrapalhando a digitacao.
     expect(screen.getByLabelText(/prazo de pagamento/i)).toHaveValue(14)
     expect(screen.getByLabelText(/tend[eê]ncia/i)).toHaveValue('→')
     expect(screen.getByLabelText(/nome do estabelecimento/i)).toHaveValue('')
@@ -142,6 +149,20 @@ describe('ModalCliente — validação de limite/prazo não-negativos', () => {
 })
 
 describe('ModalCliente — envio', () => {
+  it('campo limite vazio vira 0 ao enviar, sem disparar erro de negativo', async () => {
+    mockPost.mockResolvedValue({ ...clienteExistente, id: 'novo-vazio', nome: 'Mercado Vazio', limite: 0 })
+    render(<ModalCliente cliente={null} onSalvo={() => {}} onFechar={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/nome do estabelecimento/i), { target: { value: 'Mercado Vazio' } })
+    // nao toca no campo limite — ele comeca vazio (ver teste de valores padrao)
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    const corpo = mockPost.mock.calls[0][1] as { limite: unknown }
+    expect(corpo.limite).toBe(0)
+    expect(typeof corpo.limite).toBe('number')
+    expect(screen.queryByText(/n[aã]o pode ser negativo/i)).not.toBeInTheDocument()
+  })
+
   it('envia limite e prazo como numero, nao string', async () => {
     mockPost.mockResolvedValue({ ...clienteExistente, id: 'novo-1', nome: 'Mercado Teste' })
     render(<ModalCliente cliente={null} onSalvo={() => {}} onFechar={() => {}} />)
@@ -224,6 +245,11 @@ describe('ModalCliente — edição', () => {
   it('titulo do dialogo indica edicao', () => {
     render(<ModalCliente cliente={clienteExistente} onSalvo={() => {}} onFechar={() => {}} />)
     expect(screen.getByRole('dialog', { name: 'Editar cliente' })).toBeInTheDocument()
+  })
+
+  it('cliente existente com limite 0 mostra 0, nao vazio — zero gravado e intencional, diferente do vazio inicial', () => {
+    render(<ModalCliente cliente={{ ...clienteExistente, limite: 0 }} onSalvo={() => {}} onFechar={() => {}} />)
+    expect(screen.getByLabelText(/limite de cr[eé]dito/i)).toHaveValue(0)
   })
 
   it('usa PUT com o id do cliente ao salvar', async () => {

@@ -179,6 +179,7 @@ export function ModalCliente({ cliente, onSalvo, onFechar, onSessaoExpirada }: M
                 type="number"
                 min="0"
                 step="0.01"
+                placeholder="Ex.: 5000"
                 {...campo('limite')}
               />
               {erroLimite && <p className="modal-erro" role="alert">{erroLimite}</p>}

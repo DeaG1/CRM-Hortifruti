@@ -60,6 +60,13 @@ describe('ModalPerda — criação (valores padrão)', () => {
     expect(screen.getByLabelText(/motivo/i)).toHaveValue('não informado')
   })
 
+  it('quantidade perdida comeca vazia (nao 0), com placeholder', async () => {
+    render(<ModalPerda perda={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await aguardarProdutos()
+    expect(screen.getByLabelText(/quantidade perdida/i)).toHaveValue(null)
+    expect(screen.getByLabelText(/quantidade perdida/i)).toHaveAttribute('placeholder', 'Ex.: 8')
+  })
+
   it('form tem noValidate — quem bloqueia o submit e a validacao em JS, nao o navegador', () => {
     render(<ModalPerda perda={null} onSalvo={() => {}} onFechar={() => {}} />)
     const form = screen.getByRole('dialog').querySelector('form')

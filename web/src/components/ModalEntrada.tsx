@@ -64,12 +64,16 @@ interface Rascunho {
 
 /** Valores iniciais de uma entrada nova — sem numero/data/fornecedor (o
  * usuario preenche), pago comeca Pendente (é o que a coluna assume por
- * default no banco). */
+ * default no banco). `perda_kg: ''` (nao '0'): campo numerico comeca vazio
+ * com placeholder, nao com 0 pre-escrito — abrir com 0 ja digitado faz quem
+ * preenche esquecer de apagar o zero e gravar "01"/"0250" em vez do valor
+ * pretendido (bug real reportado pelo dono do produto). Vazio vira 0 so na
+ * hora de enviar (ver `perdaHeaderNum || 0` em `salvar`). */
 const ENTRADA_NOVA: Rascunho = {
   numero: '',
   fornecedor_id: '',
   data: '',
-  perda_kg: '0',
+  perda_kg: '',
   motivo: '',
   pago: 'Pendente',
   data_pag: '',
@@ -427,6 +431,7 @@ export function ModalEntrada({ entrada, onSalvo, onFechar, onSessaoExpirada }: M
                 type="number"
                 min="0"
                 step="0.001"
+                placeholder="Ex.: 8"
                 {...campo('perda_kg')}
               />
               {erroPerda && <p className="modal-entrada-erro" role="alert">{erroPerda}</p>}
@@ -481,6 +486,7 @@ export function ModalEntrada({ entrada, onSalvo, onFechar, onSessaoExpirada }: M
                       type="number"
                       min="0"
                       step="0.001"
+                      placeholder="Ex.: 1450"
                       aria-label={`Quantidade do item ${idx + 1}`}
                       value={it.qtd}
                       onChange={e => atualizarItem(idx, 'qtd', e.target.value)}
@@ -490,6 +496,7 @@ export function ModalEntrada({ entrada, onSalvo, onFechar, onSessaoExpirada }: M
                       type="number"
                       min="0"
                       step="0.01"
+                      placeholder="Ex.: 3,20"
                       aria-label={`Preço do item ${idx + 1}`}
                       value={it.preco}
                       onChange={e => atualizarItem(idx, 'preco', e.target.value)}
@@ -499,6 +506,7 @@ export function ModalEntrada({ entrada, onSalvo, onFechar, onSessaoExpirada }: M
                       type="number"
                       min="0"
                       step="0.001"
+                      placeholder="Ex.: 8"
                       aria-label={`Perda do item ${idx + 1}`}
                       value={it.perda_kg}
                       onChange={e => atualizarItem(idx, 'perda_kg', e.target.value)}

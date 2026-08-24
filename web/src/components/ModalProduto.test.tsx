@@ -33,7 +33,11 @@ describe('ModalProduto — criação (valores padrão)', () => {
     render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     expect(screen.getByLabelText(/nome do produto/i)).toHaveValue('')
     expect(screen.getByLabelText(/unidade padr[aã]o/i)).toHaveValue('KG')
-    expect(screen.getByLabelText(/peso m[eé]dio/i)).toHaveValue(0)
+    // peso_medio comeca vazio (nao 0) — e exatamente o campo do print que
+    // motivou essa correcao (dono do produto digitou "1" e o campo ficou
+    // "01"). O placeholder ensina o formato/grandeza esperada.
+    expect(screen.getByLabelText(/peso m[eé]dio/i)).toHaveValue(null)
+    expect(screen.getByLabelText(/peso m[eé]dio/i)).toHaveAttribute('placeholder', 'Ex.: 20')
   })
 
   it('foca o campo nome ao abrir', () => {
@@ -125,6 +129,18 @@ describe('ModalProduto — envio', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     await waitFor(() => expect(onSalvo).toHaveBeenCalledWith(criado))
   })
+
+  it('campo peso_medio vazio vira 0 ao enviar', async () => {
+    mockPost.mockResolvedValue({ ...produtoExistente, id: 'novo-vazio', nome: 'Rúcula', peso_medio: 0 })
+    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: 'Rúcula' } })
+    // nao toca no campo peso_medio — ele comeca vazio
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    const corpo = mockPost.mock.calls[0][1] as { peso_medio: unknown }
+    expect(corpo.peso_medio).toBe(0)
+    expect(typeof corpo.peso_medio).toBe('number')
+  })
 })
 
 describe('ModalProduto — 409 (nome duplicado)', () => {
@@ -174,6 +190,10 @@ describe('ModalProduto — edição', () => {
     render(<ModalProduto produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     expect(screen.getByLabelText(/nome do produto/i)).toHaveValue('Batata')
     expect(screen.getByLabelText(/unidade padr[aã]o/i)).toHaveValue('KG')
+    // produtoExistente.peso_medio e 0 gravado de verdade (nao ausente) — tem
+    // que aparecer como 0, nao vazio: vazio e so o estado inicial de
+    // criação, editar um produto com peso 0 e salvar sem tocar no campo tem
+    // que continuar 0 por intencao, nao por acaso.
     expect(screen.getByLabelText(/peso m[eé]dio/i)).toHaveValue(0)
   })
 

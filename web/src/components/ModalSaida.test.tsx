@@ -96,6 +96,20 @@ describe('ModalSaida — itens: adicionar, remover, total', () => {
     expect(screen.queryByText(/nenhum item ainda/i)).not.toBeInTheDocument()
   })
 
+  it('linha de item nova comeca com quantidade e preco vazios (nao 0), com placeholder', async () => {
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/api/produtos'))
+
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    // vazio (nao 0) — abrir com 0 ja escrito faz quem digita esquecer de
+    // apagar o zero e gravar "01"/"05" em vez do valor pretendido (bug real
+    // reportado pelo dono do produto).
+    expect(screen.getByLabelText('Quantidade')).toHaveValue(null)
+    expect(screen.getByLabelText('Quantidade')).toHaveAttribute('placeholder', 'Ex.: 1450')
+    expect(screen.getByLabelText('Preço por unidade')).toHaveValue(null)
+    expect(screen.getByLabelText('Preço por unidade')).toHaveAttribute('placeholder', 'Ex.: 3,20')
+  })
+
   it('remover item tira a linha da lista', async () => {
     render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
@@ -194,6 +208,25 @@ describe('ModalSaida — envio (criação)', () => {
     expect('venc' in corpo).toBe(false)
   })
 
+  it('quantidade/preco do item vazios viram 0 ao enviar', async () => {
+    mockPost.mockResolvedValue({ ...saidaExistente, id: 'novo-vazio' })
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/número do pedido/i), { target: { value: 'S-0101' } })
+    fireEvent.change(screen.getByLabelText(/data do pedido/i), { target: { value: '2026-08-10' } })
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    await waitFor(() => expect(screen.getByLabelText('Produto')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Produto'), { target: { value: 'prod-1' } })
+    // nao toca em Quantidade nem Preço — comecam vazios
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    const corpo = mockPost.mock.calls[0][1] as { itens: Array<{ qtd: unknown; preco: unknown }> }
+    expect(corpo.itens[0].qtd).toBe(0)
+    expect(corpo.itens[0].preco).toBe(0)
+    expect(typeof corpo.itens[0].qtd).toBe('number')
+    expect(typeof corpo.itens[0].preco).toBe('number')
+  })
+
   it('inclui venc no corpo quando o usuario preenche manualmente', async () => {
     mockPost.mockResolvedValue({ ...saidaExistente, id: 'novo-2' })
     render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
@@ -284,6 +317,18 @@ describe('ModalSaida — edição', () => {
     expect(screen.getByLabelText('Produto')).toHaveValue('prod-1')
     expect(screen.getByLabelText('Quantidade')).toHaveValue(10)
     expect(screen.getByRole('dialog', { name: 'Editar saída' })).toBeInTheDocument()
+  })
+
+  it('item existente com qtd/preco 0 mostra 0, nao vazio — zero gravado e intencional, diferente do vazio inicial', async () => {
+    const saidaComItemZerado: Saida = {
+      ...saidaExistente,
+      itens: [{ id: 'item-2', produto_id: 'prod-1', un: 'KG', qtd: 0, preco: 0, perda_kg: 0 }],
+    }
+    mockGetPadrao(saidaComItemZerado)
+    render(<ModalSaida saidaId="saida-1" onSalvo={() => {}} onFechar={() => {}} />)
+
+    expect(await screen.findByLabelText('Quantidade')).toHaveValue(0)
+    expect(screen.getByLabelText('Preço por unidade')).toHaveValue(0)
   })
 
   it('usa PUT com o id da saida ao salvar', async () => {

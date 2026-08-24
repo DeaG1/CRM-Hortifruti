@@ -37,7 +37,13 @@ describe('ModalFuncionario — criação (valores padrão)', () => {
     expect(screen.getByLabelText(/nome do funcionário/i)).toHaveValue('')
     expect(screen.getByLabelText(/cargo/i)).toHaveValue('')
     expect(screen.getByLabelText(/telefone/i)).toHaveValue('')
-    expect(screen.getByLabelText(/salário mensal/i)).toHaveValue(0)
+    // salario comeca vazio (nao 0) — mesma razao do limite em
+    // ModalCliente.test.tsx: abrir com 0 escrito faz quem digita esquecer
+    // de apagar o zero e gravar "01"/"02200" por engano.
+    expect(screen.getByLabelText(/salário mensal/i)).toHaveValue(null)
+    expect(screen.getByLabelText(/salário mensal/i)).toHaveAttribute('placeholder', 'Ex.: 2200')
+    // dia_pag mantem o default 5 — e um <select>, nao sofre do problema do
+    // zero pre-escrito, e o default e uma sugestao util.
     expect(screen.getByLabelText(/dia do pagamento/i)).toHaveValue('5')
     expect(screen.getByLabelText(/funcionário ativo/i)).toBeChecked()
   })
@@ -95,6 +101,18 @@ describe('ModalFuncionario — validação de salário não-negativo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     await waitFor(() => expect(mockPost).toHaveBeenCalled())
     expect(screen.queryByText(/não pode ser negativo/i)).not.toBeInTheDocument()
+  })
+
+  it('campo salario vazio vira 0 ao enviar', async () => {
+    mockPost.mockResolvedValue({ ...funcionarioExistente, id: 'novo-vazio', salario: 0 })
+    render(<ModalFuncionario funcionario={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/nome do funcionário/i), { target: { value: 'Sem Salário Digitado' } })
+    // nao toca no campo salario — ele comeca vazio
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    const corpo = mockPost.mock.calls[0][1] as { salario: unknown }
+    expect(corpo.salario).toBe(0)
+    expect(typeof corpo.salario).toBe('number')
   })
 })
 
@@ -186,6 +204,18 @@ describe('ModalFuncionario — edição', () => {
       <ModalFuncionario funcionario={funcionarioExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />,
     )
     expect(screen.getByRole('dialog', { name: 'Editar funcionário' })).toBeInTheDocument()
+  })
+
+  it('funcionario existente com salario 0 mostra 0, nao vazio — zero gravado e intencional, diferente do vazio inicial', () => {
+    render(
+      <ModalFuncionario
+        funcionario={{ ...funcionarioExistente, salario: 0 }}
+        onSalvo={() => {}}
+        onExcluido={() => {}}
+        onFechar={() => {}}
+      />,
+    )
+    expect(screen.getByLabelText(/salário mensal/i)).toHaveValue(0)
   })
 
   it('usa PUT com o id do funcionario ao salvar', async () => {

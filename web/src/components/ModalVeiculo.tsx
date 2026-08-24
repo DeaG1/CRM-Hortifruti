@@ -164,6 +164,7 @@ export function ModalVeiculo({ veiculo, onSalvo, onExcluido, onFechar, onSessaoE
                     className="modal-input modal-input--mono"
                     type="number"
                     step="1"
+                    placeholder="Ex.: 2019"
                     {...campo('ano')}
                   />
                   {erroAno && <p className="modal-erro" role="alert">{erroAno}</p>}

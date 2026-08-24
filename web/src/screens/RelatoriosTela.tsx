@@ -109,9 +109,9 @@ const pct1 = (n: number) => n.toFixed(1).replace('.', ',') + '%'
 const pctInt = (n: number) => Math.round(n) + '%'
 
 /**
- * Texto do aviso de quantidade incompleta — usado por três abas (Compras,
- * Pedidos e Produtos), com a mesma primeira metade e uma `consequencia`
- * própria de cada uma.
+ * Texto do aviso de quantidade incompleta — usado por quatro abas (Compras,
+ * Pedidos, Produtos e Perdas), com a mesma primeira metade e uma
+ * `consequencia` própria de cada uma.
  *
  * As quantidades destas abas saem da API em quilos, com cada lançamento
  * convertido pela unidade dele — mas lançamento em unidade diferente de KG
@@ -137,6 +137,8 @@ const CONSEQ_QTD = 'A quantidade acima está incompleta.'
 const CONSEQ_METRICAS_PRODUTO =
   'Os números desta linha (quantidades, margem, markup e perda) estão calculados sobre '
   + 'quantidade incompleta.'
+const CONSEQ_PERDA_PRODUTO =
+  'A quantidade comprada e a perda % desta linha estão calculadas sobre quantidade incompleta.'
 
 /** Frase final das notas de rodapé — a saída do problema, não só o aviso. */
 const CADASTRE_PESO_MEDIO = 'Cadastre o peso médio da embalagem em Produtos para que entrem na conta.'
@@ -406,8 +408,16 @@ export function RelatoriosTela({ onSessaoExpirada }: RelatoriosTelaProps) {
           rows: [
             ...relPerdas.porMotivo.map(m => [m.motivo, qtd(m.qtd), m.ocorrencias, pctInt(m.pct)]),
             [],
-            ['Produto', 'Qtd comprada', 'Perda %', ''],
-            ...relPerdas.porProduto.map(p => [p.nome, qtd(p.compradoQtd), p.perdaPct != null ? pct1(p.perdaPct) : '—', '']),
+            ['Produto', 'Qtd comprada (kg)', 'Perda %', ''],
+            // Mesmo asterisco da tela: o CSV sai da mesma leitura, não de
+            // uma versão "limpa".
+            ...relPerdas.porProduto.map(p => {
+              const marca = p.itensSemConversao > 0 ? '*' : ''
+              return [
+                p.nome, qtd(p.compradoQtd) + marca,
+                p.perdaPct != null ? pct1(p.perdaPct) + marca : '—', '',
+              ]
+            }),
           ],
         }
     }
@@ -810,11 +820,19 @@ function AbaPerdas({ dados }: { dados: ReturnType<typeof derivarRelatorioPerdas>
             <div>PRODUTO</div><div className="relatorios-num">COMPRADO</div><div className="relatorios-num">PERDA</div>
           </div>
           {porProduto.map(p => (
+            // Esta tabela reaproveita as linhas de derivarRelatorioProdutos,
+            // então herda o mesmo problema e a mesma marca: quantidade
+            // comprada e perda % saem da MESMA quantidade em kg, e um
+            // lançamento não convertível deixa as duas incompletas.
             <div key={p.nome} className="relatorios-linha relatorios-grid-perda-produto">
               <div className="relatorios-forte">{p.nome}</div>
-              <div className="relatorios-num relatorios-mono relatorios-suave">{qtd(p.compradoQtd)}</div>
+              <div className="relatorios-num relatorios-mono relatorios-suave">
+                <NumIncompleto texto={qtd(p.compradoQtd)} n={p.itensSemConversao} consequencia={CONSEQ_PERDA_PRODUTO} />
+              </div>
               <div className="relatorios-num relatorios-mono" style={{ color: p.perdaPct != null ? corPerda(p.perdaPct) : NEUTRO }}>
-                {p.perdaPct != null ? pct1(p.perdaPct) : '—'}
+                {p.perdaPct != null
+                  ? <NumIncompleto texto={pct1(p.perdaPct)} n={p.itensSemConversao} consequencia={CONSEQ_PERDA_PRODUTO} />
+                  : '—'}
               </div>
             </div>
           ))}
@@ -823,6 +841,7 @@ function AbaPerdas({ dados }: { dados: ReturnType<typeof derivarRelatorioPerdas>
       <div className="relatorios-nota">
         Soma a perda registrada na <strong>coleta</strong> (dentro de cada entrada) com as perdas lançadas no <strong>depósito</strong>.
       </div>
+      <NotaSemConversao n={totais.itensSemConversao} consequencia={CONSEQ_PERDA_PRODUTO} />
     </>
   )
 }

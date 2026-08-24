@@ -827,8 +827,20 @@ export interface LinhaPerdaMotivo {
 
 export interface LinhaPerdaProduto {
   nome: string
+  /** Em kg — vem de `LinhaRelatorioProduto.compradoQtd`, já convertido pela
+   * API. Incompleta quando `itensSemConversao > 0`. */
   compradoQtd: number
   perdaPct: number | null
+  /**
+   * Lançamentos deste produto que ficaram fora das quantidades por não serem
+   * convertíveis em quilos — repassado de `LinhaRelatorioProduto`, que é a
+   * fonte desta tabela. Quando > 0, tanto `compradoQtd` quanto `perdaPct`
+   * estão calculados sobre quantidade incompleta: esta aba herdou os números
+   * corrigidos de `derivarRelatorioProdutos` mas, até agora, não herdava a
+   * sinalização — mostrava incompleto como número limpo, que é justamente o
+   * que as abas Pedidos e Produtos deixaram de fazer.
+   */
+  itensSemConversao: number
 }
 
 export interface RelatorioPerdasTotais {
@@ -839,6 +851,13 @@ export interface RelatorioPerdasTotais {
   principalMotivo: string | null
   principalMotivoPct: number | null
   perdasNoDeposito: number
+  /** Soma do `itensSemConversao` das linhas de "perdas por produto" — 0
+   * quando a tabela inteira está completa. É o que decide se a nota de
+   * rodapé aparece, igual às abas Compras, Pedidos e Produtos.
+   *
+   * Cobre só a tabela por produto: "perdas por motivo" e o índice de perdas
+   * saem de `EntradaResumo`/`PerdaDeposito`, não deste agregado. */
+  itensSemConversao: number
 }
 
 /**
@@ -853,7 +872,11 @@ export interface RelatorioPerdasTotais {
  * reaproveita a saída de derivarRelatorioProdutos (`produtosView`, já
  * filtrada pelo mesmo período) em vez de recalcular — mesma fonte que
  * alimenta a aba Produtos, evitando pedir o agregado duas vezes ou duas
- * contas divergirem.
+ * contas divergirem. Por reaproveitar, herda também o `itensSemConversao` de
+ * cada linha: os números já vinham corrigidos (quantidades em kg), mas a
+ * SINALIZAÇÃO do que ficou de fora não vinha junto, e uma quantidade
+ * incompleta exibida limpa é pior que uma marcada — mesmo `*` das abas
+ * Compras, Pedidos e Produtos.
  *
  * A perda de cada entrada usa perdaColetaEfetiva(en) (máximo entre
  * cabeçalho e soma dos itens), não `en.perda_kg` cru — mesmo raciocínio de
@@ -902,7 +925,15 @@ export function derivarRelatorioPerdas(
     .filter(p => p.perdaPct != null)
     .slice()
     .sort((a, b) => (b.perdaPct as number) - (a.perdaPct as number))
-    .map(p => ({ nome: p.nome, compradoQtd: p.compradoQtd, perdaPct: p.perdaPct }))
+    .map(p => ({
+      nome: p.nome,
+      compradoQtd: p.compradoQtd,
+      perdaPct: p.perdaPct,
+      // Repassado, não recalculado: é a MESMA linha de
+      // derivarRelatorioProdutos, e quantidade incompleta lá é quantidade
+      // incompleta aqui.
+      itensSemConversao: p.itensSemConversao,
+    }))
 
   const entKgTot = entradasPeriodo.reduce((s, e) => s + (e.peso_total || 0), 0)
   const entPerdaTot = entradasPeriodo.reduce((s, e) => s + perdaColetaEfetiva(e), 0)
@@ -917,6 +948,7 @@ export function derivarRelatorioPerdas(
       principalMotivo: porMotivo[0]?.motivo ?? null,
       principalMotivoPct: porMotivo[0]?.pct ?? null,
       perdasNoDeposito: perdasPeriodo.length,
+      itensSemConversao: porProduto.reduce((s, p) => s + p.itensSemConversao, 0),
     },
   }
 }

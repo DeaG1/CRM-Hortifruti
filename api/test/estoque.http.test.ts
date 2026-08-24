@@ -53,7 +53,7 @@ beforeAll(async () => {
   tokenAdmin = await criarSessao(sql, uAdmin.id, tenantId)
   tokenColab = await criarSessao(sql, uColab.id, tenantId)
 
-  // Produto CX com peso_medio, movimentado, para a linha de equivalente_kg.
+  // Produto CX com peso_medio, movimentado, para a linha de equivalente_un.
   const [produtoCx] = await admin`
     insert into produtos (tenant_id, nome, un, peso_medio)
     values (${tenantId}, 'Melancia HTTP', 'CX', 15) returning id`
@@ -120,7 +120,7 @@ describe('autorizacao', () => {
 })
 
 describe('forma da resposta', () => {
-  it('devolve um array com nome, un, entrou, perda, saiu, saldo e peso_medio numericos', async () => {
+  it('devolve um array com nome, un, entrou, perda, saiu, saldo e peso_medio numericos, em kg', async () => {
     const res = await pedir('/api/estoque', comoAdmin())
     expect(res.status).toBe(200)
     const corpo = await res.json()
@@ -135,25 +135,39 @@ describe('forma da resposta', () => {
     expect(typeof linha.saiu).toBe('number')
     expect(typeof linha.saldo).toBe('number')
     expect(typeof linha.peso_medio).toBe('number')
+    expect(typeof linha.itens_sem_conversao).toBe('number')
+    // `un` continua sendo a unidade LANCADA (a chave da linha); as
+    // quantidades saem em kg: 10 CX de 15 kg = 150, e o perda_kg do item
+    // (1 kg, por contrato) entra como 1 — nunca como 15.
     expect(linha.un).toBe('CX')
-    expect(linha.entrou).toBe(10)
+    expect(linha.entrou).toBe(150)
     expect(linha.perda).toBe(1)
     expect(linha.saiu).toBe(0)
-    expect(linha.saldo).toBe(9) // 10 - 1 - 0
+    expect(linha.saldo).toBe(149) // 150 - 1 - 0
+    expect(linha.itens_sem_conversao).toBe(0)
   })
 
-  it('expoe equivalente_kg quando un != KG e peso_medio > 0, sem misturar com a coluna original', async () => {
+  it('expoe equivalente_un quando un != KG e peso_medio > 0, como leitura secundaria em embalagens', async () => {
     const res = await pedir('/api/estoque', comoAdmin())
     const corpo = await res.json()
     const linha = corpo.find((l: { nome: string }) => l.nome === 'Melancia HTTP')
 
-    // peso_medio = 15 kg por CX
-    expect(linha.equivalente_kg).toEqual({ entrou: 150, perda: 15, saiu: 0, saldo: 135 })
-    // a coluna original continua na unidade lancada (CX), nao em kg
-    expect(linha.entrou).toBe(10)
+    // Mesmo fator (15 kg por CX), direcao oposta: o kg e o numero principal,
+    // a contagem de embalagens e a leitura secundaria. `entrou` volta exato
+    // ao que foi lancado (10 CX); `perda` e `saldo` saem fracionarios porque
+    // carregam parcelas que nasceram em kg (perda_kg do item).
+    expect(linha.equivalente_un.entrou).toBe(10)
+    expect(linha.equivalente_un.saiu).toBe(0)
+    expect(linha.equivalente_un.perda).toBeCloseTo(1 / 15, 10)
+    expect(linha.equivalente_un.saldo).toBeCloseTo(149 / 15, 10)
+    // A coluna principal continua em kg, nao em CX.
+    expect(linha.entrou).toBe(150)
+    // O campo antigo, que multiplicava o bolo inteiro por peso_medio
+    // (inclusive as parcelas que ja eram kg), nao existe mais.
+    expect(linha).not.toHaveProperty('equivalente_kg')
   })
 
-  it('equivalente_kg e null quando un = KG (nao ha conversao a fazer)', async () => {
+  it('equivalente_un e null quando un = KG (o numero principal ja e a propria unidade)', async () => {
     const [produtoKg] = await admin`
       insert into produtos (tenant_id, nome, un, peso_medio)
       values (${tenantId}, 'Produto KG HTTP', 'KG', 0) returning id`
@@ -166,7 +180,29 @@ describe('forma da resposta', () => {
     const res = await pedir('/api/estoque', comoAdmin())
     const corpo = await res.json()
     const linha = corpo.find((l: { nome: string }) => l.nome === 'Produto KG HTTP')
-    expect(linha.equivalente_kg).toBeNull()
+    expect(linha.equivalente_un).toBeNull()
+    // No-op: produto so em KG sai com os mesmos numeros de sempre.
+    expect(linha.entrou).toBe(5)
+    expect(linha.itens_sem_conversao).toBe(0)
+  })
+
+  it('linha em CX sem peso_medio: quantidades ficam de fora, itens_sem_conversao marca a linha', async () => {
+    const [produtoSemFator] = await admin`
+      insert into produtos (tenant_id, nome, un, peso_medio)
+      values (${tenantId}, 'Caixa Sem Fator HTTP', 'CX', 0) returning id`
+    const [entrada] = await admin`
+      insert into entradas (tenant_id, numero, data) values (${tenantId}, 'E-HTTP-3', '2026-08-01') returning id`
+    await admin`
+      insert into entrada_itens (tenant_id, entrada_id, produto_id, un, qtd, preco, perda_kg)
+      values (${tenantId}, ${entrada.id}, ${produtoSemFator.id}, 'CX', 12, 30, 2)`
+
+    const res = await pedir('/api/estoque', comoAdmin())
+    const corpo = await res.json()
+    const linha = corpo.find((l: { nome: string }) => l.nome === 'Caixa Sem Fator HTTP')
+    expect(linha.entrou).toBe(0)     // fator ausente nao vira 1
+    expect(linha.perda).toBe(2)      // perda_kg do item ja era kg
+    expect(linha.itens_sem_conversao).toBe(1)
+    expect(linha.equivalente_un).toBeNull()
   })
 
   it('tenant so ve suas proprias linhas (isolamento tambem na camada HTTP)', async () => {

@@ -84,9 +84,11 @@
   overflow: hidden;
 }
 
+/* As quatro colunas numéricas ganharam o "(KG)" no cabeçalho e precisam de
+   um pouco mais de largura que as originais (0.8fr) para não quebrarem. */
 .estoque-linha {
   display: grid;
-  grid-template-columns: 1.6fr 0.8fr 0.8fr 0.8fr 0.8fr 0.9fr;
+  grid-template-columns: 1.6fr 0.9fr 1fr 1fr 1fr 1.1fr;
   gap: 8px;
   align-items: center;
 }
@@ -156,6 +158,27 @@
   font-size: 12px;
   color: #6a685c;
   margin: 12px 0 0;
+}
+
+/* A célula marcada: o asterisco basta como sinal, o `title` explica. O
+   pontilhado sob o número avisa que há explicação sem gritar. Mesmo visual
+   das outras telas afetadas (RelatoriosTela, ProdutosLista, EntradasLista). */
+.estoque-incompleto {
+  border-bottom: 1px dotted #c79320;
+  cursor: help;
+}
+
+/* Nota de rodapé do mesmo aviso: visível o bastante para ninguém ler o saldo
+   como número fechado, discreta o bastante para não competir com a tabela. */
+.estoque-legenda--incompleto {
+  color: #8a6a12;
+  background: #f6efd8;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.estoque-legenda--incompleto strong {
+  color: #8a6a12;
 }
 
 /* ---------- seção de perdas do depósito ---------- */

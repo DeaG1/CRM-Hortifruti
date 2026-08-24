@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { criarPool, withTenant } from '../src/db'
-import { buscarEstoque } from '../src/routes/estoque'
+import { buscarEstoque, paraJson } from '../src/routes/estoque'
 
 // estoque.http.test.ts cobre a camada HTTP (autorizacao, forma do JSON,
 // conversao numerica). Este arquivo cobre o calculo em si — direto contra
@@ -146,7 +146,9 @@ describe('buscarEstoque', () => {
     expect(doProduto).toHaveLength(2)
     const cx = doProduto.find(l => l.un === 'CX')!
     const kg = doProduto.find(l => l.un === 'KG')!
-    expect(Number(cx.entrou)).toBe(10)
+    // As duas linhas continuam separadas (a chave e produto+unidade lancada),
+    // mas as quantidades das DUAS saem em kg: 10 CX de 12 kg = 120.
+    expect(Number(cx.entrou)).toBe(120)
     expect(Number(kg.entrou)).toBe(20)
   })
 
@@ -283,5 +285,101 @@ describe('buscarEstoque', () => {
     const linha = linhas.find(l => l.produto_id === produtoId)!
     expect(Number(linha.saiu)).toBe(0)
     expect(Number(linha.perda)).toBe(0)
+  })
+
+  // ---- tudo em kg: cada parcela convertida pela regra da SUA unidade
+  // (ver o comentario "tudo em kg desde a origem" em estoque.ts). Antes
+  // desta correcao `entrou`/`saiu` ficavam na unidade do item, `perda`
+  // somava kg (coleta e entrega) com a unidade da perda de deposito na mesma
+  // coluna, e `equivalente_kg` multiplicava o bolo inteiro por peso_medio —
+  // convertendo DE NOVO o que ja era kg.
+
+  it('produto so em KG: a conversao e no-op, os numeros sao os mesmos de antes', async () => {
+    const produtoId = await criarProduto(tenantA, 'Batata So Kg', { un: 'KG', peso_medio: 0 })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'KG', qtd: 100, perda_kg: 5 }])
+    await criarPerda(tenantA, produtoId, 10, 'KG')
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, un: 'KG', qtd: 30, perda_kg: 2 }])
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const l = linhas.find(x => x.produto_id === produtoId)!
+    expect(Number(l.entrou)).toBe(100)
+    expect(Number(l.perda)).toBe(17) // 5 coleta + 10 deposito + 2 entrega
+    expect(Number(l.saiu)).toBe(30)
+    expect(Number(l.itens_sem_conversao)).toBe(0)
+  })
+
+  it('produto em CX com peso_medio: entrou e saiu convertem, as duas perda_kg (kg por contrato) nao', async () => {
+    const produtoId = await criarProduto(tenantA, 'Melancia Convertida', { un: 'CX', peso_medio: 10 })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'CX', qtd: 10, perda_kg: 3 }])
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, un: 'CX', qtd: 4, perda_kg: 2 }])
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const l = linhas.find(x => x.produto_id === produtoId)!
+    expect(Number(l.entrou)).toBe(100) // 10 CX * 10 kg — nao 10
+    expect(Number(l.saiu)).toBe(40)    // 4 CX * 10 kg — nao 4
+    // perda_kg do item de entrada e do item de saida sao KG para item de
+    // QUALQUER unidade: 3 + 2 = 5, jamais 5 * 10.
+    expect(Number(l.perda)).toBe(5)
+    expect(Number(l.entrou) - Number(l.perda) - Number(l.saiu)).toBe(55)
+    expect(Number(l.itens_sem_conversao)).toBe(0)
+  })
+
+  it('produto em CX SEM peso_medio: as quantidades ficam de fora (fator ausente nao vira 1) e sao contadas', async () => {
+    const produtoId = await criarProduto(tenantA, 'Caixa Sem Fator', { un: 'CX', peso_medio: 0 })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'CX', qtd: 10, perda_kg: 3 }])
+    await criarPerda(tenantA, produtoId, 2, 'CX')
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, un: 'CX', qtd: 4, perda_kg: 1 }])
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const l = linhas.find(x => x.produto_id === produtoId)!
+    // Uma caixa nao pesa um quilo: sem fator, nada de qtd entra na conta.
+    expect(Number(l.entrou)).toBe(0)
+    expect(Number(l.saiu)).toBe(0)
+    // Sobram so as parcelas que ja eram kg por contrato (coleta + entrega).
+    expect(Number(l.perda)).toBe(4)
+    // Um por lancamento fora: item de entrada, perda de deposito e item de saida.
+    expect(Number(l.itens_sem_conversao)).toBe(3)
+  })
+
+  it('perda de deposito converte pela unidade DA PERDA, nao pela do item de entrada', async () => {
+    const produtoId = await criarProduto(tenantA, 'Alface Perda Unidade', { un: 'CX', peso_medio: 8 })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'CX', qtd: 10, perda_kg: 0 }])
+    await criarPerda(tenantA, produtoId, 4, 'CX')  // 4 caixas = 32 kg
+    await criarPerda(tenantA, produtoId, 11, 'KG') // 11 quilos = 11 kg, nao 88
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const cx = linhas.find(x => x.produto_id === produtoId && x.un === 'CX')!
+    const kg = linhas.find(x => x.produto_id === produtoId && x.un === 'KG')!
+    expect(Number(cx.perda)).toBe(32)
+    expect(Number(kg.perda)).toBe(11)
+    expect(Number(kg.entrou)).toBe(0)
+  })
+
+  it('o caso medido: 11 kg de coleta + 4 CX de 8 kg = 43 kg de perda, nao 15 nem 120', async () => {
+    const produtoId = await criarProduto(tenantA, 'Alface Medida', { un: 'CX', peso_medio: 8 })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'CX', qtd: 90, perda_kg: 6 }])
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'CX', qtd: 75, perda_kg: 5 }])
+    await criarPerda(tenantA, produtoId, 4, 'CX')
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, un: 'CX', qtd: 150 }])
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const l = linhas.find(x => x.produto_id === produtoId)!
+    // 15 era a soma de tres unidades diferentes na mesma coluna; 120 era
+    // esse 15 multiplicado por 8, convertendo de novo os 11 kg de coleta.
+    expect(Number(l.perda)).toBe(43)
+    expect(Number(l.entrou)).toBe(1320) // 165 CX * 8
+    expect(Number(l.saiu)).toBe(1200)   // 150 CX * 8
+    // O dano operacional: a tela dizia 0 (nao ha alface na camara fria).
+    expect(Number(l.entrou) - Number(l.perda) - Number(l.saiu)).toBe(77)
+  })
+
+  it('itens_sem_conversao e count() — bigint no Postgres, numero na borda (paraJson)', async () => {
+    const produtoId = await criarProduto(tenantA, 'Bigint Contador', { un: 'CX', peso_medio: 0 })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'CX', qtd: 7 }])
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const crua = linhas.find(x => x.produto_id === produtoId)!
+    expect(typeof crua.itens_sem_conversao).toBe('string')
+    expect(paraJson(crua).itens_sem_conversao).toBe(1)
   })
 })

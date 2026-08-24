@@ -549,8 +549,14 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
                             entradas - perdas - saidas por produto+unidade
                             (ver api/src/routes/estoque.ts e
                             screens/EstoqueLista.tsx). Falta so buscar esse
-                            saldo neste modal e comparar contra `it.qtd`;
-                            nao fizemos isso aqui ainda, entao nenhum calculo
+                            saldo neste modal e comparar contra `it.qtd` —
+                            atencao: o saldo vem EM KG, e `it.qtd` esta na
+                            unidade escolhida na linha, entao comparar os dois
+                            crus repetiria exatamente o defeito que a tela de
+                            Estoque acabou de corrigir; a comparacao tem de
+                            passar pela mesma conversao (ou usar
+                            `equivalente_un`, que ja e o saldo em embalagens).
+                            Nao fizemos isso aqui ainda, entao nenhum calculo
                             e nenhum valor de disponibilidade sao inventados
                             nesta interface por enquanto. */}
                       </div>

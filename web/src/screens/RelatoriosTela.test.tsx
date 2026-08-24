@@ -376,6 +376,48 @@ describe('RelatoriosTela — perdas', () => {
     expect(within(painel).getByText('transporte')).toBeInTheDocument()
     expect(within(painel).getByText('vencimento')).toBeInTheDocument()
   })
+
+  // "Perdas por produto" reaproveita as linhas de derivarRelatorioProdutos:
+  // herdou os numeros em kg quando eles foram corrigidos, mas nao a
+  // sinalizacao do que ficou fora da conversao — exibia incompleto limpo.
+
+  it('quantidade completa na aba Perdas: comprado e perda % saem limpos, sem marca nem aviso', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ motivo: 'transporte', perda_kg: 10 })],
+      'produtos-agregados': [produtoAgregado({ compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 5 })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Perdas' }))
+
+    const painel = (await screen.findByText('Perdas por produto')).closest('.relatorios-painel') as HTMLElement
+    expect(within(painel).getByText('100')).toBeInTheDocument()
+    expect(within(painel).queryByText('100*')).not.toBeInTheDocument()
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
+  it('quantidade incompleta na aba Perdas: comprado e perda % marcados com *, mais a nota de rodape', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ motivo: 'transporte', perda_kg: 10 })],
+      'produtos-agregados': [produtoAgregado({
+        compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 5, itens_sem_conversao: 2,
+      })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Perdas' }))
+
+    const painel = (await screen.findByText('Perdas por produto')).closest('.relatorios-painel') as HTMLElement
+    expect(within(painel).getByText('100*')).toBeInTheDocument()
+    expect(within(painel).getByText('5,0%*')).toBeInTheDocument()
+    expect(within(painel).getByText('100*')).toHaveAttribute('title', expect.stringContaining('2 itens lançados'))
+
+    const nota = screen.getByRole('note')
+    expect(nota).toHaveTextContent('fora da quantidade')
+    expect(nota).toHaveTextContent('Cadastre o peso médio da embalagem')
+  })
 })
 
 // As quantidades das abas Pedidos e Produtos vem da API em kg, mas
@@ -541,6 +583,25 @@ describe('RelatoriosTela — CSV das quantidades incompletas', () => {
     const texto = await lerBlobComoTexto(blobsCriados[0])
     expect(texto).toContain('Qtd comprada (kg)')
     expect(texto).toContain('100*;80*;R$ 400;R$ 240*;150%*;5,0%*')
+  })
+
+  it('CSV de perdas leva o mesmo asterisco da tela na tabela por produto', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ motivo: 'transporte', perda_kg: 10 })],
+      'produtos-agregados': [produtoAgregado({
+        compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 5, itens_sem_conversao: 2,
+      })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Perdas' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar CSV' }))
+
+    await waitFor(() => expect(blobsCriados).toHaveLength(1))
+    const texto = await lerBlobComoTexto(blobsCriados[0])
+    expect(texto).toContain('Qtd comprada (kg)')
+    expect(texto).toContain('Batata;100*;5,0%*')
   })
 
   it('sem lancamento fora da conversao, o CSV sai sem asterisco nenhum', async () => {

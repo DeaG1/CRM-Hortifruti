@@ -985,6 +985,42 @@ describe('derivarRelatorioPerdas', () => {
     expect(totais.principalMotivo).toBeNull()
     expect(totais.perdaTotalQtd).toBe(0)
   })
+
+  // ---- ponta solta declarada em f6374ac: esta aba reaproveita produtosView
+  // e herdou os numeros corrigidos, mas nao herdava a SINALIZACAO do que
+  // ficou fora da conversao — mostrava incompleto como numero limpo.
+
+  it('repassa itensSemConversao de cada linha de produtos para "perdas por produto"', () => {
+    const produtosView = [
+      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 2, margem: 0, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p2', nome: 'Batata', compradoQtd: 200, vendidoQtd: 20, faturamento: 20, itensSemConversao: 0, margem: 0, markupPct: null, perdaPct: 5 },
+    ]
+    const { porProduto } = derivarRelatorioPerdas([], [], produtosView, '', '')
+    expect(porProduto.find(p => p.nome === 'Alface')!.itensSemConversao).toBe(2)
+    expect(porProduto.find(p => p.nome === 'Batata')!.itensSemConversao).toBe(0)
+  })
+
+  it('totais.itensSemConversao soma as linhas exibidas — 0 quando a tabela esta completa', () => {
+    const completa = [
+      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 0, margem: 0, markupPct: null, perdaPct: 20 },
+    ]
+    expect(derivarRelatorioPerdas([], [], completa, '', '').totais.itensSemConversao).toBe(0)
+
+    const incompleta = [
+      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 2, margem: 0, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p2', nome: 'Tomate', compradoQtd: 50, vendidoQtd: 5, faturamento: 5, itensSemConversao: 3, margem: 0, markupPct: null, perdaPct: 8 },
+    ]
+    expect(derivarRelatorioPerdas([], [], incompleta, '', '').totais.itensSemConversao).toBe(5)
+  })
+
+  it('linha sem perdaPct nao entra na tabela nem no contador (nao e exibida)', () => {
+    const produtosView = [
+      { produtoId: 'p1', nome: 'Sem compra', compradoQtd: 0, vendidoQtd: 0, faturamento: 0, itensSemConversao: 7, margem: 0, markupPct: null, perdaPct: null },
+    ]
+    const { porProduto, totais } = derivarRelatorioPerdas([], [], produtosView, '', '')
+    expect(porProduto).toHaveLength(0)
+    expect(totais.itensSemConversao).toBe(0)
+  })
 })
 
 // -------------------------------------------------------- 7. livro-caixa (lançamentos)

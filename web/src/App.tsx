@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { api, ErroApi } from './api/client'
+import { instalarGuardaDeScrollNumerico } from './campoNumerico'
 import { Login } from './screens/Login'
 import { Shell } from './components/Shell'
 import { ClientesLista } from './screens/ClientesLista'
@@ -137,6 +138,10 @@ function App() {
 
   // Ao carregar a pagina (inclui F5), pergunta pra API se o cookie de
   // sessao ainda e valido antes de decidir entre tela de login e app.
+  // Vale para o app inteiro: a roda do mouse nao pode alterar campo
+  // numerico focado (ver campoNumerico.ts).
+  useEffect(instalarGuardaDeScrollNumerico, [])
+
   useEffect(() => {
     api.get<Eu>('/api/eu')
       .then(dados => { setEu(dados); setEstado('logado') })

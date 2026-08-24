@@ -108,3 +108,26 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+/*
+ * Campos numericos sem as setinhas de incremento.
+ *
+ * O spinner nativo serve para ajustar de um em um. Nos campos deste sistema
+ * — preco, quilo, salario, prazo — ninguem chega a 1450 clicando 1450 vezes:
+ * digita. Em compensacao as setinhas ocupam espaco util, encostam no texto em
+ * campo estreito, e convidam a um clique que muda o valor por acidente.
+ *
+ * O scroll, que tambem altera o valor, e tratado em src/campoNumerico.ts —
+ * CSS nao alcanca esse comportamento.
+ */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

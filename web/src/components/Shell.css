@@ -219,3 +219,21 @@
   padding: 26px 30px 60px;
   background: #f6f4ec;
 }
+
+/*
+ * Centraliza o conteudo de cada tela na area util.
+ *
+ * As telas limitam a propria largura (max-width de 1280-1320px) para o texto
+ * nao esticar em monitor largo — o que e correto. Mas nenhuma centralizava,
+ * entao tudo ficava colado a esquerda com uma faixa vazia crescente a direita.
+ * Em 1920px de largura sobravam quase 400px de nada, e o efeito era de tela
+ * cortada, nao de layout deliberado.
+ *
+ * `margin-inline: auto` em todo filho direto resolve para as telas atuais e
+ * para as futuras: quem tem max-width passa a centralizar, quem nao tem
+ * continua ocupando a largura toda (margem automatica sobre largura total nao
+ * produz efeito alguum).
+ */
+.shell-conteudo > * {
+  margin-inline: auto;
+}

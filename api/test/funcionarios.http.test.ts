@@ -124,6 +124,52 @@ describe('autorizacao', () => {
   })
 })
 
+// GET /opcoes: adicionado junto da feature de Veiculos (web/src/screens/
+// VeiculosLista.tsx), que e visivel pro colaborador e precisa de um seletor
+// de funcionario em "Pegar". Continua sem enxergar a rota GET / completa
+// (com salario) — so este resumo.
+describe('GET /opcoes — resumo liberado pro colaborador', () => {
+  it('sem cookie -> 401', async () => {
+    const res = await pedir('/api/funcionarios/opcoes')
+    expect(res.status).toBe(401)
+  })
+
+  it('colaborador LE /opcoes (precisa disso pro seletor de Veiculos)', async () => {
+    const res = await pedir('/api/funcionarios/opcoes', comoColab())
+    expect(res.status).toBe(200)
+  })
+
+  it('devolve so id e nome, nunca salario/cargo/tel', async () => {
+    const criado = await (await pedir('/api/funcionarios', comoAdmin(json({
+      nome: 'Funcionario Opcoes', salario: 9999, cargo: 'Confidencial',
+    })))).json()
+
+    const res = await pedir('/api/funcionarios/opcoes', comoColab())
+    expect(res.status).toBe(200)
+    const lista = await res.json()
+    const linha = lista.find((f: { id: string }) => f.id === criado.id)
+    expect(linha).toBeDefined()
+    expect(linha).toEqual({ id: criado.id, nome: 'Funcionario Opcoes' })
+    expect(linha).not.toHaveProperty('salario')
+    expect(linha).not.toHaveProperty('cargo')
+  })
+
+  it('nao inclui funcionario inativo', async () => {
+    const criado = await (await pedir('/api/funcionarios', comoAdmin(json({
+      nome: 'Funcionario Inativo Opcoes', ativo: false,
+    })))).json()
+
+    const res = await pedir('/api/funcionarios/opcoes', comoColab())
+    const lista = await res.json()
+    expect(lista.find((f: { id: string }) => f.id === criado.id)).toBeUndefined()
+  })
+
+  it('admin tambem acessa /opcoes', async () => {
+    const res = await pedir('/api/funcionarios/opcoes', comoAdmin())
+    expect(res.status).toBe(200)
+  })
+})
+
 describe('mass assignment', () => {
   it('POST ignora tenant_id e id enviados no corpo', async () => {
     const res = await pedir('/api/funcionarios', comoAdmin({

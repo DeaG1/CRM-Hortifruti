@@ -1,0 +1,332 @@
+/* Molde: SaidasLista.css. Tokens do produto: fundo #ece8db, superfície
+   #fffefa, texto #2a2a24, suave #6a685c, linha #d8d3c2, acento #5a7d3a.
+   Semáforo: disponível #3f8f5b, em uso #c79320, aberto há muito #c2502f. */
+
+.veiculos-estado {
+  padding: 30px 4px;
+  font-size: 14px;
+  color: #6a685c;
+}
+
+.veiculos-estado--erro {
+  color: #9a4a2e;
+  font-weight: 600;
+}
+
+.veiculos-vazio {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 40px 18px;
+  text-align: center;
+  max-width: 560px;
+}
+
+.veiculos-vazio-titulo {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2a2a24;
+}
+
+.veiculos-vazio-sub {
+  font-size: 12.5px;
+  color: #6a685c;
+  margin-top: 4px;
+  margin-bottom: 16px;
+}
+
+.veiculos-lista {
+  max-width: 1180px;
+}
+
+/* ---------- topo ---------- */
+
+.veiculos-topo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.veiculos-dica {
+  flex: 1;
+  font-size: 12.5px;
+  color: #6a685c;
+}
+
+.veiculos-botao-novo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #5a7d3a;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 9px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  white-space: nowrap;
+}
+
+.veiculos-botao-novo:hover {
+  background: #4a6b2e;
+}
+
+/* ---------- tabela ---------- */
+
+.veiculos-tabela {
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+.veiculos-linha {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1.6fr 0.9fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.veiculos-linha--cabecalho {
+  padding: 12px 18px;
+  background: #ece8db;
+  border-bottom: 1px solid #d8d3c2;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6a685c;
+  letter-spacing: 0.3px;
+}
+
+.veiculos-linha--dados {
+  padding: 13px 18px;
+  border-bottom: 1px solid #f1eee2;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.veiculos-linha--dados:last-child {
+  border-bottom: none;
+}
+
+.veiculos-linha--dados:hover {
+  background: #ece8db;
+}
+
+.veiculos-col-acao {
+  text-align: right;
+}
+
+.veiculos-celula-nome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.veiculos-nome {
+  font-family: 'Archivo', sans-serif;
+  font-weight: 700;
+  color: #21331f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.veiculos-placa {
+  font-family: 'IBM Plex Mono', monospace;
+  color: #2a2a24;
+  font-weight: 600;
+}
+
+.veiculos-inativo-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #9a4a2e;
+  background: #f6e4dc;
+  padding: 2px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+/* ---------- status (semaforo) ---------- */
+
+.veiculos-status {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 14px;
+  white-space: nowrap;
+}
+
+.veiculos-status--disponivel {
+  color: #3f8f5b;
+  background: #e7f1e8;
+}
+
+.veiculos-status--em-uso {
+  color: #c79320;
+  background: #f6efd8;
+}
+
+.veiculos-status--antigo {
+  color: #c2502f;
+  background: #f6e4dc;
+}
+
+/* ---------- acoes (pegar/devolver) ---------- */
+
+.veiculos-botao-pegar {
+  background: #5a7d3a;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.veiculos-botao-pegar:hover:not(:disabled) {
+  background: #4a6b2e;
+}
+
+.veiculos-botao-pegar:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.veiculos-botao-devolver {
+  background: #fff;
+  color: #c79320;
+  border: 1px solid #ecd9a3;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.veiculos-botao-devolver:hover:not(:disabled) {
+  background: #f6efd8;
+}
+
+.veiculos-botao-devolver:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ---------- dialogo "Pegar" (seletor de funcionario) ---------- */
+
+.veiculos-pegar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 25, 18, 0.48);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 24px;
+}
+
+.veiculos-pegar-card {
+  background: #fffefa;
+  border-radius: 14px;
+  width: 380px;
+  max-width: 100%;
+  padding: 20px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+}
+
+.veiculos-pegar-titulo {
+  font-family: 'Archivo', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  color: #21331f;
+  margin-bottom: 14px;
+}
+
+.veiculos-pegar-rotulo {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #6a685c;
+  margin-bottom: 5px;
+  display: block;
+}
+
+.veiculos-pegar-select {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid #d8d3c2;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: 'Public Sans', sans-serif;
+  color: #2a2a24;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.veiculos-pegar-select:focus {
+  outline: none;
+  border-color: #7cb342;
+  box-shadow: 0 0 0 3px rgba(124, 179, 66, 0.22);
+}
+
+.veiculos-pegar-erro {
+  margin: 10px 0 0;
+  background: #f6e4dc;
+  border: 1px solid #e7cbbf;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: #9a4a2e;
+  font-weight: 600;
+}
+
+.veiculos-pegar-rodape {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.veiculos-botao-cancelar {
+  background: #fff;
+  color: #4a4838;
+  border: 1px solid #d8d3c2;
+  border-radius: 9px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.veiculos-botao-cancelar:hover {
+  background: #f3f0e6;
+}
+
+.veiculos-botao-confirmar {
+  background: #5a7d3a;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 9px 22px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.veiculos-botao-confirmar:hover:not(:disabled) {
+  background: #4a6b2e;
+}
+
+.veiculos-botao-confirmar:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}

@@ -117,9 +117,42 @@ export const funcionarios = new Hono<{
   Variables: Vars
 }>()
 
-// Tela de admin no design (cadastro de equipe/folha) — colaborador nao
-// enxerga.
-funcionarios.use('*', exigirSessao, exigirAdmin)
+// Tela de admin no design (cadastro de equipe/folha, com salario) —
+// colaborador nao enxerga. exigirAdmin fica em cada rota especifica (nao
+// em '*') porque '/opcoes' abaixo e a excecao: precisa continuar aberta pro
+// colaborador.
+funcionarios.use('*', exigirSessao)
+
+/**
+ * Nome resumido (so id+nome, so ativos) de cada funcionario — pro seletor
+ * que a tela de Veiculos usa em "Pegar" (web/src/screens/VeiculosLista.tsx).
+ * Veiculos e visivel pro colaborador (nao esta em ADMIN_ONLY_SCREENS), e
+ * precisa listar funcionarios pra saber quem esta pegando o carro.
+ *
+ * Isto NAO reabre a rota GET / inteira pro colaborador, ao contrario do que
+ * clientes.ts/produtos.ts fizeram pro mesmo tipo de problema (colaborador
+ * precisa ler uma lista pra preencher um seletor): funcionarios.salario e
+ * dado sensivel — um colaborador ver o salario dos colegas seria um
+ * vazamento real, nao so um detalhe de design. Por isso um endpoint enxuto,
+ * so com o que o seletor precisa, em vez de abrir toda a rota de leitura
+ * (comentario de clientes.ts ja antecipava esse caminho: "o caminho e um
+ * endpoint enxuto, id e nome apenas").
+ *
+ * Registrada antes de GET /:id (e sem exigirAdmin) para nao ser interceptada
+ * pelo parametro — '/opcoes' e um segmento estatico, '/:id' so deveria
+ * capturar ids de fato.
+ */
+funcionarios.get('/opcoes', async (c) => {
+  const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
+    tx`select id, nome from funcionarios where ativo = true order by nome`)
+  return c.json(linhas)
+})
+
+funcionarios.get('/', exigirAdmin)
+funcionarios.get('/:id', exigirAdmin)
+funcionarios.post('/', exigirAdmin)
+funcionarios.put('/:id', exigirAdmin)
+funcionarios.delete('/:id', exigirAdmin)
 
 funcionarios.get('/', async (c) => {
   const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>

@@ -8,6 +8,7 @@ import { ModalCliente } from './components/ModalCliente'
 import { ProdutosLista } from './screens/ProdutosLista'
 import { FornecedoresLista } from './screens/FornecedoresLista'
 import { FuncionariosLista } from './screens/FuncionariosLista'
+import { VeiculosLista } from './screens/VeiculosLista'
 import { EntradasLista } from './screens/EntradasLista'
 import { SaidasLista } from './screens/SaidasLista'
 import { EstoqueLista } from './screens/EstoqueLista'
@@ -17,7 +18,7 @@ import { DashboardTela } from './screens/DashboardTela'
 import { FinanceiroTela } from './screens/FinanceiroTela'
 import { RelatoriosTela } from './screens/RelatoriosTela'
 import type { Cliente } from './derive/clientes'
-import { ADMIN_ONLY_SCREENS, type Tela } from './telas'
+import { ADMIN_ONLY_SCREENS, type Papel, type Tela } from './telas'
 
 /** Espelha o corpo de GET /api/eu (api/src/index.ts). */
 interface Eu {
@@ -182,7 +183,7 @@ function App() {
 
   return (
     <Shell papel={eu.papel} telaAtual={telaEfetiva} onNavegar={setTela} onSair={sair}>
-      <Conteudo tela={telaEfetiva} onSessaoExpirada={sair} />
+      <Conteudo tela={telaEfetiva} papel={eu.papel} onSessaoExpirada={sair} />
     </Shell>
   )
 }
@@ -193,8 +194,14 @@ function App() {
  * completo e Relatorios): elas calculam sobre as outras, e por isso vem
  * depois delas. Estoque (a quarta) ja existe — GET /api/estoque agrega
  * entradas, perdas e saidas em SQL (ver src/screens/EstoqueLista.tsx).
+ *
+ * `papel` so e repassado adiante pra VeiculosLista: e a unica tela onde
+ * admin e colaborador veem a MESMA tela com acoes diferentes (cadastrar e
+ * admin, pegar/devolver e qualquer sessao) — as demais telas admin-only
+ * simplesmente nao aparecem pro colaborador (ADMIN_ONLY_SCREENS), entao nao
+ * precisam saber o papel de quem esta olhando.
  */
-function Conteudo({ tela, onSessaoExpirada }: { tela: Tela; onSessaoExpirada: () => void }) {
+function Conteudo({ tela, papel, onSessaoExpirada }: { tela: Tela; papel: Papel; onSessaoExpirada: () => void }) {
   switch (tela) {
     case 'dashboard':     return <DashboardTela onSessaoExpirada={onSessaoExpirada} />
     case 'relatorios':    return <RelatoriosTela onSessaoExpirada={onSessaoExpirada} />
@@ -202,6 +209,7 @@ function Conteudo({ tela, onSessaoExpirada }: { tela: Tela; onSessaoExpirada: ()
     case 'produtos':      return <ProdutosLista onSessaoExpirada={onSessaoExpirada} />
     case 'fornecedores':  return <FornecedoresLista onSessaoExpirada={onSessaoExpirada} />
     case 'funcionarios':  return <FuncionariosLista onSessaoExpirada={onSessaoExpirada} />
+    case 'veiculos':      return <VeiculosLista papel={papel} onSessaoExpirada={onSessaoExpirada} />
     case 'entradas':      return <EntradasLista onSessaoExpirada={onSessaoExpirada} />
     case 'pedidos':       return <SaidasLista onSessaoExpirada={onSessaoExpirada} />
     // Lancamentos e a parte de Financeiro que ja existe: a tela completa

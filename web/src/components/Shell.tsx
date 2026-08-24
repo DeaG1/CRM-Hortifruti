@@ -11,6 +11,7 @@ const NAV_DEFS: { key: Tela; label: string }[] = [
   { key: 'fornecedores', label: 'Fornecedores' },
   { key: 'produtos', label: 'Produtos' },
   { key: 'funcionarios', label: 'Funcionários' },
+  { key: 'veiculos', label: 'Veículos' },
   { key: 'financeiro', label: 'Financeiro' },
   { key: 'relatorios', label: 'Relatórios' },
 ]
@@ -25,6 +26,7 @@ const TITULOS: Record<Tela, [string, string]> = {
   fornecedores: ['Fornecedores', 'Produtores rurais'],
   produtos: ['Produtos', 'Preço, margem e perda'],
   funcionarios: ['Funcionários', 'Salários e adiantamentos'],
+  veiculos: ['Veículos', 'Quem pegou qual carro'],
   financeiro: ['Financeiro', 'Resultado e ciclo de caixa'],
   relatorios: ['Relatórios', 'Clientes, pedidos e lançamentos do período'],
 }

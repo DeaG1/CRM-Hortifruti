@@ -5,15 +5,17 @@ import { Shell } from './Shell'
 
 const ITENS_ADMIN = [
   'Saúde do Negócio', 'Clientes', 'Entradas (Compras)', 'Saídas (Vendas)', 'Estoque',
-  'Fornecedores', 'Produtos', 'Funcionários', 'Financeiro', 'Relatórios',
+  'Fornecedores', 'Produtos', 'Funcionários', 'Veículos', 'Financeiro', 'Relatórios',
 ]
 const ITENS_ADMIN_ONLY = [
   'Saúde do Negócio', 'Clientes', 'Fornecedores', 'Produtos', 'Funcionários', 'Financeiro', 'Relatórios',
 ]
-const ITENS_COLABORADOR = ['Entradas (Compras)', 'Saídas (Vendas)', 'Estoque']
+// Veiculos e visivel pro colaborador (nao esta em ADMIN_ONLY_SCREENS): quem
+// de fato pega/devolve o carro no dia a dia precisa ver a tela.
+const ITENS_COLABORADOR = ['Entradas (Compras)', 'Saídas (Vendas)', 'Estoque', 'Veículos']
 
 describe('Shell — menu por papel', () => {
-  it('admin ve as 10 entradas do menu', () => {
+  it('admin ve as 11 entradas do menu', () => {
     render(
       <Shell papel="admin" telaAtual="clientes" onNavegar={() => {}} onSair={() => {}}>
         <p>conteudo</p>

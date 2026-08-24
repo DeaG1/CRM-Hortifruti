@@ -1,9 +1,11 @@
 export type Papel = 'admin' | 'colaborador'
 
-/** As 10 telas do produto, na ordem do menu do protótipo (navDefs). */
+/** As telas do produto. As 10 originais seguem a ordem do menu do protótipo
+ * (navDefs); 'veiculos' é nova (controle de veículos — cadastro +
+ * check-in/check-out), acrescentada depois de 'funcionarios' no menu. */
 export type Tela =
   | 'dashboard' | 'clientes' | 'entradas' | 'pedidos' | 'estoque'
-  | 'fornecedores' | 'produtos' | 'funcionarios' | 'financeiro' | 'relatorios'
+  | 'fornecedores' | 'produtos' | 'funcionarios' | 'veiculos' | 'financeiro' | 'relatorios'
 
 /**
  * Telas visíveis só para admin. Portado de `ADMIN_ONLY_SCREENS` do protótipo

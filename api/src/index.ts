@@ -13,6 +13,7 @@ import { saidas } from './routes/saidas'
 import { perdas } from './routes/perdas'
 import { estoque } from './routes/estoque'
 import { relatorios } from './routes/relatorios'
+import { veiculos } from './routes/veiculos'
 
 type Env = EnvBanco
 
@@ -131,6 +132,10 @@ app.route('/api/estoque', estoque)
 // Relatorios tambem e agregado: so o de produtos precisa somar itens de
 // entrada e saida, e faz isso em SQL para nao virar N+1 no navegador.
 app.route('/api/relatorios', relatorios)
+// Veiculos: cadastro + check-in/check-out (quem pegou qual carro). Visivel
+// pro colaborador (nao esta em ADMIN_ONLY_SCREENS) — ver permissoes em
+// src/routes/veiculos.ts.
+app.route('/api/veiculos', veiculos)
 
 /**
  * Sem isto, qualquer excecao nao tratada (ex.: um erro do Postgres que

@@ -130,13 +130,30 @@ export function perdaColetaEfetiva(
   return Math.max(en.perda_kg || 0, en.perda_itens_qtd || 0)
 }
 
-/** Perda de depósito (pós-entrada), como GET /api/perdas devolve — ver
- * api/src/routes/perdas.ts. */
+/**
+ * Perda de depósito (pós-entrada), como GET /api/perdas devolve — ver
+ * api/src/routes/perdas.ts.
+ *
+ * `qtd` (a quantidade na unidade da PRÓPRIA perda) NÃO está declarada aqui
+ * de propósito, embora a API a envie: este módulo soma perdas com números que
+ * já estão em quilos (a perda de coleta e o peso comprado), e declarar o
+ * campo cru convidaria de volta o defeito que esta versão corrigiu — 4 caixas
+ * entrando na conta como "4". O que se soma é `qtd_kg`, e nada mais.
+ */
 export interface PerdaDeposito {
   data: string
   produto_id: string
-  qtd: number
   motivo: string
+  /**
+   * A mesma perda em quilos, convertida pela API pela unidade dela
+   * (`perdas.un`), ao contrário de `entrada_itens.perda_kg`/
+   * `saida_itens.perda_kg`, que já são kg por contrato e nunca convertem.
+   * `null` = não convertível (produto sem peso médio): fica fora da soma e é
+   * contada em `itens_sem_conversao` — nunca vira 1 nem 0.
+   */
+  qtd_kg?: number | null
+  /** 0 ou 1 — cada linha desta rota é um lançamento. Ver perdas.ts. */
+  itens_sem_conversao?: number
 }
 
 /**
@@ -820,9 +837,21 @@ export function derivarRelatorioProdutos(
 
 export interface LinhaPerdaMotivo {
   motivo: string
+  /** Em kg: perda de coleta (já kg por contrato) + perda de depósito
+   * convertida pela unidade dela. Incompleta quando `itensSemConversao > 0`. */
   qtd: number
   ocorrencias: number
   pct: number
+  /**
+   * Lançamentos de perda de DEPÓSITO com este motivo que ficaram fora de
+   * `qtd` por não serem convertíveis em quilos. A perda de coleta nunca
+   * entra nesta contagem: é kg por contrato, sempre completa.
+   *
+   * Contado por motivo, e não só no total, porque a marca vai na linha: um
+   * motivo pode estar fechado e o vizinho não, e marcar os dois ensinaria a
+   * ignorar a marca.
+   */
+  itensSemConversao: number
 }
 
 export interface LinhaPerdaProduto {
@@ -844,6 +873,9 @@ export interface LinhaPerdaProduto {
 }
 
 export interface RelatorioPerdasTotais {
+  /** Em kg — perda de coleta (kg por contrato) + perda de depósito
+   * convertida pela unidade dela. Incompleta quando
+   * `itensSemConversaoPerdaTotal > 0`. */
   perdaTotalQtd: number
   /** Mesmo `perdaMedia` do dashboard/financeiro: perda (coleta + depósito)
    * sobre o total comprado no período, não sobre o total perdido. */
@@ -851,13 +883,33 @@ export interface RelatorioPerdasTotais {
   principalMotivo: string | null
   principalMotivoPct: number | null
   perdasNoDeposito: number
-  /** Soma do `itensSemConversao` das linhas de "perdas por produto" — 0
-   * quando a tabela inteira está completa. É o que decide se a nota de
-   * rodapé aparece, igual às abas Compras, Pedidos e Produtos.
+  /**
+   * Três contadores, e não um, porque esta aba mostra números de TRÊS
+   * origens diferentes e cada `*` precisa dizer a verdade sobre o número que
+   * marca — marcar tudo com o mesmo contador acusaria de incompleto um
+   * número fechado, que é o jeito mais rápido de ensinar o leitor a ignorar
+   * o asterisco.
    *
-   * Cobre só a tabela por produto: "perdas por motivo" e o índice de perdas
-   * saem de `EntradaResumo`/`PerdaDeposito`, não deste agregado. */
-  itensSemConversao: number
+   * `itensSemConversaoPerdaTotal`: perdas de depósito do período que não
+   * converteram. Deixa incompletos `perdaTotalQtd` (cartão "Perda total") e
+   * as linhas de "perdas por motivo" — os dois somam perda de coleta (kg,
+   * sempre completa) com perda de depósito.
+   */
+  itensSemConversaoPerdaTotal: number
+  /**
+   * O anterior MAIS os itens de entrada que não entraram em `peso_total`.
+   * Deixa incompleto `indicePerdaPct` (cartão "Índice de perdas"), que é uma
+   * fração: perda no numerador, kg comprado no denominador — os dois lados
+   * podem perder lançamentos, e por isso a marca dele conta os dois.
+   */
+  itensSemConversaoIndice: number
+  /**
+   * Soma do `itensSemConversao` das linhas de "perdas por produto" —
+   * repassado de `derivarRelatorioProdutos`, que é a fonte daquela tabela
+   * (outro agregado, outra rota: GET /api/relatorios/produtos). Não tem
+   * relação com os dois acima e não deve ser somado a eles.
+   */
+  itensSemConversaoProduto: number
 }
 
 /**
@@ -883,6 +935,20 @@ export interface RelatorioPerdasTotais {
  * derivarRelatorioCompras (ver comentário em EntradaResumo/
  * perdaColetaEfetiva, acima): cabeçalho e soma dos itens descrevem o mesmo
  * evento de perda, somar contaria em dobro.
+ *
+ * ---- tudo em quilos, cada parcela pela unidade dela ----
+ *
+ * Esta função soma perdas de duas origens que NÃO nascem na mesma unidade:
+ * a perda de coleta (`perda_kg` do cabeçalho / dos itens da entrada) é KG por
+ * contrato para item de qualquer unidade e não converte; a perda de depósito
+ * (`perdas.qtd`) está na unidade da própria perda e por isso converte — é
+ * `pe.qtd_kg`, que GET /api/perdas passou a calcular, nunca `pe.qtd`.
+ * Somá-las cruas era o defeito: no seed do protótipo, 4 CX de alface + 3 CX
+ * de tomate entravam como "7" ao lado de 296 kg de coleta, quando pesam
+ * 92 kg — `perdaTotalQtd` saía 303 em vez de 388, e `indicePerdaPct` 3,5% em
+ * vez de 4,5%. Os dois saíam PARA BAIXO, que é a direção que esconde
+ * sangria. Mesma regra e mesma leitura de api/src/routes/relatorios.ts e
+ * estoque.ts, para as três telas não divergirem de novo.
  */
 export function derivarRelatorioPerdas(
   entradas: EntradaResumo[],
@@ -894,19 +960,24 @@ export function derivarRelatorioPerdas(
   const entradasPeriodo = entradas.filter(e => noPeriodo(e.data, de, ate))
   const perdasPeriodo = perdasDeposito.filter(p => noPeriodo(p.data, de, ate))
 
-  const agg = new Map<string, { qtd: number; ocor: number }>()
+  const agg = new Map<string, { qtd: number; ocor: number; semConv: number }>()
   entradasPeriodo.forEach(en => {
     const m = (en.motivo && en.motivo !== '—') ? en.motivo : 'não informado'
-    const o = agg.get(m) ?? { qtd: 0, ocor: 0 }
+    const o = agg.get(m) ?? { qtd: 0, ocor: 0, semConv: 0 }
     const perda = perdaColetaEfetiva(en)
+    // Em kg por contrato — não converte. Ver o comentário acima.
     o.qtd += perda
     if (perda > 0) o.ocor++
     agg.set(m, o)
   })
   perdasPeriodo.forEach(pe => {
     const m = pe.motivo || 'não informado'
-    const o = agg.get(m) ?? { qtd: 0, ocor: 0 }
-    o.qtd += pe.qtd || 0
+    const o = agg.get(m) ?? { qtd: 0, ocor: 0, semConv: 0 }
+    // `qtd_kg`, não `qtd`: a perda de depósito está na unidade dela e a API
+    // já a converteu. Não convertível soma nada e é contada — a ocorrência
+    // continua sendo contada, porque ela ACONTECEU; o que falta é o peso.
+    o.qtd += pe.qtd_kg || 0
+    o.semConv += pe.itens_sem_conversao || 0
     o.ocor++
     agg.set(m, o)
   })
@@ -918,6 +989,7 @@ export function derivarRelatorioPerdas(
       qtd: o.qtd,
       ocorrencias: o.ocor,
       pct: perdaTotalQtd ? (o.qtd / perdaTotalQtd) * 100 : 0,
+      itensSemConversao: o.semConv,
     }))
     .sort((a, b) => b.qtd - a.qtd)
 
@@ -937,7 +1009,14 @@ export function derivarRelatorioPerdas(
 
   const entKgTot = entradasPeriodo.reduce((s, e) => s + (e.peso_total || 0), 0)
   const entPerdaTot = entradasPeriodo.reduce((s, e) => s + perdaColetaEfetiva(e), 0)
-    + perdasPeriodo.reduce((s, p) => s + (p.qtd || 0), 0)
+    + perdasPeriodo.reduce((s, p) => s + (p.qtd_kg || 0), 0)
+
+  // Só as perdas de depósito: a perda de coleta é kg por contrato e nunca
+  // fica de fora. Igual à soma dos contadores por motivo, calculada aqui
+  // sobre a mesma lista para não depender da ordem das linhas.
+  const semConversaoPerda = perdasPeriodo.reduce((s, p) => s + (p.itens_sem_conversao || 0), 0)
+  // O denominador do índice (kg comprado) tem o contador dele desde 203fb28.
+  const semConversaoCompra = entradasPeriodo.reduce((s, e) => s + (e.itens_sem_conversao || 0), 0)
 
   return {
     porMotivo,
@@ -948,7 +1027,9 @@ export function derivarRelatorioPerdas(
       principalMotivo: porMotivo[0]?.motivo ?? null,
       principalMotivoPct: porMotivo[0]?.pct ?? null,
       perdasNoDeposito: perdasPeriodo.length,
-      itensSemConversao: porProduto.reduce((s, p) => s + p.itensSemConversao, 0),
+      itensSemConversaoPerdaTotal: semConversaoPerda,
+      itensSemConversaoIndice: semConversaoPerda + semConversaoCompra,
+      itensSemConversaoProduto: porProduto.reduce((s, p) => s + p.itensSemConversao, 0),
     },
   }
 }

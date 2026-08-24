@@ -57,6 +57,41 @@ function valorOuTracejado(ind: Indicador, formatar: (v: number) => string): stri
   return ind.disponivel ? formatar(ind.valor) : '—'
 }
 
+// -------------------------------- indicador incompleto (sem peso médio)
+
+/**
+ * Texto do aviso — mesma regra e mesma marca das outras telas afetadas
+ * (RelatoriosTela.tsx, EstoqueLista.tsx, ProdutosLista.tsx,
+ * EntradasLista.tsx), com a consequência desta.
+ *
+ * Um indicador pode sair de uma soma da qual ficaram FORA lançamentos em
+ * unidade diferente de KG cujo produto não tem peso médio cadastrado: a API
+ * prefere deixá-los de fora a inventar um fator (ver `itens_sem_conversao`
+ * em api/src/routes/perdas.ts e irmãs). O número continua sendo o melhor
+ * disponível e continua sendo exibido — mas não pode ser exibido LIMPO, como
+ * se fechasse: um painel existe para dizer se a operação está bem, e um
+ * número incompleto sem marca é uma resposta confiante para uma pergunta que
+ * ainda não foi respondida.
+ *
+ * O `*` é a sinalização mais discreta que ainda é honesta num cartão — não há
+ * espaço para uma nota por cartão, então a explicação vai no `title` e o
+ * rodapé do painel (um só, abaixo da grade) diz o que fazer a respeito.
+ */
+function avisoSemConversao(n: number): string {
+  const itens = n === 1 ? '1 lançamento' : `${n} lançamentos`
+  const verbo = n === 1 ? 'ficou' : 'ficaram'
+  return `${itens} em unidade diferente de KG, sem peso médio cadastrado no produto, `
+    + `${verbo} fora deste indicador — sem o peso da embalagem não há como somar em `
+    + 'quilos. O número está calculado sobre uma quantidade incompleta.'
+}
+
+/** Quantos lançamentos ficaram fora de um indicador: 0 quando ele está
+ * fechado, e 0 também quando ele é indisponível (não há conta nenhuma
+ * para estar incompleta). */
+function semConversaoDe(ind: Indicador): number {
+  return ind.disponivel ? (ind.itensSemConversao ?? 0) : 0
+}
+
 interface CartaoKpi {
   rotulo: string
   valorTexto: string
@@ -64,6 +99,8 @@ interface CartaoKpi {
   tagTexto: string
   cor: string
   barraPct: number
+  /** > 0 = o valor saiu de uma soma incompleta; o cartão ganha `*` e title. */
+  semConversao: number
 }
 
 /** Monta um card de KPI a partir de um indicador (que pode estar
@@ -78,7 +115,10 @@ function cartaoDeIndicador(
   metaBase: number,
 ): CartaoKpi {
   if (!ind.disponivel) {
-    return { rotulo, valorTexto: '—', metaTexto: ind.motivo, tagTexto: 'sem dado', cor: NEUTRO, barraPct: 0 }
+    return {
+      rotulo, valorTexto: '—', metaTexto: ind.motivo, tagTexto: 'sem dado',
+      cor: NEUTRO, barraPct: 0, semConversao: 0,
+    }
   }
   const cor = classificar(ind.valor)
   const bateAMeta = cor === 'green'
@@ -87,8 +127,14 @@ function cartaoDeIndicador(
     valorTexto: formatar(ind.valor),
     metaTexto,
     tagTexto: bateAMeta ? 'na meta' : cor === 'amber' ? 'atenção' : 'fora da meta',
+    // O semáforo NÃO muda por causa de lançamento fora da conta: a cor é um
+    // julgamento sobre o valor medido, e o valor medido continua sendo esse.
+    // Pintar de âmbar um indicador que bate a meta seria trocar um número
+    // incompleto por um alarme falso — o `*` conserta a leitura, o alarme não
+    // (mesma decisão do saldo negativo em EstoqueLista.tsx).
     cor: CORES[cor],
     barraPct: Math.min(100, Math.round((ind.valor / metaBase) * 100)),
+    semConversao: semConversaoDe(ind),
   }
 }
 
@@ -181,6 +227,9 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
       tagTexto: statusClientesAtivosKpi(nAtivos) === 'green' ? 'na meta' : statusClientesAtivosKpi(nAtivos) === 'amber' ? 'atenção' : 'fora da meta',
       cor: CORES[statusClientesAtivosKpi(nAtivos)],
       barraPct: Math.min(100, Math.round((nAtivos / METAS_DASHBOARD.clientesAtivosMeta) * 100)),
+      // Contagem de cadastro, não soma de quantidade — nunca fica incompleta
+      // por falta de peso médio.
+      semConversao: 0,
     },
     cartaoDeIndicador('Ticket médio / minimercado', ticketMes, money, '3,5–3,8k', statusTicketMes, METAS_DASHBOARD.ticketMesMetaAlto),
     cartaoDeIndicador('Ticket médio por entrega', ticketEntrega, money, '≥ R$ 430', statusTicketEntrega, METAS_DASHBOARD.ticketEntregaMeta),
@@ -188,6 +237,13 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
     cartaoDeIndicador('Giro de estoque (dias)', giro, v => String(Math.round(v)), '≤ 4 d', statusGiroDeEstoque, METAS_DASHBOARD.giroEstoqueMetaDias),
     cartaoDeIndicador('Ciclo de caixa (dias)', ciclo, v => String(Math.round(v)), '≤ 13 d', statusCicloDeCaixa, METAS_DASHBOARD.cicloCaixaMetaDias),
   ]
+
+  // Quantos lançamentos ficaram fora de ALGUM cartão — decide se a nota de
+  // rodapé do painel aparece. Hoje só o Índice de perdas alimenta isto; o
+  // total é lido do próprio array de cartões (não recalculado a partir de
+  // `perdas1`) para que qualquer indicador que passe a marcar no futuro entre
+  // na nota sem que ninguém precise lembrar de somá-lo aqui.
+  const totalSemConversaoKpis = kpis.reduce((s, k) => s + k.semConversao, 0)
 
   const carteira = concentracaoDeCarteira(clientes, saidas)
   const cenarios = cenariosDeResultado(receita, custo)
@@ -247,7 +303,15 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
           {kpis.map(k => (
             <div key={k.rotulo} className="dashboard-kpi-card" style={{ borderTopColor: k.cor }}>
               <div className="dashboard-kpi-rotulo">{k.rotulo}</div>
-              <div className="dashboard-kpi-valor" style={{ color: k.cor }}>{k.valorTexto}</div>
+              <div className="dashboard-kpi-valor" style={{ color: k.cor }}>
+                {k.semConversao > 0
+                  ? (
+                    <span className="dashboard-kpi-incompleto" title={avisoSemConversao(k.semConversao)}>
+                      {k.valorTexto}*
+                    </span>
+                  )
+                  : k.valorTexto}
+              </div>
               <div className="dashboard-kpi-barra-trilha">
                 <div className="dashboard-kpi-barra-preenchimento" style={{ width: `${k.barraPct}%`, background: k.cor }} />
               </div>
@@ -258,6 +322,15 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
             </div>
           ))}
         </div>
+        {/* Uma nota só, abaixo da grade, e não uma por cartão: o `*` já diz
+            QUAL indicador está incompleto; o que falta é a saída do problema,
+            que é a mesma para todos. Some inteira quando nada ficou de fora. */}
+        {totalSemConversaoKpis > 0 && (
+          <div className="dashboard-kpis-nota" role="note">
+            <strong>*</strong> {avisoSemConversao(totalSemConversaoKpis)} Cadastre o peso médio da
+            embalagem em Produtos para que esses lançamentos entrem na conta.
+          </div>
+        )}
       </div>
 
       {/* ---- concentracao de carteira ---- */}

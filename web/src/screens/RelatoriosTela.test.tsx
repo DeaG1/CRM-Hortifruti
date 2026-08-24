@@ -39,8 +39,12 @@ const lancamento = (over: Record<string, unknown> = {}) => ({
   valor: 1280, funcionario_id: null, ...over,
 })
 
+/** Como GET /api/perdas devolve: `qtd` na unidade da propria perda e
+ * `qtd_kg` a mesma perda em quilos (null quando nao convertivel). O default e
+ * uma perda em KG, onde a conversao e no-op. */
 const perda = (over: Record<string, unknown> = {}) => ({
-  data: '2026-06-19', produto_id: 'p1', qtd: 4, motivo: 'vencimento', ...over,
+  data: '2026-06-19', produto_id: 'p1', un: 'KG', qtd: 4, qtd_kg: 4,
+  motivo: 'vencimento', itens_sem_conversao: 0, ...over,
 })
 
 const produtoAgregado = (over: Record<string, unknown> = {}) => ({
@@ -339,6 +343,81 @@ describe('RelatoriosTela — compras', () => {
     expect(nota).toHaveTextContent('fora da quantidade')
     expect(nota).toHaveTextContent('Cadastre o peso médio da embalagem')
   })
+
+  // ---- perda de deposito: `perdas.qtd` esta na unidade da propria perda e
+  // era somada crua aos quilos da perda de coleta.
+
+  function cartao(rotulo: string): HTMLElement {
+    const el = screen.getByText(rotulo).closest('.relatorios-cartao')
+    if (!el) throw new Error(`cartao "${rotulo}" nao encontrado`)
+    return el as HTMLElement
+  }
+
+  it('perda de deposito em CX entra pelos quilos nos cartoes e na tabela por motivo', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ motivo: 'transporte', perda_kg: 10, peso_total: 1000 })],
+      '/api/perdas': [perda({ un: 'CX', qtd: 4, qtd_kg: 32 })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Perdas' }))
+
+    const painel = (await screen.findByText('Perdas por motivo')).closest('.relatorios-painel') as HTMLElement
+    // 10 kg de coleta + 32 kg de deposito. Somando `qtd` cru daria 14.
+    expect(within(cartao('Perda total (kg)')).getByText('42')).toBeInTheDocument()
+    expect(within(cartao('Índice de perdas')).getByText('4,2%')).toBeInTheDocument()
+    expect(within(painel).getByText('32')).toBeInTheDocument()
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
+  it('perda de deposito sem fator: cartoes e linha do motivo marcados com *, mais nota propria', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ motivo: 'transporte', perda_kg: 10, peso_total: 1000 })],
+      '/api/perdas': [perda({ un: 'CX', qtd: 4, qtd_kg: null, itens_sem_conversao: 1 })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Perdas' }))
+
+    await screen.findByText('Perdas por motivo')
+    const total = within(cartao('Perda total (kg)')).getByText('10*')
+    expect(total).toHaveAttribute('title', expect.stringContaining('1 item lançado'))
+    // A consequencia desta aba diz a DIRECAO do desvio, que aqui e para baixo
+    // (a perda fica de fora do numerador) — o oposto das outras abas.
+    expect(total).toHaveAttribute('title', expect.stringContaining('menos perda do que houve'))
+    expect(within(cartao('Índice de perdas')).getByText('1,0%*')).toBeInTheDocument()
+
+    const painel = screen.getByText('Perdas por motivo').closest('.relatorios-painel') as HTMLElement
+    const linhaVencimento = within(painel).getByText('vencimento')
+      .closest('.relatorios-motivo-linha') as HTMLElement
+    // O motivo afetado leva a marca; o numero de ocorrencias nao (a perda
+    // aconteceu — o que falta e o peso dela).
+    expect(within(linhaVencimento).getByText('0*')).toBeInTheDocument()
+    expect(within(linhaVencimento).getByText('1 ocorr.')).toBeInTheDocument()
+
+    expect(screen.getByRole('note')).toHaveTextContent('Cadastre o peso médio da embalagem')
+  })
+
+  it('motivo fechado nao ganha marca so porque o vizinho esta incompleto', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ motivo: 'transporte', perda_kg: 10, peso_total: 1000 })],
+      '/api/perdas': [
+        perda({ motivo: 'manuseio', un: 'CX', qtd: 4, qtd_kg: 32 }),
+        perda({ motivo: 'vencimento', un: 'CX', qtd: 4, qtd_kg: null, itens_sem_conversao: 1 }),
+      ],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Perdas' }))
+
+    const painel = (await screen.findByText('Perdas por motivo')).closest('.relatorios-painel') as HTMLElement
+    expect(within(painel).getByText('32')).toBeInTheDocument() // manuseio, fechado
+    expect(within(painel).queryByText('32*')).not.toBeInTheDocument()
+    expect(within(painel).getByText('0*')).toBeInTheDocument() // vencimento, incompleto
+  })
 })
 
 describe('RelatoriosTela — lançamentos (livro-caixa)', () => {
@@ -583,6 +662,27 @@ describe('RelatoriosTela — CSV das quantidades incompletas', () => {
     const texto = await lerBlobComoTexto(blobsCriados[0])
     expect(texto).toContain('Qtd comprada (kg)')
     expect(texto).toContain('100*;80*;R$ 400;R$ 240*;150%*;5,0%*')
+  })
+
+  it('CSV de perdas: a tabela por motivo sai em kg e leva o mesmo asterisco da tela', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ motivo: 'transporte', perda_kg: 10, peso_total: 1000 })],
+      '/api/perdas': [
+        perda({ motivo: 'manuseio', un: 'CX', qtd: 4, qtd_kg: 32 }),
+        perda({ motivo: 'vencimento', un: 'CX', qtd: 4, qtd_kg: null, itens_sem_conversao: 1 }),
+      ],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Perdas' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar CSV' }))
+
+    await waitFor(() => expect(blobsCriados).toHaveLength(1))
+    const texto = await lerBlobComoTexto(blobsCriados[0])
+    expect(texto).toContain('Quantidade (kg)')
+    expect(texto).toContain('manuseio;32;1;')      // convertido, sem marca
+    expect(texto).toContain('vencimento;0*;1;')    // fora da soma, marcado
   })
 
   it('CSV de perdas leva o mesmo asterisco da tela na tabela por produto', async () => {

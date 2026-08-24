@@ -44,7 +44,37 @@ const entrada = (over: Partial<Entrada> = {}): Entrada => ({
   perda_kg: 0, valor_total: 0, peso_total: 0, ...over,
 })
 
-const perda = (over: Partial<Perda> = {}): Perda => ({ qtd: 0, ...over })
+/**
+ * Uma perda de depósito lançada EM QUILOS — o caso em que a conversão é
+ * no-op. Manda `un: 'KG'` e o `qtd` cru IGUAL ao `qtd_kg`, exatamente como a
+ * API faz nesse caso: é o que torna verificável a afirmação "não quebrou quem
+ * já estava certo". Um fixture que omitisse o `qtd` faria qualquer mutação
+ * que voltasse a somar o campo cru derrubar também os testes de KG, e a
+ * sensibilidade não distinguiria mais uma coisa da outra.
+ */
+const perda = (over: Partial<Perda> = {}): Perda => {
+  const base = { qtd_kg: 0, itens_sem_conversao: 0, ...over }
+  const daApi = { ...base, un: 'KG', qtd: base.qtd_kg ?? 0 }
+  return daApi
+}
+
+/**
+ * A mesma perda como GET /api/perdas de fato a devolve: com o `qtd` CRU
+ * junto, na unidade da própria perda. `Perda` não declara esse campo de
+ * propósito (ver o comentário do tipo em dashboard.ts), mas os testes de
+ * conversão precisam mandá-lo — ele é o número que a versão anterior somava,
+ * e só prova que ficou de fora da conta se chegar até a função. Vai por uma
+ * VARIÁVEL, e não por um literal, porque o excess property check do
+ * TypeScript só dispara em literais.
+ */
+function perdaDaApi(campos: { un: string; qtd: number; qtd_kg: number | null }): Perda {
+  const daApi = {
+    data: '2026-06-19', produto_id: 'p1', motivo: 'vencimento',
+    un: campos.un, qtd: campos.qtd, qtd_kg: campos.qtd_kg,
+    itens_sem_conversao: campos.qtd_kg === null ? 1 : 0,
+  }
+  return daApi
+}
 
 const lancamento = (over: Partial<Lancamento> = {}): Lancamento => ({
   id: 'l1', data: '2026-06-10', categoria: 'Frete', descricao: '', valor: 0, funcionario_id: null, ...over,
@@ -124,10 +154,100 @@ describe('indiceDePerdas', () => {
   it('(perda das entradas + perda de deposito) / kg recebido', () => {
     const r = indiceDePerdas(
       [entrada({ peso_total: 1000, perda_kg: 50 }), entrada({ peso_total: 1000, perda_kg: 30 })],
-      [perda({ qtd: 20 })],
+      [perda({ qtd_kg: 20 })],
     )
     // (50+30+20) / 2000 * 100 = 5%
     expect(r).toEqual({ disponivel: true, valor: 5 })
+  })
+})
+
+describe('indiceDePerdas soma em KG, cada parcela pela unidade dela', () => {
+  // `perdas.qtd` esta na unidade da PROPRIA perda; as duas perda_kg
+  // (entrada_itens/saida_itens) sao KG por contrato para item de qualquer
+  // unidade. Ate esta versao, o indice somava a primeira crua com as
+  // segundas — 4 caixas entrando como "4" ao lado de centenas de quilos —, e
+  // saia PARA BAIXO, a direcao que esconde sangria.
+
+  const entradaKg = (over: Partial<Entrada> = {}) =>
+    entrada({ peso_total: 1000, perda_kg: 50, ...over })
+
+  it('perda so em KG: a conversao e no-op, o valor e o mesmo de antes', () => {
+    // Prova que a correcao nao quebrou quem ja estava certo.
+    const r = indiceDePerdas([entradaKg()], [perdaDaApi({ un: 'KG', qtd: 20, qtd_kg: 20 })])
+    expect(r.disponivel && r.valor).toBeCloseTo(7) // (50+20)/1000*100
+    expect(r).not.toHaveProperty('itensSemConversao')
+  })
+
+  it('perda em CX com fator: entra pelos quilos (qtd_kg), nao pelas caixas (qtd)', () => {
+    // 4 CX de 8 kg = 32 kg. Somar `qtd` daria (50+4)/1000 = 5,4%.
+    const r = indiceDePerdas([entradaKg()], [perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: 32 })])
+    expect(r.disponivel && r.valor).toBeCloseTo(8.2) // (50+32)/1000*100
+  })
+
+  it('perda em CX SEM fator: fica fora da soma (nunca vira 1) e e contada', () => {
+    const r = indiceDePerdas([entradaKg()], [perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: null })])
+    // Nem 5,4% (fator 1 inventado) nem 8,2% (fator que nao existe): 5,0%, o
+    // que da para afirmar — marcado como incompleto.
+    expect(r.disponivel && r.valor).toBeCloseTo(5)
+    expect(r.disponivel && r.itensSemConversao).toBe(1)
+  })
+
+  it('mistura: converte o que da, deixa de fora o que nao da, e conta o que ficou', () => {
+    const r = indiceDePerdas([entradaKg()], [
+      perdaDaApi({ un: 'KG', qtd: 11, qtd_kg: 11 }),
+      perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: 32 }),
+      perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: null }),
+    ])
+    // (50 + 11 + 32) / 1000. Somar cru daria (50+11+4+4)/1000 = 6,9%.
+    expect(r.disponivel && r.valor).toBeCloseTo(9.3)
+    expect(r.disponivel && r.itensSemConversao).toBe(1)
+  })
+
+  it('as duas perda_kg NAO sao convertidas: perda de coleta entra em kg, crua', () => {
+    // A perda de coleta ja e kg por contrato para item de qualquer unidade
+    // (nome da coluna, rotulo em ModalEntrada.tsx e total do rodape do mesmo
+    // modal). Aqui a entrada tem 296 kg de coleta e o deposito 92 kg de
+    // caixas convertidas: 388 sobre 8700 — o caso do seed do prototipo.
+    // Converter a coleta por engano (x8, x20…) explodiria o indice.
+    const r = indiceDePerdas(
+      [entrada({ peso_total: 8700, perda_kg: 296, perda_itens_qtd: 296 })],
+      [
+        perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: 32 }),
+        perdaDaApi({ un: 'CX', qtd: 3, qtd_kg: 60 }),
+      ],
+    )
+    expect(r.disponivel && r.valor).toBeCloseTo(4.4598, 3)
+    // O numero que a versao anterior mostrava, com `qtd` cru: (296+7)/8700.
+    expect(r.disponivel && r.valor).not.toBeCloseTo(3.4828, 3)
+  })
+
+  it('indicador completo sai LIMPO — sem o campo de marca', () => {
+    // O caso normal (a esmagadora maioria) nao pode ganhar um campo a mais so
+    // porque o mecanismo de marca existe: `itensSemConversao` ausente e 0 sao
+    // a mesma coisa, e o objeto continua de dois campos.
+    const r = indiceDePerdas([entradaKg()], [perdaDaApi({ un: 'KG', qtd: 20, qtd_kg: 20 })])
+    expect(r).not.toHaveProperty('itensSemConversao')
+  })
+
+  it('conta tambem o que ficou fora do DENOMINADOR (itens de entrada sem fator)', () => {
+    // O indice e uma fracao: perda em cima, kg comprado embaixo. Um item de
+    // entrada que nao entrou em `peso_total` deixa o denominador curto — o
+    // numero sai para CIMA, e exibi-lo limpo seria tao desonesto quanto no
+    // outro lado.
+    const r = indiceDePerdas(
+      [entradaKg({ itens_sem_conversao: 2 })],
+      [perdaDaApi({ un: 'KG', qtd: 20, qtd_kg: 20 })],
+    )
+    expect(r.disponivel && r.valor).toBeCloseTo(7)
+    expect(r.disponivel && r.itensSemConversao).toBe(2)
+  })
+
+  it('soma os dois lados quando os dois perderam lancamentos', () => {
+    const r = indiceDePerdas(
+      [entradaKg({ itens_sem_conversao: 2 })],
+      [perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: null })],
+    )
+    expect(r.disponivel && r.itensSemConversao).toBe(3)
   })
 })
 

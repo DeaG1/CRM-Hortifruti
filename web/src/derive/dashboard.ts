@@ -63,11 +63,44 @@ export interface Entrada {
    * correcao — o valor ausente e indistinguivel de zero para esta conta. */
   perda_itens_qtd?: number
   valor_total: number
+  /** Em kg — GET /api/entradas converte cada item pela unidade dele. */
   peso_total: number
+  /**
+   * Itens desta entrada que ficaram FORA de `peso_total` por não serem
+   * convertíveis em quilos (unidade diferente de KG sem `produtos.peso_medio`
+   * cadastrado). Vem de GET /api/entradas desde 203fb28; só não estava
+   * modelado aqui. É o que torna o DENOMINADOR do índice de perdas
+   * (kg recebido) incompleto — ver indiceDePerdas.
+   *
+   * Opcional pelo mesmo motivo de `perda_itens_qtd`: a API sempre envia, mas
+   * fixtures de teste montam entradas parciais e ausente significa
+   * exatamente 0 (nada ficou de fora).
+   */
+  itens_sem_conversao?: number
 }
 
+/**
+ * Uma perda de depósito, como GET /api/perdas devolve — ver
+ * api/src/routes/perdas.ts.
+ *
+ * `qtd` (a quantidade na unidade da PRÓPRIA perda, 'CX', 'DZ'…) NÃO está
+ * declarada aqui de propósito, embora a API a envie: este módulo soma perdas
+ * com números que já estão em quilos, e declarar o campo cru convidaria de
+ * volta exatamente o defeito que esta versão corrigiu — 4 caixas de alface
+ * entrando na conta como "4" ao lado de 296 kg. O que se soma aqui é
+ * `qtd_kg`, e nada mais. (A interface é deliberadamente mínima, como as duas
+ * acima: só os campos que a Saúde do Negócio consome.)
+ */
 export interface Perda {
-  qtd: number
+  /**
+   * A mesma perda em quilos, convertida pela API pela unidade dela.
+   * `null`/ausente = não convertível (produto sem peso médio cadastrado):
+   * fica fora da soma e é contada em `itens_sem_conversao`. Nunca vira 1 nem
+   * 0 disfarçado de perda real.
+   */
+  qtd_kg?: number | null
+  /** 0 ou 1 — cada linha desta rota é um lançamento. Ver perdas.ts. */
+  itens_sem_conversao?: number
 }
 
 /**
@@ -129,10 +162,27 @@ export const METAS_DASHBOARD = {
  * o único jeito de dizer "não sei" sem mentir com um número.
  */
 export type Indicador =
-  | { disponivel: true; valor: number }
+  | { disponivel: true; valor: number; itensSemConversao?: number }
   | { disponivel: false; motivo: string }
 
-const disponivel = (valor: number): Indicador => ({ disponivel: true, valor })
+/**
+ * Um indicador tem três estados, não dois: "sei" (`disponivel: true` sem
+ * mais nada), "não sei" (`disponivel: false` + motivo) e o terceiro, que
+ * este campo introduz — "sei, mas a conta ignorou lançamentos".
+ *
+ * `itensSemConversao` > 0 significa que o número saiu de uma soma da qual
+ * ficaram de fora lançamentos em unidade diferente de KG sem peso médio
+ * cadastrado no produto (a API prefere deixá-los fora a inventar um fator —
+ * ver `itens_sem_conversao` em api/src/routes/perdas.ts e irmãs). O número
+ * continua sendo o melhor disponível e continua sendo exibido; o que não
+ * pode é aparecer LIMPO, como se fechasse. Quem desenha o cartão marca.
+ *
+ * Ausente é indistinguível de 0 (nada ficou de fora) — por isso o helper só
+ * inclui o campo quando ele tem o que dizer, e o caso normal continua sendo
+ * um objeto de dois campos.
+ */
+const disponivel = (valor: number, itensSemConversao = 0): Indicador =>
+  itensSemConversao > 0 ? { disponivel: true, valor, itensSemConversao } : { disponivel: true, valor }
 const indisponivel = (motivo: string): Indicador => ({ disponivel: false, motivo })
 
 function entreguesDe(saidas: Saida[]): Saida[] {
@@ -183,20 +233,56 @@ export function percentualLucro(receita: Indicador, lucro: Indicador): Indicador
  * sobre o total recebido (kg). Porta perdaMedia de
  * design/CRM Hortifruti.dc.html:2167-2174. Sem nenhuma entrada registrada
  * não há denominador (kg recebido) — indisponível, não 0%.
+ *
+ * ---- os três termos, e por que só agora eles estão na mesma unidade ----
+ *
+ * As perdas do sistema não nascem todas em quilos, e o defeito que esta
+ * versão fecha era exatamente somá-las como se nascessem:
+ *
+ *   perda de coleta (entrada_itens.perda_kg / entradas.perda_kg) -> KG por
+ *     contrato, para item de qualquer unidade (nome da coluna, rótulo em
+ *     ModalEntrada.tsx e total do rodapé do mesmo modal). NÃO converte.
+ *   perda de depósito (perdas.qtd) -> na unidade da PRÓPRIA perda
+ *     (perdas.un). CONVERTE — é `p.qtd_kg`, que GET /api/perdas passou a
+ *     calcular, e nunca `p.qtd`.
+ *   kg recebido (entradas.peso_total) -> já vem em kg desde 203fb28.
+ *
+ * Antes disto, `p.qtd` cru entrava na soma: no seed do protótipo, 4 CX de
+ * alface + 3 CX de tomate somavam "7" ao lado de 296 kg de perda de coleta,
+ * quando pesam 92 kg. O índice saía 3,5% em vez de 4,5% — e "para baixo" é a
+ * direção perigosa neste indicador específico: ele é o que o dono usa para
+ * decidir se a operação está sangrando, e um número menor que a realidade diz
+ * "está tudo bem" justamente quando não está. (Nas outras telas o erro sai
+ * para cima, porque lá o que falta é denominador.)
+ *
+ * ---- perda de coleta: cabeçalho vs. soma dos itens ----
+ *
+ * perdaColetaEfetiva, e não `en.perda_kg` cru: o total no cabeçalho da
+ * entrada e a soma das perdas dos itens são o MESMO evento em duas
+ * granularidades — o protótipo recalcula o cabeçalho a partir dos itens ao
+ * salvar (design/CRM Hortifruti.dc.html:2037). Usar o campo cru aqui, com o
+ * estoque e os relatórios já reconciliando, faria o índice de perdas do
+ * painel divergir do número das outras telas — e nada é pior num painel do
+ * que dois indicadores que deveriam bater e não batem.
+ *
+ * ---- o que ficou de fora ----
+ *
+ * `itensSemConversao` soma os DOIS lados da fração, porque os dois podem
+ * estar incompletos por lançamentos não convertíveis: as perdas de depósito
+ * (numerador) e os itens de entrada que não entraram em `peso_total`
+ * (denominador). Não dá para saber a direção do desvio quando os dois lados
+ * perdem lançamentos — daí a marca no cartão dizer que a conta ignorou
+ * lançamentos, sem prometer para que lado. A perda de coleta nunca entra
+ * nessa contagem: ela é kg por contrato, sempre completa.
  */
 export function indiceDePerdas(entradas: Entrada[], perdas: Perda[]): Indicador {
   const kgRecebido = entradas.reduce((s, en) => s + (en.peso_total || 0), 0)
   if (kgRecebido === 0) return indisponivel('sem compras (entradas) registradas')
-  // perdaColetaEfetiva, e nao `en.perda_kg` cru: o total no cabecalho da
-  // entrada e a soma das perdas dos itens sao o MESMO evento em duas
-  // granularidades — o prototipo recalcula o cabecalho a partir dos itens ao
-  // salvar (design/CRM Hortifruti.dc.html:2037). Usar o campo cru aqui, com o
-  // estoque e os relatorios ja reconciliando, faria o indice de perdas do
-  // painel divergir do numero das outras telas — e nada e pior num painel do
-  // que dois indicadores que deveriam bater e nao batem.
   const perdaEntradas = entradas.reduce((s, en) => s + perdaColetaEfetiva(en), 0)
-  const perdaDeposito = perdas.reduce((s, p) => s + (p.qtd || 0), 0)
-  return disponivel(((perdaEntradas + perdaDeposito) / kgRecebido) * 100)
+  const perdaDeposito = perdas.reduce((s, p) => s + (p.qtd_kg || 0), 0)
+  const semConversao = perdas.reduce((s, p) => s + (p.itens_sem_conversao || 0), 0)
+    + entradas.reduce((s, en) => s + (en.itens_sem_conversao || 0), 0)
+  return disponivel(((perdaEntradas + perdaDeposito) / kgRecebido) * 100, semConversao)
 }
 
 /** Ticket médio por entrega = receita bruta / nº de pedidos entregues. */

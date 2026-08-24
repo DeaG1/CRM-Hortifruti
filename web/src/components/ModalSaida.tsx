@@ -546,16 +546,50 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
                             (existe no protótipo, modal-pedido.html) continua
                             sem implementar aqui — mas nao mais por falta de
                             dado: GET /api/estoque ja existe e agrega
-                            entradas - perdas - saidas por produto+unidade
-                            (ver api/src/routes/estoque.ts e
-                            screens/EstoqueLista.tsx). Falta so buscar esse
-                            saldo neste modal e comparar contra `it.qtd` —
-                            atencao: o saldo vem EM KG, e `it.qtd` esta na
-                            unidade escolhida na linha, entao comparar os dois
-                            crus repetiria exatamente o defeito que a tela de
-                            Estoque acabou de corrigir; a comparacao tem de
-                            passar pela mesma conversao (ou usar
-                            `equivalente_un`, que ja e o saldo em embalagens).
+                            entradas - perdas - saidas (ver
+                            api/src/routes/estoque.ts e
+                            screens/EstoqueLista.tsx). Falta buscar esse saldo
+                            neste modal e comparar contra `it.qtd`. Sao TRES
+                            armadilhas nessa comparacao, e as tres derrubam o
+                            aviso de formas diferentes:
+
+                            1) UNIDADE. O saldo vem EM KG e `it.qtd` esta na
+                            unidade escolhida na linha (`it.un`). Comparar os
+                            dois crus repetiria exatamente o defeito que as
+                            telas de Estoque, Compras, Vendas, Produtos e
+                            Perdas acabaram de corrigir: "50" caixas nunca
+                            passam de "200" quilos, e o aviso simplesmente
+                            nunca dispararia. A comparacao tem de acontecer
+                            toda em kg — `it.qtd` convertido pela MESMA regra
+                            da API (un === 'KG' ? qtd : qtd * peso_medio, e so
+                            quando peso_medio > 0), com o `peso_medio` que
+                            `produtos` ja traz neste modal.
+
+                            2) LINHAS POR PRODUTO. GET /api/estoque devolve uma
+                            linha por (produto, unidade LANCADA), nao uma por
+                            produto: um mesmo produto movimentado em CX e em KG
+                            aparece em duas linhas. O saldo do produto e a SOMA
+                            do kg dessas linhas — pegar a linha cujo `un` bate
+                            com `it.un` daria so o saldo do que foi lancado
+                            naquela unidade, um numero menor e sem significado
+                            aqui (avisaria falta de mercadoria que existe).
+
+                            3) LINHA INCOMPLETA. Linha com
+                            `itens_sem_conversao > 0` tem saldo incompleto por
+                            construcao (as quantidades ficaram de fora e so as
+                            perdas em kg entraram, entao ele tende a negativo).
+                            Um aviso disparado sobre ela e alarme falso — pelo
+                            mesmo motivo que EstoqueLista.tsx nao pinta esse
+                            saldo de vermelho. Nesse caso o certo e nao avisar
+                            (ou dizer que o saldo daquele produto nao e
+                            conhecido), nunca acusar excesso.
+
+                            E `equivalente_un` NAO e um atalho para nada disso:
+                            ele e null justamente quando un === 'KG' (nada a
+                            converter) ou peso_medio === 0 (sem fator), ou
+                            seja, falta nos dois casos em que seria preciso, e
+                            e por linha, herdando a armadilha 2.
+
                             Nao fizemos isso aqui ainda, entao nenhum calculo
                             e nenhum valor de disponibilidade sao inventados
                             nesta interface por enquanto. */}

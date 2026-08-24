@@ -45,9 +45,46 @@ const lancamento = (over: Partial<Lancamento> = {}): Lancamento => ({
   valor: 1280, funcionario_id: null, ...over,
 })
 
-const perda = (over: Partial<PerdaDeposito> = {}): PerdaDeposito => ({
-  data: '2026-06-19', produto_id: 'p1', qtd: 4, motivo: 'vencimento', ...over,
-})
+/**
+ * Uma perda de depósito lançada EM QUILOS — o caso em que a conversão é
+ * no-op. Manda `un: 'KG'` e o `qtd` cru IGUAL ao `qtd_kg`, exatamente como a
+ * API faz nesse caso: é o que torna verificável a afirmação "não quebrou quem
+ * já estava certo". Um fixture que omitisse o `qtd` faria qualquer mutação
+ * que voltasse a somar o campo cru derrubar também os testes de KG, e a
+ * sensibilidade não distinguiria mais uma coisa da outra.
+ */
+const perda = (over: Partial<PerdaDeposito> = {}): PerdaDeposito => {
+  const base = {
+    data: '2026-06-19', produto_id: 'p1', motivo: 'vencimento',
+    qtd_kg: 4, itens_sem_conversao: 0, ...over,
+  }
+  const daApi = { ...base, un: 'KG', qtd: base.qtd_kg ?? 0 }
+  return daApi
+}
+
+/**
+ * A mesma perda como GET /api/perdas de fato a devolve: com o `qtd` CRU
+ * junto, na unidade da própria perda. `PerdaDeposito` não declara esse campo
+ * de propósito (ver o comentário do tipo), mas os testes de conversão
+ * precisam mandá-lo — ele é o número que a versão anterior somava, e só prova
+ * que ficou de fora da conta se chegar até a função. Vai por uma VARIÁVEL, e
+ * não por um literal, porque o excess property check do TypeScript só dispara
+ * em literais.
+ */
+function perdaDaApi(
+  campos: { un: string; qtd: number; qtd_kg: number | null; motivo?: string; data?: string },
+): PerdaDeposito {
+  const daApi = {
+    data: campos.data ?? '2026-06-19',
+    produto_id: 'p1',
+    motivo: campos.motivo ?? 'vencimento',
+    un: campos.un,
+    qtd: campos.qtd,
+    qtd_kg: campos.qtd_kg,
+    itens_sem_conversao: campos.qtd_kg === null ? 1 : 0,
+  }
+  return daApi
+}
 
 const produtoAgregado = (over: Partial<ProdutoAgregado> = {}): ProdutoAgregado => ({
   produto_id: 'p1', nome: 'Batata', un: 'KG',
@@ -897,7 +934,7 @@ describe('derivarRelatorioPerdas', () => {
       entrada({ motivo: 'transporte', perda_kg: 10 }),
       entrada({ motivo: 'transporte', perda_kg: 5 }),
     ]
-    const perdas = [perda({ motivo: 'vencimento', qtd: 4 })]
+    const perdas = [perda({ motivo: 'vencimento', qtd_kg: 4 })]
     const { porMotivo, totais } = derivarRelatorioPerdas(entradas, perdas, [], '', '')
     const transporte = porMotivo.find(m => m.motivo === 'transporte')!
     expect(transporte.qtd).toBe(15)
@@ -944,7 +981,7 @@ describe('derivarRelatorioPerdas', () => {
 
   it('pct de cada motivo e a fatia do total', () => {
     const entradas = [entrada({ motivo: 'transporte', perda_kg: 25 })]
-    const perdas = [perda({ motivo: 'vencimento', qtd: 75 })]
+    const perdas = [perda({ motivo: 'vencimento', qtd_kg: 75 })]
     const { porMotivo } = derivarRelatorioPerdas(entradas, perdas, [], '', '')
     expect(porMotivo.find(m => m.motivo === 'transporte')!.pct).toBeCloseTo(25)
     expect(porMotivo.find(m => m.motivo === 'vencimento')!.pct).toBeCloseTo(75)
@@ -962,7 +999,7 @@ describe('derivarRelatorioPerdas', () => {
 
   it('indice de perda = perda total sobre o total comprado (peso_total das entradas)', () => {
     const entradas = [entrada({ peso_total: 1000, perda_kg: 50 })]
-    const perdas = [perda({ qtd: 50 })]
+    const perdas = [perda({ qtd_kg: 50 })]
     const { totais } = derivarRelatorioPerdas(entradas, perdas, [], '', '')
     expect(totais.indicePerdaPct).toBeCloseTo(10) // (50+50)/1000*100
   })
@@ -973,8 +1010,8 @@ describe('derivarRelatorioPerdas', () => {
       entrada({ data: '2026-05-01', motivo: 'transporte', perda_kg: 100 }),
     ]
     const perdas = [
-      perda({ data: '2026-06-01', qtd: 5 }),
-      perda({ data: '2026-05-01', qtd: 500 }),
+      perda({ data: '2026-06-01', qtd_kg: 5 }),
+      perda({ data: '2026-05-01', qtd_kg: 500 }),
     ]
     const { totais } = derivarRelatorioPerdas(entradas, perdas, [], '2026-06', '2026-06')
     expect(totais.perdaTotalQtd).toBe(15)
@@ -1000,17 +1037,114 @@ describe('derivarRelatorioPerdas', () => {
     expect(porProduto.find(p => p.nome === 'Batata')!.itensSemConversao).toBe(0)
   })
 
-  it('totais.itensSemConversao soma as linhas exibidas — 0 quando a tabela esta completa', () => {
+  it('totais.itensSemConversaoProduto soma as linhas exibidas — 0 quando a tabela esta completa', () => {
     const completa = [
       { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 0, margem: 0, markupPct: null, perdaPct: 20 },
     ]
-    expect(derivarRelatorioPerdas([], [], completa, '', '').totais.itensSemConversao).toBe(0)
+    expect(derivarRelatorioPerdas([], [], completa, '', '').totais.itensSemConversaoProduto).toBe(0)
 
     const incompleta = [
       { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 2, margem: 0, markupPct: null, perdaPct: 20 },
       { produtoId: 'p2', nome: 'Tomate', compradoQtd: 50, vendidoQtd: 5, faturamento: 5, itensSemConversao: 3, margem: 0, markupPct: null, perdaPct: 8 },
     ]
-    expect(derivarRelatorioPerdas([], [], incompleta, '', '').totais.itensSemConversao).toBe(5)
+    expect(derivarRelatorioPerdas([], [], incompleta, '', '').totais.itensSemConversaoProduto).toBe(5)
+  })
+
+  // ---- perdas.qtd esta na unidade da PROPRIA perda; as duas perda_kg
+  // (entrada_itens/saida_itens) sao KG por contrato para item de qualquer
+  // unidade. Ate esta versao, perdaTotalQtd e indicePerdaPct somavam a
+  // primeira crua com as segundas, e saiam PARA BAIXO — a direcao que esconde
+  // sangria justamente no relatorio de perdas.
+
+  it('perda de deposito so em KG: a conversao e no-op, os numeros sao os mesmos de antes', () => {
+    const entradas = [entrada({ motivo: 'transporte', perda_kg: 10, peso_total: 1000 })]
+    const perdas = [perdaDaApi({ un: 'KG', qtd: 20, qtd_kg: 20 })]
+    const { porMotivo, totais } = derivarRelatorioPerdas(entradas, perdas, [], '', '')
+    expect(porMotivo.find(m => m.motivo === 'vencimento')!.qtd).toBe(20)
+    expect(totais.perdaTotalQtd).toBe(30)
+    expect(totais.indicePerdaPct).toBeCloseTo(3) // (10+20)/1000*100
+    expect(totais.itensSemConversaoPerdaTotal).toBe(0)
+    expect(totais.itensSemConversaoIndice).toBe(0)
+  })
+
+  it('perda de deposito em CX com fator: entra pelos quilos (qtd_kg), nao pelas caixas', () => {
+    const entradas = [entrada({ motivo: 'transporte', perda_kg: 10, peso_total: 1000 })]
+    const perdas = [perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: 32 })]
+    const { porMotivo, totais } = derivarRelatorioPerdas(entradas, perdas, [], '', '')
+    // Somar `qtd` cru daria 4 e um total de 14.
+    expect(porMotivo.find(m => m.motivo === 'vencimento')!.qtd).toBe(32)
+    expect(totais.perdaTotalQtd).toBe(42)
+    expect(totais.indicePerdaPct).toBeCloseTo(4.2)
+  })
+
+  it('perda de deposito em CX SEM fator: fica fora da soma (nunca vira 1) e e contada', () => {
+    const entradas = [entrada({ motivo: 'transporte', perda_kg: 10, peso_total: 1000 })]
+    const perdas = [perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: null })]
+    const { porMotivo, totais } = derivarRelatorioPerdas(entradas, perdas, [], '', '')
+    const vencimento = porMotivo.find(m => m.motivo === 'vencimento')!
+    expect(vencimento.qtd).toBe(0)
+    // A ocorrencia continua contada: a perda ACONTECEU, o que falta e o peso.
+    expect(vencimento.ocorrencias).toBe(1)
+    expect(vencimento.itensSemConversao).toBe(1)
+    expect(totais.perdaTotalQtd).toBe(10)
+    expect(totais.itensSemConversaoPerdaTotal).toBe(1)
+  })
+
+  it('mistura: converte o que da, deixa de fora o que nao da, e conta so o motivo afetado', () => {
+    const entradas = [entrada({ motivo: 'transporte', perda_kg: 10, peso_total: 1000 })]
+    const perdas = [
+      perdaDaApi({ un: 'KG', qtd: 11, qtd_kg: 11, motivo: 'manuseio' }),
+      perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: 32, motivo: 'manuseio' }),
+      perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: null, motivo: 'vencimento' }),
+    ]
+    const { porMotivo, totais } = derivarRelatorioPerdas(entradas, perdas, [], '', '')
+    const manuseio = porMotivo.find(m => m.motivo === 'manuseio')!
+    const vencimento = porMotivo.find(m => m.motivo === 'vencimento')!
+    expect(manuseio.qtd).toBe(43)
+    // O motivo fechado NAO e marcado: marcar tudo ensinaria a ignorar a marca.
+    expect(manuseio.itensSemConversao).toBe(0)
+    expect(vencimento.itensSemConversao).toBe(1)
+    expect(totais.perdaTotalQtd).toBe(53) // 10 + 11 + 32, nao 10+11+4+4 = 29
+  })
+
+  it('as duas perda_kg NAO sao convertidas: a perda de coleta entra em kg, crua', () => {
+    // O caso do seed do prototipo: 296 kg de coleta (kg por contrato, item em
+    // CX ou em KG, tanto faz) + 4 CX de alface de 8 kg + 3 CX de tomate de
+    // 20 kg = 296 + 92 = 388 kg sobre 8700 kg comprados.
+    const entradas = [entrada({ motivo: 'transporte', perda_kg: 296, perda_itens_qtd: 296, peso_total: 8700 })]
+    const perdas = [
+      perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: 32 }),
+      perdaDaApi({ un: 'CX', qtd: 3, qtd_kg: 60, motivo: 'armazenagem' }),
+    ]
+    const { porMotivo, totais } = derivarRelatorioPerdas(entradas, perdas, [], '', '')
+    // Converter a coleta por engano (x8, x20…) explodiria este numero.
+    expect(porMotivo.find(m => m.motivo === 'transporte')!.qtd).toBe(296)
+    expect(totais.perdaTotalQtd).toBe(388) // e nao 303, que era o de antes
+    expect(totais.indicePerdaPct).toBeCloseTo(4.4598, 3)
+  })
+
+  it('itensSemConversaoIndice conta tambem o denominador (itens de entrada sem fator)', () => {
+    // O indice e uma fracao: perda em cima, kg comprado embaixo. Um item de
+    // entrada fora de `peso_total` encurta o denominador e joga o indice para
+    // CIMA — e o cartao "Perda total", que nao usa denominador, continua
+    // fechado, por isso os dois contadores sao diferentes.
+    const entradas = [entrada({ motivo: 'transporte', perda_kg: 10, peso_total: 1000, itens_sem_conversao: 2 })]
+    const perdas = [perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: null })]
+    const { totais } = derivarRelatorioPerdas(entradas, perdas, [], '', '')
+    expect(totais.itensSemConversaoPerdaTotal).toBe(1)
+    expect(totais.itensSemConversaoIndice).toBe(3)
+  })
+
+  it('os tres contadores sao independentes e nao se somam entre si', () => {
+    // "perdas por produto" sai de outra rota (o agregado por produto): o que
+    // ficou de fora la nao diz nada sobre a perda total nem sobre o indice.
+    const produtosView = [
+      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 5, margem: 0, markupPct: null, perdaPct: 20 },
+    ]
+    const { totais } = derivarRelatorioPerdas([entrada({ peso_total: 1000 })], [], produtosView, '', '')
+    expect(totais.itensSemConversaoProduto).toBe(5)
+    expect(totais.itensSemConversaoPerdaTotal).toBe(0)
+    expect(totais.itensSemConversaoIndice).toBe(0)
   })
 
   it('linha sem perdaPct nao entra na tabela nem no contador (nao e exibida)', () => {
@@ -1019,7 +1153,7 @@ describe('derivarRelatorioPerdas', () => {
     ]
     const { porProduto, totais } = derivarRelatorioPerdas([], [], produtosView, '', '')
     expect(porProduto).toHaveLength(0)
-    expect(totais.itensSemConversao).toBe(0)
+    expect(totais.itensSemConversaoProduto).toBe(0)
   })
 })
 

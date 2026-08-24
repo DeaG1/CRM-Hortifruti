@@ -39,6 +39,8 @@ let tokenAdmin: string
 let tokenColab: string
 let produtoId: string
 let produtoOutroTenantId: string
+let produtoCxComPeso: string
+let produtoCxSemPeso: string
 
 beforeAll(async () => {
   admin = criarPool(ADMIN)
@@ -71,6 +73,18 @@ beforeAll(async () => {
   const [produto] = await admin`
     insert into produtos (tenant_id, nome) values (${tenantId}, 'Produto Perda Http') returning id`
   produtoId = produto.id
+
+  // Os dois produtos que a conversao de GET / distingue: o mesmo 'CX', um com
+  // peso da embalagem cadastrado e outro sem (peso_medio = 0 = "nao
+  // informado", ver migration 009).
+  const [pCom] = await admin`
+    insert into produtos (tenant_id, nome, un, peso_medio)
+    values (${tenantId}, 'Alface Perda Http', 'CX', 8) returning id`
+  produtoCxComPeso = pCom.id
+  const [pSem] = await admin`
+    insert into produtos (tenant_id, nome, un, peso_medio)
+    values (${tenantId}, 'Sem Peso Perda Http', 'CX', 0) returning id`
+  produtoCxSemPeso = pSem.id
 
   // Produto de dentro do OUTRO tenant — prova que a FK composta (migration
   // 010_fk_com_tenant.sql) rejeita uma referencia valida mas de fora do
@@ -368,5 +382,117 @@ describe('codigos de status dos handlers', () => {
       expect(res.headers.get('content-type')).toMatch(/application\/json/)
       expect(await res.json()).toEqual({ erro: 'id invalido' })
     }
+  })
+})
+
+/**
+ * GET / converte `perdas.qtd` para quilos porque quem consome esta listagem
+ * SOMA varias perdas e as compara com numeros que ja estao em kg — o indice
+ * de perdas do painel (web/src/derive/dashboard.ts) e o relatorio de perdas
+ * (web/src/derive/relatorios.ts). Ver o comentario grande do handler em
+ * src/routes/perdas.ts.
+ *
+ * A regra e a MESMA das outras quatro ocorrencias no projeto (entradas.ts,
+ * saidas.ts, relatorios.ts, estoque.ts): 'KG' conta `qtd`; outra unidade
+ * conta `qtd * produtos.peso_medio`, e so quando peso_medio > 0. Fator
+ * ausente NUNCA vira 1 — a perda sai da soma (`qtd_kg` null) e e contada.
+ */
+describe('conversao para KG (GET /)', () => {
+  async function criarELer(corpo: Record<string, unknown>) {
+    const res = await pedir('/api/perdas', comoAdmin(json(corpo)))
+    expect(res.status).toBe(201)
+    const criado = await res.json()
+    const lista = await (await pedir('/api/perdas', comoAdmin())).json()
+    const linha = lista.find((p: { id: string }) => p.id === criado.id)
+    expect(linha, 'a perda criada tem que aparecer na listagem').toBeTruthy()
+    return linha
+  }
+
+  it('perda em KG: qtd_kg e a propria qtd (conversao no-op) e nada fica de fora', async () => {
+    // Prova que a correcao nao mexeu em quem ja estava certo: perda lancada
+    // em quilos vale exatamente o que valia antes desta versao.
+    const linha = await criarELer(umaPerda({ un: 'KG', qtd: 11, produto_id: produtoId }))
+    expect(linha.qtd).toBe(11)
+    expect(linha.qtd_kg).toBe(11)
+    expect(linha.itens_sem_conversao).toBe(0)
+  })
+
+  it('perda em CX com peso medio cadastrado: qtd_kg = qtd * peso_medio', async () => {
+    // 4 caixas de alface de 8 kg sao 32 kg, nunca "4".
+    const linha = await criarELer(umaPerda({ un: 'CX', qtd: 4, produto_id: produtoCxComPeso }))
+    expect(linha.qtd).toBe(4)
+    expect(linha.qtd_kg).toBe(32)
+    expect(linha.itens_sem_conversao).toBe(0)
+  })
+
+  it('perda em CX SEM peso medio: qtd_kg e null (fator ausente nunca vira 1) e e contada', async () => {
+    const linha = await criarELer(umaPerda({ un: 'CX', qtd: 4, produto_id: produtoCxSemPeso }))
+    expect(linha.qtd).toBe(4)
+    // Nem 4 (fator 1 inventado) nem 0 (perda que some fingindo nao ter havido
+    // perda): null e o unico valor honesto, e o contador diz que existiu.
+    expect(linha.qtd_kg).toBeNull()
+    expect(linha.itens_sem_conversao).toBe(1)
+  })
+
+  it('converte pela unidade da PERDA, nao pela do cadastro do produto', async () => {
+    // Produto cadastrado em CX (8 kg/caixa), mas a perda foi lancada em KG:
+    // 11 kg sao 11 kg — multiplicar por 8 aqui daria 88.
+    const linha = await criarELer(umaPerda({ un: 'KG', qtd: 11, produto_id: produtoCxComPeso }))
+    expect(linha.qtd_kg).toBe(11)
+    expect(linha.itens_sem_conversao).toBe(0)
+  })
+
+  it('mistura: cada linha converte pela unidade dela, e so a nao convertivel fica de fora', async () => {
+    const emKg = await criarELer(umaPerda({ un: 'KG', qtd: 11, produto_id: produtoId }))
+    const emCx = await criarELer(umaPerda({ un: 'CX', qtd: 4, produto_id: produtoCxComPeso }))
+    const semFator = await criarELer(umaPerda({ un: 'CX', qtd: 4, produto_id: produtoCxSemPeso }))
+
+    const somaKg = [emKg, emCx, semFator].reduce((s, p) => s + (p.qtd_kg ?? 0), 0)
+    const semConversao = [emKg, emCx, semFator].reduce((s, p) => s + p.itens_sem_conversao, 0)
+    // 11 + 32, e nao 11 + 4 + 4 = 19 (somar caixas com quilos) nem
+    // 11 + 32 + 4 = 47 (o nao convertivel entrando por um fator 1).
+    expect(somaKg).toBe(43)
+    expect(semConversao).toBe(1)
+  })
+
+  it('qtd_kg e itens_sem_conversao vem como number (numeric/int do Postgres chegam como string)', async () => {
+    const linha = await criarELer(umaPerda({ un: 'CX', qtd: 2.5, produto_id: produtoCxComPeso }))
+    expect(typeof linha.qtd_kg).toBe('number')
+    expect(typeof linha.itens_sem_conversao).toBe('number')
+    expect(linha.qtd_kg).toBe(20)
+  })
+
+  it('GET /:id, POST e PUT continuam devolvendo o registro cru, sem qtd_kg', async () => {
+    // Divisao deliberada, igual a de entradas.ts (paraJson x paraJsonLista):
+    // a verdade de UMA perda e a quantidade na unidade em que ela foi
+    // lancada — que e o que o formulario de edicao carrega e o que a tabela
+    // de Perdas mostra ("4 CX"). O quilo so aparece quando ela e SOMADA a
+    // outras, ou seja, na listagem.
+    const resPost = await pedir('/api/perdas', comoAdmin(json(
+      umaPerda({ un: 'CX', qtd: 4, produto_id: produtoCxComPeso }),
+    )))
+    const criado = await resPost.json()
+    expect(criado).not.toHaveProperty('qtd_kg')
+    expect(criado).not.toHaveProperty('itens_sem_conversao')
+    expect(criado.qtd).toBe(4)
+    expect(criado.un).toBe('CX')
+
+    const doId = await (await pedir(`/api/perdas/${criado.id}`, comoAdmin())).json()
+    expect(doId).not.toHaveProperty('qtd_kg')
+    expect(doId.qtd).toBe(4)
+
+    const atualizado = await (await pedir(`/api/perdas/${criado.id}`, comoAdmin(put({ qtd: 5 })))).json()
+    expect(atualizado).not.toHaveProperty('qtd_kg')
+    expect(atualizado.qtd).toBe(5)
+  })
+
+  it('a listagem nunca perde uma perda por causa da conversao — so a tira da soma', async () => {
+    // `left join produtos`, nao inner: a linha nao convertivel continua
+    // aparecendo na tela de Perdas (com "4 CX"), marcada; o que ela nao faz e
+    // entrar num total em quilos.
+    const linha = await criarELer(umaPerda({ un: 'DZ', qtd: 3, produto_id: produtoCxSemPeso }))
+    expect(linha.un).toBe('DZ')
+    expect(linha.qtd).toBe(3)
+    expect(linha.qtd_kg).toBeNull()
   })
 })

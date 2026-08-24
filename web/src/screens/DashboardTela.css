@@ -180,6 +180,33 @@
   white-space: nowrap;
 }
 
+/* O valor marcado: o asterisco basta como sinal, o `title` explica. O
+   pontilhado avisa que há explicação sem gritar, e a cor do número continua
+   sendo a do semáforo — a marca fala sobre a COMPLETUDE da conta, não sobre
+   o julgamento dela. Mesmo tratamento de .relatorios-incompleto e
+   .estoque-incompleto. */
+.dashboard-kpi-incompleto {
+  border-bottom: 1px dotted #c79320;
+  cursor: help;
+}
+
+/* Nota de rodapé do painel, do mesmo aviso: visível o bastante para ninguém
+   ler o indicador como número fechado, discreta o bastante para não competir
+   com os cartões. Mesmo âmbar de "atenção" usado nos indicadores. */
+.dashboard-kpis-nota {
+  margin-top: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #f6efd8;
+  color: #8a6a12;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.dashboard-kpis-nota strong {
+  color: #8a6a12;
+}
+
 /* ---------- secoes (carteira / cenarios) ---------- */
 
 .dashboard-secao {

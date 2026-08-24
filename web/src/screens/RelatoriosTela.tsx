@@ -139,6 +139,24 @@ const CONSEQ_METRICAS_PRODUTO =
   + 'quantidade incompleta.'
 const CONSEQ_PERDA_PRODUTO =
   'A quantidade comprada e a perda % desta linha estão calculadas sobre quantidade incompleta.'
+/**
+ * A aba Perdas precisa de duas consequências próprias porque nela o desvio
+ * tem direção — e direção oposta à das outras abas.
+ *
+ * Nas demais, o que fica de fora é PESO no denominador e o número sai para
+ * cima. Aqui o que fica de fora é a perda de depósito, que está no
+ * NUMERADOR: a perda total e as quantidades por motivo saem para baixo, ou
+ * seja, o relatório subestima o que se perdeu. Dizer só "está incompleto"
+ * deixaria o leitor supor a direção errada e se tranquilizar.
+ */
+const CONSEQ_PERDA_TOTAL =
+  'São perdas de depósito, e elas entram na SOMA da perda: a perda total e as '
+  + 'quantidades por motivo acima saem para baixo — o sistema está mostrando menos '
+  + 'perda do que houve.'
+const CONSEQ_PERDA_INDICE =
+  'O índice é uma fração e os dois lados dela podem ter perdido lançamentos — a perda '
+  + 'de depósito no numerador, o quilo comprado no denominador —, então nem a direção do '
+  + 'desvio é conhecida.'
 
 /** Frase final das notas de rodapé — a saída do problema, não só o aviso. */
 const CADASTRE_PESO_MEDIO = 'Cadastre o peso médio da embalagem em Produtos para que entrem na conta.'
@@ -404,9 +422,14 @@ export function RelatoriosTela({ onSessaoExpirada }: RelatoriosTelaProps) {
         // Igual ao protótipo: um único CSV com as duas tabelas da aba,
         // separadas por uma linha em branco e um sub-cabeçalho.
         return {
-          header: ['Motivo', 'Quantidade', 'Ocorrências', '% do total'],
+          header: ['Motivo', 'Quantidade (kg)', 'Ocorrências', '% do total'],
           rows: [
-            ...relPerdas.porMotivo.map(m => [m.motivo, qtd(m.qtd), m.ocorrencias, pctInt(m.pct)]),
+            // Mesmo asterisco da tela, na mesma célula: o CSV sai da mesma
+            // leitura, não de uma versão "limpa".
+            ...relPerdas.porMotivo.map(m => [
+              m.motivo, qtd(m.qtd) + (m.itensSemConversao > 0 ? '*' : ''),
+              m.ocorrencias, pctInt(m.pct),
+            ]),
             [],
             ['Produto', 'Qtd comprada (kg)', 'Perda %', ''],
             // Mesmo asterisco da tela: o CSV sai da mesma leitura, não de
@@ -788,8 +811,28 @@ function AbaPerdas({ dados }: { dados: ReturnType<typeof derivarRelatorioPerdas>
   return (
     <>
       <Cartoes itens={[
-        { label: 'Perda total', valor: qtd(totais.perdaTotalQtd), sub: 'somando coleta e depósito' },
-        { label: 'Índice de perdas', valor: pct1(totais.indicePerdaPct), sub: 'meta ≤ 10%' },
+        {
+          label: 'Perda total (kg)',
+          valor: (
+            <NumIncompleto
+              texto={qtd(totais.perdaTotalQtd)}
+              n={totais.itensSemConversaoPerdaTotal}
+              consequencia={CONSEQ_PERDA_TOTAL}
+            />
+          ),
+          sub: 'somando coleta e depósito',
+        },
+        {
+          label: 'Índice de perdas',
+          valor: (
+            <NumIncompleto
+              texto={pct1(totais.indicePerdaPct)}
+              n={totais.itensSemConversaoIndice}
+              consequencia={CONSEQ_PERDA_INDICE}
+            />
+          ),
+          sub: 'meta ≤ 10%',
+        },
         { label: 'Principal motivo', valor: totais.principalMotivo ?? '—', sub: totais.principalMotivoPct != null ? `${pctInt(totais.principalMotivoPct)} do total` : 'sem perdas' },
         { label: 'Perdas no depósito', valor: String(totais.perdasNoDeposito), sub: 'lançamentos avulsos' },
       ]}
@@ -797,13 +840,20 @@ function AbaPerdas({ dados }: { dados: ReturnType<typeof derivarRelatorioPerdas>
       <div className="relatorios-duas-colunas">
         <div className="relatorios-painel">
           <h3 className="relatorios-painel-titulo">Perdas por motivo</h3>
-          <div className="relatorios-painel-sub">Onde a mercadoria está se perdendo.</div>
+          <div className="relatorios-painel-sub">Onde a mercadoria está se perdendo, em quilos.</div>
           {porMotivo.map(m => (
             <div key={m.motivo} className="relatorios-motivo-linha">
               <div className="relatorios-motivo-cabecalho">
                 <div className="relatorios-motivo-nome">{m.motivo}</div>
                 <div className="relatorios-suave">{m.ocorrencias} ocorr.</div>
-                <div className="relatorios-mono relatorios-forte" style={{ color: '#9a4a2e' }}>{qtd(m.qtd)}</div>
+                {/* A quantidade soma perda de coleta (kg por contrato) com
+                    perda de depósito convertida pela unidade dela; uma perda
+                    não convertível fica fora e marca só ESTE motivo. O nº de
+                    ocorrências continua fechado — a perda aconteceu, o que
+                    falta é o peso dela —, por isso ele não leva marca. */}
+                <div className="relatorios-mono relatorios-forte" style={{ color: '#9a4a2e' }}>
+                  <NumIncompleto texto={qtd(m.qtd)} n={m.itensSemConversao} consequencia={CONSEQ_PERDA_TOTAL} />
+                </div>
                 <div className="relatorios-mono relatorios-suave relatorios-motivo-pct">{pctInt(m.pct)}</div>
               </div>
               <div className="relatorios-barra-fundo">
@@ -839,9 +889,17 @@ function AbaPerdas({ dados }: { dados: ReturnType<typeof derivarRelatorioPerdas>
         </div>
       </div>
       <div className="relatorios-nota">
-        Soma a perda registrada na <strong>coleta</strong> (dentro de cada entrada) com as perdas lançadas no <strong>depósito</strong>.
+        Soma a perda registrada na <strong>coleta</strong> (dentro de cada entrada) com as perdas lançadas no{' '}
+        <strong>depósito</strong>, sempre em <strong>quilos</strong>: a perda de coleta já é lançada em kg,
+        e a de depósito é convertida pelo peso médio da embalagem quando foi lançada em caixas.
       </div>
-      <NotaSemConversao n={totais.itensSemConversao} consequencia={CONSEQ_PERDA_PRODUTO} />
+      {/* Duas notas, e não uma: os dois painéis desta aba saem de rotas
+          diferentes (perdas + entradas de um lado, o agregado por produto do
+          outro) e podem estar incompletos por lançamentos diferentes. Uma
+          nota só somaria contadores sem relação e apontaria para números que
+          estão fechados. */}
+      <NotaSemConversao n={totais.itensSemConversaoIndice} consequencia={CONSEQ_PERDA_TOTAL} />
+      <NotaSemConversao n={totais.itensSemConversaoProduto} consequencia={CONSEQ_PERDA_PRODUTO} />
     </>
   )
 }

@@ -31,6 +31,19 @@ const entrada = (over: Partial<Entrada> = {}): Entrada => ({
   perda_kg: 0, valor_total: 0, peso_total: 0, ...over,
 })
 
+/** Como GET /api/perdas devolve: `qtd` na unidade da propria perda e `qtd_kg`
+ * a mesma perda em quilos (null quando o produto nao tem peso medio). Passa
+ * por uma variavel porque `Perda` nao declara `qtd` de proposito — ver o
+ * comentario do tipo em derive/dashboard.ts. */
+function perdaDaApi(campos: { un: string; qtd: number; qtd_kg: number | null }): Perda {
+  const daApi = {
+    data: '2026-06-19', produto_id: 'p1', motivo: 'vencimento',
+    un: campos.un, qtd: campos.qtd, qtd_kg: campos.qtd_kg,
+    itens_sem_conversao: campos.qtd_kg === null ? 1 : 0,
+  }
+  return daApi
+}
+
 const lancamento = (over: Partial<Lancamento> = {}): Lancamento => ({
   id: 'l1', data: '2026-06-10', categoria: 'Frete', descricao: '', valor: 0, funcionario_id: null, ...over,
 } as Lancamento)
@@ -207,6 +220,71 @@ describe('DashboardTela — KPI bate a meta / fora da meta', () => {
     const card = cartao('Índice de perdas (%)')
     expect(within(card).getByText('20,0%')).toBeInTheDocument()
     expect(within(card).getByText('fora da meta')).toBeInTheDocument()
+  })
+
+  it('perda de deposito em CX entra no indice pelos quilos, nao pelas caixas', async () => {
+    mockApiPara({
+      clientes: [cliente()],
+      saidas: [saida({ valor: 1000 })],
+      entradas: [entrada({ valor_total: 500, peso_total: 1000, perda_kg: 50 })],
+      // 4 caixas de alface de 8 kg = 32 kg. Somar `qtd` cru daria 5,4%.
+      perdas: [perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: 32 })],
+    })
+    render(<DashboardTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    const card = cartao('Índice de perdas (%)')
+    expect(within(card).getByText('8,2%')).toBeInTheDocument()
+    // Numero completo sai LIMPO: sem asterisco no cartao e sem nota no painel.
+    expect(within(card).queryByText('8,2%*')).not.toBeInTheDocument()
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
+  it('perda sem peso medio: o indice sai marcado com * e o painel ganha a nota de rodape', async () => {
+    mockApiPara({
+      clientes: [cliente()],
+      saidas: [saida({ valor: 1000 })],
+      entradas: [entrada({ valor_total: 500, peso_total: 1000, perda_kg: 50 })],
+      perdas: [perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: null })],
+    })
+    render(<DashboardTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    const card = cartao('Índice de perdas (%)')
+    const valor = within(card).getByText('5,0%*')
+    expect(valor).toHaveAttribute('title', expect.stringContaining('1 lançamento'))
+    expect(valor).toHaveAttribute('title', expect.stringContaining('quantidade incompleta'))
+    // O semaforo NAO muda: 5% continua batendo a meta de <=10%. A marca fala
+    // da completude da conta, nao do julgamento dela.
+    expect(within(card).getByText('na meta')).toBeInTheDocument()
+
+    const nota = screen.getByRole('note')
+    expect(nota).toHaveTextContent('Cadastre o peso médio da embalagem em Produtos')
+  })
+
+  it('so o indicador afetado ganha a marca — os outros cartoes saem limpos', async () => {
+    mockApiPara({
+      clientes: [cliente()],
+      saidas: [saida({ valor: 1000 })],
+      entradas: [entrada({ valor_total: 500, peso_total: 1000, perda_kg: 50 })],
+      perdas: [perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: null })],
+    })
+    render(<DashboardTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    expect(within(cartao('Ticket médio por entrega')).getByText('R$ 1.000')).toBeInTheDocument()
+    expect(within(cartao('Ticket médio por entrega')).queryByText('R$ 1.000*')).not.toBeInTheDocument()
+    expect(within(cartao('Nº de minimercados ativos')).getByText('1')).toBeInTheDocument()
+  })
+
+  it('item de entrada sem peso medio marca o indice pelo DENOMINADOR (kg recebido curto)', async () => {
+    mockApiPara({
+      clientes: [cliente()],
+      saidas: [saida({ valor: 1000 })],
+      entradas: [entrada({ valor_total: 500, peso_total: 1000, perda_kg: 50, itens_sem_conversao: 2 })],
+      perdas: [],
+    })
+    render(<DashboardTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    const card = cartao('Índice de perdas (%)')
+    expect(within(card).getByText('5,0%*')).toHaveAttribute('title', expect.stringContaining('2 lançamentos'))
   })
 
   it('ticket medio por entrega bate a meta (>=R$430)', async () => {

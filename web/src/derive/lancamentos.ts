@@ -15,8 +15,17 @@ export interface Lancamento {
  * campo). Duplicada aqui de propósito: é uma regra de UI (que campo exibir),
  * diferente da lista fechada de categorias em si, que nunca é hardcoded no
  * front — sempre vem de `GET /api/lancamentos/categorias`.
+ *
+ * As duas categorias também são exportadas nomeadamente
+ * (CATEGORIA_SALARIO / CATEGORIA_ADIANTAMENTO) porque quem conta dinheiro
+ * por funcionário (derive/funcionarios.ts) precisa distinguir uma da outra
+ * — o Set diz "aceita funcionário", não diz qual é qual. É a mesma fonte: o
+ * Set é montado a partir delas, então não há como uma divergir da outra.
  */
-export const CATEGORIAS_COM_FUNCIONARIO = new Set(['Salário', 'Adiantamento de salário'])
+export const CATEGORIA_SALARIO = 'Salário'
+export const CATEGORIA_ADIANTAMENTO = 'Adiantamento de salário'
+
+export const CATEGORIAS_COM_FUNCIONARIO = new Set([CATEGORIA_SALARIO, CATEGORIA_ADIANTAMENTO])
 
 /**
  * Valores iniciais ao criar um lançamento novo, exceto `data` e `categoria`:

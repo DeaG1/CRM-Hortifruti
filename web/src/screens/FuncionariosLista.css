@@ -13,19 +13,59 @@
   max-width: 1180px;
 }
 
+/* ---------- aviso de falha isolada (folha indisponivel) ---------- */
+
+.funcionarios-aviso-folha {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  background: #f6efd8;
+  border: 1px solid #e5d6a8;
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: #7a6118;
+}
+
 /* ---------- topo ---------- */
 
 .funcionarios-topo {
   display: flex;
   align-items: center;
   gap: 10px;
+  row-gap: 10px;
+  flex-wrap: wrap;
   margin-bottom: 16px;
 }
 
 .funcionarios-dica {
-  flex: 1;
+  flex: 1 1 260px;
   font-size: 12.5px;
   color: #8a8775;
+}
+
+.funcionarios-periodo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 9px;
+  padding: 5px 10px 5px 13px;
+}
+
+.funcionarios-periodo-rotulo {
+  font-size: 12px;
+  color: #8a8775;
+}
+
+.funcionarios-periodo-select {
+  border: none;
+  background: transparent;
+  font-weight: 700;
+  font-size: 13px;
+  color: #2a2a24;
+  font-family: 'Public Sans', sans-serif;
+  cursor: pointer;
+  outline: none;
 }
 
 .funcionarios-botao-novo {
@@ -51,6 +91,41 @@
 .funcionarios-botao-novo-icone {
   font-size: 16px;
   line-height: 1;
+}
+
+/* ---------- cartoes ---------- */
+
+.funcionarios-cartoes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.funcionarios-cartao {
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 13px;
+  padding: 15px 17px;
+}
+
+.funcionarios-cartao-label {
+  font-size: 12px;
+  color: #8a8775;
+  font-weight: 600;
+}
+
+.funcionarios-cartao-valor {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 23px;
+  color: #21331f;
+  margin-top: 6px;
+}
+
+.funcionarios-cartao-sub {
+  font-size: 11.5px;
+  color: #9a9784;
 }
 
 /* ---------- vazio ---------- */
@@ -86,44 +161,62 @@
 }
 
 .funcionarios-linha {
-  display: grid;
-  grid-template-columns: 1.6fr 1.2fr 1fr 0.9fr 1.3fr;
-  gap: 8px;
-  align-items: center;
-}
-
-.funcionarios-linha--cabecalho {
-  padding: 12px 18px;
-  background: #f3f0e6;
-  border-bottom: 1px solid #e6e2d4;
-  font-size: 11px;
-  font-weight: 700;
-  color: #7c7a6a;
-  letter-spacing: 0.3px;
-}
-
-.funcionarios-linha--dados {
-  padding: 13px 18px;
   border-bottom: 1px solid #f1eee2;
-  font-size: 13px;
-  cursor: pointer;
 }
 
-.funcionarios-linha--dados:last-child {
+.funcionarios-linha:last-child {
   border-bottom: none;
 }
 
-.funcionarios-linha--dados:hover {
+.funcionarios-linha--aberta {
   background: #faf8f0;
 }
 
-.funcionarios-col-num {
-  text-align: right;
+.funcionarios-cabecalho {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  row-gap: 10px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
 }
 
-.funcionarios-mono {
-  font-family: 'IBM Plex Mono', monospace;
-  color: #2a2a24;
+.funcionarios-toggle {
+  flex: 1 1 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  min-width: 0;
+}
+
+.funcionarios-toggle:hover .funcionarios-nome {
+  color: #3f6b2f;
+}
+
+.funcionarios-identificacao {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  row-gap: 10px;
+  flex-wrap: wrap;
+}
+
+.funcionarios-seta {
+  color: #9a9784;
+  font-size: 12px;
+  flex: 0 0 10px;
+}
+
+.funcionarios-nome-bloco {
+  flex: 1 1 180px;
+  min-width: 0;
 }
 
 .funcionarios-celula-nome {
@@ -136,6 +229,7 @@
 .funcionarios-nome {
   font-family: 'Archivo', sans-serif;
   font-weight: 700;
+  font-size: 15.5px;
   color: #21331f;
   white-space: nowrap;
   overflow: hidden;
@@ -143,7 +237,8 @@
 }
 
 .funcionarios-cargo {
-  color: #5a584a;
+  font-size: 12px;
+  color: #8a8775;
 }
 
 .funcionarios-inativo-badge {
@@ -157,16 +252,248 @@
 }
 
 .funcionarios-proximo {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  text-align: right;
+  margin-left: auto;
 }
 
 .funcionarios-status-badge {
   font-size: 11px;
   font-weight: 700;
-  padding: 4px 10px;
+  padding: 5px 11px;
   border-radius: 14px;
   white-space: nowrap;
+}
+
+/* ---------- as quatro colunas de dinheiro ---------- */
+
+.funcionarios-numeros {
+  display: flex;
+  gap: 26px;
+  row-gap: 12px;
+  flex-wrap: wrap;
+  padding-left: 24px;
+}
+
+.funcionarios-rotulo {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #9a9784;
+  letter-spacing: 0.3px;
+}
+
+.funcionarios-mono {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  color: #2a2a24;
+  margin-top: 1px;
+}
+
+.funcionarios-mono--adiantado {
+  color: #9a4a2e;
+}
+
+.funcionarios-mono--pago {
+  color: #5a584a;
+}
+
+.funcionarios-numero--apagar {
+  padding-left: 26px;
+  border-left: 1px solid #eee9da;
+}
+
+.funcionarios-apagar {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* ---------- acoes ---------- */
+
+.funcionarios-acoes {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.funcionarios-quitado {
+  font-size: 11px;
+  color: #9db088;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.funcionarios-botao-pagar {
+  background: #2f5d3f;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.funcionarios-botao-pagar:hover {
+  background: #254a32;
+}
+
+.funcionarios-botao-adiantar {
+  background: #fff;
+  color: #a96b3a;
+  border: 1px solid #e0c9b4;
+  border-radius: 8px;
+  padding: 8px 13px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  white-space: nowrap;
+}
+
+.funcionarios-botao-adiantar:hover {
+  background: #f6efe4;
+}
+
+.funcionarios-botao-editar {
+  background: #fff;
+  color: #4a4838;
+  border: 1px solid #d8d3c2;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  white-space: nowrap;
+}
+
+.funcionarios-botao-editar:hover {
+  background: #f3f0e6;
+}
+
+/* ---------- linha expandida ---------- */
+
+.funcionarios-detalhe {
+  padding: 0 20px 18px 24px;
+  background: #faf8f0;
+}
+
+.funcionarios-detalhe-resumo {
+  display: flex;
+  gap: 22px;
+  row-gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 11px 14px;
+  background: #fff;
+  border: 1px solid #eee9da;
+  border-radius: 9px;
+}
+
+.funcionarios-detalhe-resumo .funcionarios-mono {
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.funcionarios-detalhe-divisor {
+  width: 1px;
+  background: #eee9da;
+}
+
+.funcionarios-excedente {
+  margin: 0 0 12px;
+  padding: 9px 13px;
+  background: #f6efe4;
+  border: 1px solid #e0c9b4;
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: #8a5a2a;
+}
+
+.funcionarios-historico-titulo {
+  font-size: 11px;
+  font-weight: 700;
+  color: #7c7a6a;
+  letter-spacing: 0.3px;
+  margin-bottom: 8px;
+}
+
+.funcionarios-historico-vazio {
+  background: #fff;
+  border: 1px dashed #ddd8c6;
+  border-radius: 9px;
+  padding: 14px;
+  font-size: 12.5px;
+  color: #9a9784;
+  text-align: center;
+}
+
+.funcionarios-lancamento {
+  display: grid;
+  grid-template-columns: 0.55fr 1.2fr 1.8fr 0.7fr;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  background: #fff;
+  border: 1px solid #eee9da;
+  border-radius: 9px;
+  padding: 9px 13px;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.funcionarios-lancamento:hover {
+  border-color: #c3d3a8;
+}
+
+.funcionarios-lancamento .funcionarios-mono {
+  font-size: 12.5px;
+  color: #5a584a;
+  margin-top: 0;
+}
+
+.funcionarios-categoria-badge {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 14px;
+  white-space: nowrap;
+}
+
+.funcionarios-lancamento-descricao {
+  color: #5a584a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.funcionarios-lancamento-valor {
+  text-align: right;
+  font-weight: 600;
+  color: #9a4a2e;
+}
+
+/* ---------- nota de rodape ---------- */
+
+.funcionarios-nota {
+  font-size: 12px;
+  color: #8a8775;
+  margin-top: 12px;
+}
+
+.funcionarios-nota strong {
+  color: #2a2a24;
+}
+
+@media (max-width: 900px) {
+  .funcionarios-cartoes {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }

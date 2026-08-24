@@ -4,6 +4,7 @@ import {
   calcularResultado,
   calcularCicloCaixa,
   periodoDe,
+  rotuloPeriodo,
   type SaidaFin,
   type EntradaFin,
   type Resultado,
@@ -35,19 +36,6 @@ const NEUTRO = '#6a685c'
 const CORES_SEMAFORO: Record<Health, string> = { green: GREEN, amber: AMBER, red: RED }
 
 const money = (n: number) => 'R$ ' + Math.round(n).toLocaleString('pt-BR')
-
-const MESES = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
-]
-
-/** 'AAAA-MM' -> 'Junho/2026'. 'all' -> 'Todo o período'. */
-function rotuloPeriodo(periodo: string): string {
-  if (periodo === 'all') return 'Todo o período'
-  const [ano, mes] = periodo.split('-')
-  const nome = MESES[Number(mes) - 1] ?? mes
-  return `${nome}/${ano}`
-}
 
 /** Meses (AAAA-MM) com pelo menos um dado (venda, compra ou lançamento),
  * mais recente primeiro — só oferece no seletor um período que existe. */

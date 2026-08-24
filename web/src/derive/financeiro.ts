@@ -103,6 +103,25 @@ export function periodoDe(iso: string | null | undefined): string {
   return typeof iso === 'string' && DATA_RE.test(iso) ? iso.slice(0, 7) : ''
 }
 
+const MESES = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+]
+
+/**
+ * 'AAAA-MM' -> 'Junho/2026'. 'all' -> 'Todo o período'. Mora aqui, junto de
+ * `periodoDe`, porque é o rótulo DAQUELA convenção de período: quem escreve
+ * um seletor de período novo (FinanceiroTela, FuncionariosLista) usa os
+ * dois juntos, e duas cópias do rótulo dariam duas grafias do mesmo mês em
+ * telas vizinhas.
+ */
+export function rotuloPeriodo(periodo: string): string {
+  if (periodo === 'all') return 'Todo o período'
+  const [ano, mes] = periodo.split('-')
+  const nome = MESES[Number(mes) - 1] ?? mes
+  return `${nome}/${ano}`
+}
+
 function noPeriodo<T>(itens: T[], periodo: string, dataDe: (item: T) => string | null): T[] {
   if (periodo === 'all') return itens
   return itens.filter(item => periodoDe(dataDe(item)) === periodo)

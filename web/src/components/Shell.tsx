@@ -25,7 +25,7 @@ const TITULOS: Record<Tela, [string, string]> = {
   estoque: ['Estoque', 'Quantidade por produto'],
   fornecedores: ['Fornecedores', 'Produtores rurais'],
   produtos: ['Produtos', 'Preço, margem e perda'],
-  funcionarios: ['Funcionários', 'Salários e adiantamentos'],
+  funcionarios: ['Funcionários', 'Salários, adiantamentos e valores a pagar'],
   veiculos: ['Veículos', 'Quem pegou qual carro'],
   financeiro: ['Financeiro', 'Resultado e ciclo de caixa'],
   relatorios: ['Relatórios', 'Clientes, pedidos e lançamentos do período'],

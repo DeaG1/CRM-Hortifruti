@@ -74,6 +74,21 @@ export function respostaDeErroPg(err: unknown): { corpo: { erro: string }; statu
       ?? 'dado invalido para um dos campos'
     return { corpo: { erro: mensagem }, status: 400 }
   }
+  // 23503 = violacao de chave estrangeira. Acontece ao tentar apagar produto
+  // que ja aparece em entrada, venda ou perda — as tres FKs sao ON DELETE
+  // RESTRICT, de proposito: apagar o produto orfanaria o historico e as somas
+  // de estoque e preco medio passariam a ignorar movimentacao que existiu.
+  //
+  // Sem este mapeamento o erro caia no onError generico e o usuario lia
+  // "erro interno", sem saber o que fez de errado nem o que fazer. O bloqueio
+  // esta certo; a mensagem e que precisa dizer o caminho — desativar em vez
+  // de excluir preserva o historico e tira o produto dos seletores.
+  if (e.code === '23503') {
+    return {
+      corpo: { erro: 'este produto ja tem movimentacao registrada e nao pode ser excluido' },
+      status: 409,
+    }
+  }
   return null
 }
 
@@ -172,7 +187,16 @@ produtos.put('/:id', async (c) => {
 produtos.delete('/:id', async (c) => {
   const id = c.req.param('id')
   if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
-  const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
-    tx`delete from produtos where id = ${id} returning id`)
-  return linhas.length ? c.json({ ok: true }) : c.json({ erro: 'nao encontrado' }, 404)
+  try {
+    const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
+      tx`delete from produtos where id = ${id} returning id`)
+    return linhas.length ? c.json({ ok: true }) : c.json({ erro: 'nao encontrado' }, 404)
+  } catch (err) {
+    // Produto com movimentacao dispara 23503 (as FKs de entrada_itens,
+    // saida_itens e perdas sao RESTRICT). Sem este try/catch o erro subia
+    // para o onError e o usuario lia "erro interno".
+    const resposta = respostaDeErroPg(err)
+    if (resposta) return c.json(resposta.corpo, resposta.status)
+    throw err
+  }
 })

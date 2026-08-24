@@ -52,6 +52,17 @@ beforeAll(async () => {
   tenantId = t.id
   outroTenantId = t2.id
 
+  // Limpa na ordem das dependencias: as FKs para produtos sao RESTRICT, entao
+  // um produto que ficou com movimentacao (por um teste interrompido, por
+  // exemplo) travaria o delete e derrubaria a suite inteira no setup — com uma
+  // mensagem de FK que nao aponta para a causa. Apagar o que referencia antes
+  // torna o setup resiliente a lixo de execucoes anteriores.
+  await admin`delete from entrada_itens where tenant_id in (${tenantId}, ${outroTenantId})`
+  await admin`delete from entradas     where tenant_id in (${tenantId}, ${outroTenantId})`
+  await admin`delete from saida_itens  where tenant_id in (${tenantId}, ${outroTenantId})`
+  await admin`delete from saidas       where tenant_id in (${tenantId}, ${outroTenantId})`
+  await admin`delete from perdas       where tenant_id in (${tenantId}, ${outroTenantId})`
+  await admin`delete from fornecedores where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from produtos where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from usuarios where tenant_id in (${tenantId}, ${outroTenantId})`
 
@@ -423,5 +434,52 @@ describe('codigos de status dos handlers', () => {
       expect(res.headers.get('content-type')).toMatch(/application\/json/)
       expect(await res.json()).toEqual({ erro: 'id invalido' })
     }
+  })
+})
+
+describe('excluir produto com movimentacao', () => {
+  // As FKs de entrada_itens, saida_itens e perdas para produtos sao RESTRICT
+  // de proposito: apagar um produto ja movimentado orfanaria o historico, e as
+  // somas de estoque e de preco medio passariam a ignorar movimentacao que de
+  // fato existiu. O bloqueio esta certo — o que faltava era a mensagem dizer o
+  // caminho (desativar em vez de excluir) em vez de "erro interno".
+  it('devolve 409 com mensagem util, nao 500 generico', async () => {
+    const [produto] = await admin`
+      insert into produtos (tenant_id, nome, un) values (${tenantId}, 'Batata Movimentada', 'KG')
+      returning id`
+    const [forn] = await admin`
+      insert into fornecedores (tenant_id, nome) values (${tenantId}, 'Sitio do Teste Delete')
+      returning id`
+    const [entrada] = await admin`
+      insert into entradas (tenant_id, numero, fornecedor_id, data)
+      values (${tenantId}, 'E-MOV-DEL', ${forn.id}, current_date) returning id`
+    await admin`
+      insert into entrada_itens (tenant_id, entrada_id, produto_id, un, qtd, preco)
+      values (${tenantId}, ${entrada.id}, ${produto.id}, 'KG', 100, 2.5)`
+
+    const res = await pedir(`/api/produtos/${produto.id}`, { ...comoAdmin(), method: 'DELETE' })
+
+    expect(res.status).toBe(409)
+    const corpo = await res.json() as { erro: string }
+    expect(corpo.erro).toMatch(/movimenta/i)
+
+    // O produto continua la: o bloqueio protege o historico de verdade, nao
+    // so devolve mensagem diferente.
+    const ainda = await admin`select id from produtos where id = ${produto.id}`
+    expect(ainda).toHaveLength(1)
+
+    await admin`delete from entradas where id = ${entrada.id}`
+    await admin`delete from produtos where id = ${produto.id}`
+    await admin`delete from fornecedores where id = ${forn.id}`
+  })
+
+  it('produto sem movimentacao continua podendo ser excluido', async () => {
+    const [produto] = await admin`
+      insert into produtos (tenant_id, nome, un) values (${tenantId}, 'Nunca Movimentado', 'KG')
+      returning id`
+
+    const res = await pedir(`/api/produtos/${produto.id}`, { ...comoAdmin(), method: 'DELETE' })
+
+    expect(res.status).toBe(200)
   })
 })

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { api, ErroApi } from '../api/client'
 import type { Cliente } from '../derive/clientes'
+import { avisoLimiteCredito } from '../derive/pagamento'
 import './ModalSaida.css'
 
 export type StatusSaida = 'Pendente' | 'Em rota' | 'Entregue' | 'Cancelado' | 'Devolvido'
@@ -44,6 +45,21 @@ interface Produto {
   nome: string
   un: string
   peso_medio: number
+}
+
+/** Cabecalho de uma saida (venda) como GET /api/saidas (listagem) devolve —
+ * mesmo raciocinio de `SaidaBruta` em screens/ClientesLista.tsx: um tipo
+ * raso por consumidor, so com os campos que o calculo do aviso de limite
+ * de credito usa. Nao reaproveita `Saida` (acima) de proposito: la
+ * `valor` e opcional (`GET /:id`, usado no modo edicao, nao garante
+ * agregado), aqui a listagem sempre traz `valor` — reaproveitar criaria um
+ * campo obrigatorio que o tipo de origem nao garante. */
+interface SaidaResumo {
+  id: string
+  cliente_id: string | null
+  pag: PagSaida
+  venc: string | null
+  valor: number
 }
 
 /**
@@ -103,6 +119,16 @@ function linhaNova(): ItemLinha {
 const money = (n: number) =>
   'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+/** AAAA-MM-DD de hoje, no fuso local — mesmo padrão de `hojeIso()`
+ * (ModalLancamento.tsx) / `hojeIsoLocal()` (SaidasLista.tsx e outras
+ * telas). Fica aqui (não em derive/pagamento.ts) porque toca `new Date()`:
+ * a função pura (`avisoLimiteCredito`) recebe isso como parâmetro, pra
+ * continuar testável sem mockar relógio. */
+function hojeIso(): string {
+  const d = new Date()
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+}
+
 interface ModalSaidaProps {
   /** null = criando uma saida nova. String = editando — usado para buscar o
    * cabecalho COM itens (GET /:id; a listagem so traz totais agregados). */
@@ -121,6 +147,12 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
   const [itens, setItens] = useState<ItemLinha[]>([])
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [produtos, setProdutos] = useState<Produto[]>([])
+  const [saidasAnteriores, setSaidasAnteriores] = useState<SaidaResumo[]>([])
+  // Separado de `saidasAnteriores.length > 0`: um cliente sem NENHUMA venda
+  // anterior tambem produz array vazio, e isso e uma informacao valida
+  // ("em aberto = 0", nao "nao sei"). So esta flag distingue "carregou e
+  // nao tem nada" de "nao carregou" — ver o calculo de `aviso` abaixo.
+  const [saidasAnterioresCarregadas, setSaidasAnterioresCarregadas] = useState(false)
 
   const [carregando, setCarregando] = useState(editando)
   const [erroDetalhe, setErroDetalhe] = useState('')
@@ -153,6 +185,31 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
         // seletores ficam vazios — mensagem honesta em vez de um formulario
         // silenciosamente quebrado. Ver observacao no relatorio final.
         setErroOpcoes('Não foi possível carregar clientes e produtos para os seletores.')
+      })
+    return () => { cancelado = true }
+  }, [onSessaoExpirada])
+
+  // Vendas anteriores (GET /api/saidas) — usadas SO pra calcular o aviso de
+  // limite de credito (ver avisoLimiteCredito, derive/pagamento.ts, e o
+  // calculo de `aviso` abaixo). Busca separada da acima, e falha SOZINHA —
+  // mesmo padrao de isolacao de ClientesLista.tsx (GET /api/saidas la
+  // tambem tem seu proprio catch, independente de /api/clientes): se este
+  // fetch cair, o modal continua TOTALMENTE funcional pra lancar/editar a
+  // venda, so o aviso de limite fica indisponivel. Sem mensagem de erro de
+  // proposito — o aviso e um extra informativo, entao a falha dele some em
+  // silencio, nunca bloqueia nem exige atencao do usuario.
+  useEffect(() => {
+    let cancelado = false
+    api.get<SaidaResumo[]>('/api/saidas')
+      .then(ss => { if (!cancelado) { setSaidasAnteriores(ss); setSaidasAnterioresCarregadas(true) } })
+      .catch((err: unknown) => {
+        if (cancelado) return
+        if (err instanceof ErroApi && err.status === 401) { onSessaoExpirada?.(); return }
+        // `saidasAnterioresCarregadas` fica false — o aviso de limite fica
+        // suprimido (ver `aviso` abaixo), nunca calculado com dado parcial:
+        // um "em aberto" de R$ 0,00 por falha de rede pareceria dado real
+        // e podia mostrar um excedente menor do que o de verdade (ou nenhum
+        // aviso quando deveria haver um) — pior que nao mostrar nada.
       })
     return () => { cancelado = true }
   }, [onSessaoExpirada])
@@ -221,6 +278,15 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
   }
 
   const total = itens.reduce((soma, it) => soma + (Number(it.qtd) || 0) * (Number(it.preco) || 0), 0)
+
+  // Aviso de limite de credito (NUNCA bloqueia — ver avisoLimiteCredito).
+  // `saidaId` como `ignorarId`: ao editar, `saidasAnteriores` ja contem a
+  // versao gravada desta mesma saida — sem excluir ela, o valor entraria
+  // duas vezes (a versao antiga dentro de "em aberto" e a versao atual
+  // dentro de `total`). Em criacao `saidaId` e null, entao nada e excluido.
+  const aviso = clienteSelecionado && saidasAnterioresCarregadas
+    ? avisoLimiteCredito(clienteSelecionado.limite, saidasAnteriores, clienteSelecionado.id, total, hojeIso(), saidaId)
+    : null
 
   async function salvar(e: FormEvent) {
     e.preventDefault()
@@ -379,6 +445,20 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
                     <option value="">Selecione…</option>
                     {clientes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
                   </select>
+                  {/* Aviso, nunca bloqueio (decisao do dono do produto): a
+                      venda sempre pode ser salva estourando o limite — quem
+                      esta no balcao as vezes precisa vender pra um cliente
+                      estourado, e travar viraria ligacao pra destravar. Por
+                      isso role="status" (anuncia sem interromper o leitor de
+                      tela, diferente de role="alert") e nao ha `disabled` no
+                      botao de salvar nem confirmacao extra em lugar nenhum. */}
+                  {aviso && (
+                    <p className="modal-aviso-limite" role="status">
+                      Limite de crédito de {money(aviso.limite)}: cliente já deve {money(aviso.emAberto)} em
+                      aberto e esta venda soma {money(aviso.estaVenda)} — ultrapassa o limite
+                      em {money(aviso.excedente)}.
+                    </p>
+                  )}
                 </div>
 
                 <div className="modal-campo">

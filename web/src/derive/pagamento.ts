@@ -85,3 +85,105 @@ export function valorSelecionavelPagamento(situacaoExibida: string): SituacaoPag
 export function rotuloOpcaoPendente(situacaoExibida: string): string {
   return situacaoExibida === 'Atrasado' ? 'Atrasado' : 'Pendente'
 }
+
+/** Formato raso de uma saida (venda) usado só pelas duas funções abaixo —
+ * mesmo padrão de tipo "por consumidor" que `SaidaBruta`
+ * (screens/ClientesLista.tsx) e `SaidaFin` (derive/financeiro.ts): só os
+ * campos de que o cálculo de limite de crédito precisa, não o tipo cheio
+ * de ModalSaida.tsx. */
+export interface SaidaParaLimite {
+  id: string
+  cliente_id: string | null
+  pag: string
+  venc: string | null | undefined
+  valor: number
+}
+
+/**
+ * Soma o valor das saídas de um cliente que ainda NÃO estão pagas — usa
+ * `situacaoExibidaSaida` (não o `pag` gravado cru) pra decidir "paga" ou
+ * não, mesma regra que `inadimplenciaPorCliente` (derive/clientes.ts) usa
+ * pra atraso: filtrar por `pag === 'Pago'` na mão já causou defeito neste
+ * projeto (a inadimplência ficava cega a atrasos calculados, não
+ * gravados), e o mesmo bug se repetiria aqui.
+ *
+ * '—' ("não aplicável", típico de pedido cancelado/devolvido — ver
+ * comentário em SaidasLista.tsx) fica de fora da soma de propósito: não é
+ * "ainda não paga", é "pagamento não se aplica" — não representa dívida
+ * nenhuma, e somar contaria pedido cancelado como se o cliente devesse
+ * por ele.
+ *
+ * `ignorarId`, quando informado, exclui essa saída específica da soma —
+ * usado ao EDITAR uma saída existente: a lista buscada de GET /api/saidas
+ * já contém a versão GRAVADA (antiga) dessa mesma venda, e o valor
+ * atualizado dela (ainda não salvo) é somado por fora, pelo chamador
+ * (`avisoLimiteCredito`, abaixo, via seu parâmetro `estaVenda`). Sem
+ * excluir aqui, o valor entraria duas vezes.
+ */
+export function valorEmAbertoCliente(
+  saidas: SaidaParaLimite[],
+  clienteId: string,
+  hojeIso: string,
+  ignorarId?: string | null,
+): number {
+  return saidas
+    .filter(s => s.cliente_id === clienteId && s.id !== ignorarId)
+    .filter(s => {
+      const situacao = situacaoExibidaSaida(s.pag, s.venc, hojeIso)
+      return situacao !== 'Pago' && situacao !== '—'
+    })
+    .reduce((soma, s) => soma + (s.valor || 0), 0)
+}
+
+/** Números concretos do aviso de limite de crédito — ver `avisoLimiteCredito`. */
+export interface AvisoLimiteCredito {
+  /** Limite de crédito cadastrado do cliente. */
+  limite: number
+  /** Soma das saídas do cliente ainda não pagas (`valorEmAbertoCliente`),
+   * sem contar a venda sendo lançada/editada agora. */
+  emAberto: number
+  /** Total desta venda — os itens do formulário, ainda não salvos. */
+  estaVenda: number
+  /** Quanto `emAberto + estaVenda` passa de `limite`. Sempre > 0 quando o
+   * aviso existe: a função devolve `null` em vez de um excedente <= 0. */
+  excedente: number
+}
+
+/**
+ * Decide se avisa que uma venda, somada ao que o cliente já deve, passa do
+ * limite de crédito cadastrado — e devolve os números concretos pra exibir
+ * (quanto já deve, quanto a venda soma, quanto passa do limite).
+ *
+ * DECISÃO DO DONO DO PRODUTO: isto é um AVISO, nunca um bloqueio — a venda
+ * sempre pode ser salva estourando o limite (quem está no balcão às vezes
+ * precisa vender pra um cliente estourado). Esta função só calcula os
+ * números; quem decide mostrar ou não é o componente (ModalSaida.tsx), e
+ * nada aqui nem lá impede o salvamento.
+ *
+ * `limite` ausente/vazio/zero significa "sem limite cadastrado" — mesmo
+ * padrão de `CLIENTE_NOVO.limite` (derive/clientes.ts): o campo nasce ''
+ * (não 0), então tratar 0 como "limite de R$ 0,00" faria todo cliente sem
+ * cadastro de crédito disparar aviso em toda venda, virando ruído que
+ * ninguém lê. Nesse caso a função sempre devolve `null`, mesmo que o
+ * cliente já tenha saídas em aberto.
+ *
+ * `hojeIso`/`ignorarId`: ver `valorEmAbertoCliente`, que faz o trabalho de
+ * somar o "em aberto".
+ */
+export function avisoLimiteCredito(
+  limite: number | string | null | undefined,
+  saidas: SaidaParaLimite[],
+  clienteId: string,
+  estaVenda: number,
+  hojeIso: string,
+  ignorarId?: string | null,
+): AvisoLimiteCredito | null {
+  const limiteNum = Number(limite) || 0
+  if (limiteNum <= 0) return null
+
+  const emAberto = valorEmAbertoCliente(saidas, clienteId, hojeIso, ignorarId)
+  const excedente = emAberto + estaVenda - limiteNum
+  if (excedente <= 0) return null
+
+  return { limite: limiteNum, emAberto, estaVenda, excedente }
+}

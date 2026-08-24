@@ -136,6 +136,20 @@
   color: #6a685c;
 }
 
+/* Aviso de limite de credito — nao e erro (nao bloqueia nada), mesma
+   paleta ambar discreta de .clientes-aviso-vendas (ClientesLista.css),
+   .ficha-aviso-vendas (ClienteFicha.css) e .produtos-aviso-metricas
+   (ProdutosLista.css): informa, nao repreende. */
+.modal-aviso-limite {
+  margin: 6px 0 0;
+  background: #f6efd8;
+  border: 1px solid #e8dcae;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: #8a6a1f;
+}
+
 .modal-dica {
   background: #eef3e6;
   border: 1px solid #d7e3c6;

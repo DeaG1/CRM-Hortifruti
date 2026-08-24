@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { situacaoExibidaSaida, valorSelecionavelPagamento, rotuloOpcaoPendente } from './pagamento'
+import {
+  situacaoExibidaSaida,
+  valorSelecionavelPagamento,
+  rotuloOpcaoPendente,
+  valorEmAbertoCliente,
+  avisoLimiteCredito,
+  type SaidaParaLimite,
+} from './pagamento'
 
 describe('situacaoExibidaSaida', () => {
   it('Pendente com vencimento no passado exibe Atrasado', () => {
@@ -60,5 +67,114 @@ describe('rotuloOpcaoPendente', () => {
   })
   it('situacao Pago nao afeta o rotulo da opcao Pendente (continua "Pendente")', () => {
     expect(rotuloOpcaoPendente('Pago')).toBe('Pendente')
+  })
+})
+
+const HOJE = '2026-08-23'
+
+function saida(parcial: Partial<SaidaParaLimite> & { id: string }): SaidaParaLimite {
+  return { cliente_id: 'cli-1', pag: 'Pendente', venc: null, valor: 0, ...parcial }
+}
+
+describe('valorEmAbertoCliente', () => {
+  it('soma saidas Pendente e Atrasado do cliente', () => {
+    const saidas = [
+      saida({ id: 's1', pag: 'Pendente', valor: 100 }),
+      saida({ id: 's2', pag: 'Atrasado', valor: 50 }),
+    ]
+    expect(valorEmAbertoCliente(saidas, 'cli-1', HOJE)).toBe(150)
+  })
+
+  it('Pendente com vencimento vencido conta como em aberto (via situacaoExibidaSaida, nao o pag cru)', () => {
+    const saidas = [saida({ id: 's1', pag: 'Pendente', venc: '2026-01-01', valor: 80 })]
+    expect(valorEmAbertoCliente(saidas, 'cli-1', HOJE)).toBe(80)
+  })
+
+  it('exclui saidas Pago da soma', () => {
+    const saidas = [
+      saida({ id: 's1', pag: 'Pago', valor: 100 }),
+      saida({ id: 's2', pag: 'Pendente', valor: 30 }),
+    ]
+    expect(valorEmAbertoCliente(saidas, 'cli-1', HOJE)).toBe(30)
+  })
+
+  it('exclui saidas "—" (nao aplicavel — cancelada/devolvida) da soma', () => {
+    const saidas = [
+      saida({ id: 's1', pag: '—', valor: 500 }),
+      saida({ id: 's2', pag: 'Pendente', valor: 20 }),
+    ]
+    expect(valorEmAbertoCliente(saidas, 'cli-1', HOJE)).toBe(20)
+  })
+
+  it('ignora saidas de outro cliente', () => {
+    const saidas = [
+      saida({ id: 's1', cliente_id: 'cli-1', pag: 'Pendente', valor: 100 }),
+      saida({ id: 's2', cliente_id: 'cli-2', pag: 'Pendente', valor: 999 }),
+    ]
+    expect(valorEmAbertoCliente(saidas, 'cli-1', HOJE)).toBe(100)
+  })
+
+  it('ignorarId exclui uma saida especifica (caso de edicao)', () => {
+    const saidas = [
+      saida({ id: 's1', pag: 'Pendente', valor: 100 }),
+      saida({ id: 's2', pag: 'Pendente', valor: 40 }),
+    ]
+    expect(valorEmAbertoCliente(saidas, 'cli-1', HOJE, 's1')).toBe(40)
+  })
+
+  it('sem saidas do cliente devolve 0', () => {
+    expect(valorEmAbertoCliente([], 'cli-1', HOJE)).toBe(0)
+  })
+})
+
+describe('avisoLimiteCredito', () => {
+  it('sem limite cadastrado (0) nunca avisa, mesmo com saidas em aberto e venda grande', () => {
+    const saidas = [saida({ id: 's1', pag: 'Pendente', valor: 10000 })]
+    expect(avisoLimiteCredito(0, saidas, 'cli-1', 5000, HOJE)).toBeNull()
+  })
+
+  it('sem limite cadastrado ("") nunca avisa', () => {
+    expect(avisoLimiteCredito('', [], 'cli-1', 5000, HOJE)).toBeNull()
+  })
+
+  it('sem limite cadastrado (null/undefined) nunca avisa', () => {
+    expect(avisoLimiteCredito(null, [], 'cli-1', 5000, HOJE)).toBeNull()
+    expect(avisoLimiteCredito(undefined, [], 'cli-1', 5000, HOJE)).toBeNull()
+  })
+
+  it('dentro do limite nao avisa', () => {
+    const saidas = [saida({ id: 's1', pag: 'Pendente', valor: 40 })]
+    // 40 em aberto + 30 desta venda = 70, limite 100 — nao estoura
+    expect(avisoLimiteCredito(100, saidas, 'cli-1', 30, HOJE)).toBeNull()
+  })
+
+  it('estoura exatamente no limite (soma == limite) nao avisa', () => {
+    const saidas = [saida({ id: 's1', pag: 'Pendente', valor: 40 })]
+    expect(avisoLimiteCredito(100, saidas, 'cli-1', 60, HOJE)).toBeNull()
+  })
+
+  it('estoura COM esta venda: avisa com os numeros corretos', () => {
+    const saidas = [saida({ id: 's1', pag: 'Pendente', valor: 80 })]
+    const aviso = avisoLimiteCredito(100, saidas, 'cli-1', 30, HOJE)
+    expect(aviso).toEqual({ limite: 100, emAberto: 80, estaVenda: 30, excedente: 10 })
+  })
+
+  it('cliente ja estourado ANTES desta venda avisa, mesmo com esta venda zerada', () => {
+    const saidas = [saida({ id: 's1', pag: 'Pendente', valor: 150 })]
+    const aviso = avisoLimiteCredito(100, saidas, 'cli-1', 0, HOJE)
+    expect(aviso).toEqual({ limite: 100, emAberto: 150, estaVenda: 0, excedente: 50 })
+  })
+
+  it('edicao: ignorarId evita contar a propria saida em edicao duas vezes', () => {
+    // saida sendo editada ja esta em `saidas` com o valor GRAVADO (60);
+    // `estaVenda` traz o total ATUAL do formulario (100, ja editado).
+    const saidas = [
+      saida({ id: 'editando', pag: 'Pendente', valor: 60 }),
+      saida({ id: 'outra', pag: 'Pendente', valor: 20 }),
+    ]
+    const aviso = avisoLimiteCredito(100, saidas, 'cli-1', 100, HOJE, 'editando')
+    // emAberto so conta 'outra' (20) — 'editando' fica de fora porque seu
+    // valor atualizado ja esta em estaVenda (100). 20 + 100 = 120, excedente 20.
+    expect(aviso).toEqual({ limite: 100, emAberto: 20, estaVenda: 100, excedente: 20 })
   })
 })

@@ -21,6 +21,13 @@ const clienteA: Cliente = {
   id: 'cli-1', nome: 'Mercado A', resp: 'Sonia', rota: 'Norte', freq: 'Semanal',
   status: 'ativo', tend: '→', limite: 0, prazo: 14,
 }
+// Cliente com limite de credito cadastrado, pra suite "aviso de limite de
+// credito" abaixo — clienteA (limite: 0 = sem limite) fica reservado pra
+// provar que ausencia de limite nunca dispara aviso.
+const clienteComLimite: Cliente = {
+  id: 'cli-2', nome: 'Mercado B', resp: 'Joao', rota: 'Sul', freq: 'Semanal',
+  status: 'ativo', tend: '→', limite: 100, prazo: 14,
+}
 const produtoA = { id: 'prod-1', nome: 'Tomate', un: 'KG', peso_medio: 0 }
 const produtoB = { id: 'prod-2', nome: 'Batata', un: 'KG', peso_medio: 0 }
 
@@ -43,11 +50,23 @@ const saidaExistente: Saida = {
 }
 
 /** Roteia api.get pela URL — clientes/produtos sempre disponiveis; GET de
- * uma saida especifica so quando explicitamente configurado. */
-function mockGetPadrao(saida: Saida | null = null) {
+ * uma saida especifica so quando explicitamente configurado.
+ *
+ * `saidasAnteriores`: resposta de GET /api/saidas (listagem, usada so pro
+ * calculo do aviso de limite de credito). Default `[]` (nenhuma venda
+ * anterior — nao muda o comportamento das suites que nao mexem com limite
+ * de credito). Passar `'erro'` simula a falha desse fetch especifico
+ * (isolada — GET /api/clientes e /api/produtos continuam OK), pra testar
+ * que o modal continua funcional sem o aviso. */
+function mockGetPadrao(saida: Saida | null = null, saidasAnteriores: Saida[] | 'erro' = []) {
   mockGet.mockImplementation((rota: string) => {
-    if (rota === '/api/clientes') return Promise.resolve([clienteA])
+    if (rota === '/api/clientes') return Promise.resolve([clienteA, clienteComLimite])
     if (rota === '/api/produtos') return Promise.resolve([produtoA, produtoB])
+    if (rota === '/api/saidas') {
+      return saidasAnteriores === 'erro'
+        ? Promise.reject(new Error('falha ao buscar vendas anteriores'))
+        : Promise.resolve(saidasAnteriores)
+    }
     if (saida && rota === `/api/saidas/${saida.id}`) return Promise.resolve(saida)
     return Promise.reject(new Error('rota inesperada no teste: ' + rota))
   })
@@ -416,5 +435,143 @@ describe('ModalSaida — fechar', () => {
     const form = screen.getByRole('dialog').querySelector('form')
     expect(form).toHaveAttribute('novalidate')
     expect(screen.getByLabelText(/número do pedido/i)).toBeRequired()
+  })
+})
+
+// DECISAO DO DONO DO PRODUTO: isto e um AVISO, nunca um bloqueio — a venda
+// sempre pode ser salva estourando o limite. Nenhum teste aqui deve
+// verificar `disabled` no botao Salvar nem qualquer confirmacao extra por
+// causa do limite; o teste "venda salva normalmente..." abaixo existe
+// justamente pra proteger essa decisao contra alguem "endurecer" isto depois.
+describe('ModalSaida — aviso de limite de crédito', () => {
+  // clienteComLimite (limite: 100) já deve 80 (saidaAbertaClienteComLimite,
+  // pag Pendente) — fixture-base reaproveitada em vários testes abaixo.
+  const saidaAbertaClienteComLimite: Saida = {
+    id: 'saida-aberta-b', numero: 'S-0050', cliente_id: 'cli-2', rota: 'Sul',
+    data_pedido: '2026-08-01', entrega: '2026-08-01', status: 'Entregue',
+    pag: 'Pendente', venc: '2099-01-01', data_pag: null, forma_pag: '',
+    perda_kg: 0, motivo: '', obs: '', valor: 80,
+  }
+  const saidaAbertaClienteA: Saida = {
+    id: 'saida-aberta-a', numero: 'S-0040', cliente_id: 'cli-1', rota: 'Norte',
+    data_pedido: '2026-08-01', entrega: '2026-08-01', status: 'Entregue',
+    pag: 'Pendente', venc: '2099-01-01', data_pag: null, forma_pag: '',
+    perda_kg: 0, motivo: '', obs: '', valor: 99999,
+  }
+
+  async function selecionarCliente(id: string, nome: string) {
+    await waitFor(() => expect(screen.getByRole('option', { name: nome })).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Cliente'), { target: { value: id } })
+  }
+
+  async function lancarItem(qtd: string, preco: string) {
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    await waitFor(() => expect(screen.getByLabelText('Produto')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Produto'), { target: { value: 'prod-1' } })
+    fireEvent.change(screen.getByLabelText('Quantidade'), { target: { value: qtd } })
+    fireEvent.change(screen.getByLabelText('Preço por unidade'), { target: { value: preco } })
+  }
+
+  it('cliente sem limite cadastrado nunca avisa, mesmo com divida grande e venda grande', async () => {
+    mockGetPadrao(null, [saidaAbertaClienteA])
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await selecionarCliente('cli-1', 'Mercado A')
+    await lancarItem('1000', '1000')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('cliente dentro do limite (em aberto + esta venda nao ultrapassa) nao avisa', async () => {
+    mockGetPadrao(null, [saidaAbertaClienteComLimite]) // 80 em aberto, limite 100
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await selecionarCliente('cli-2', 'Mercado B')
+    await lancarItem('1', '10') // total 10 -> 80 + 10 = 90 < 100
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('cliente que estoura COM esta venda avisa com o valor correto do excedente', async () => {
+    mockGetPadrao(null, [saidaAbertaClienteComLimite]) // 80 em aberto, limite 100
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await selecionarCliente('cli-2', 'Mercado B')
+    await lancarItem('10', '3') // total 30 -> 80 + 30 = 110, excedente 10
+
+    const aviso = await screen.findByRole('status')
+    expect(aviso).toHaveTextContent('R$ 100,00') // limite
+    expect(aviso).toHaveTextContent('R$ 80,00') // ja deve (em aberto)
+    expect(aviso).toHaveTextContent('R$ 30,00') // esta venda
+    expect(aviso).toHaveTextContent('R$ 10,00') // excedente
+  })
+
+  it('cliente já estourado ANTES desta venda avisa, mesmo sem nenhum item lançado ainda', async () => {
+    const saidaEstourada: Saida = { ...saidaAbertaClienteComLimite, id: 'saida-estourada', valor: 150 }
+    mockGetPadrao(null, [saidaEstourada])
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await selecionarCliente('cli-2', 'Mercado B')
+
+    const aviso = await screen.findByRole('status')
+    expect(aviso).toHaveTextContent('R$ 150,00') // ja deve, mesmo com "esta venda" = R$ 0,00
+  })
+
+  it('falha ao carregar vendas anteriores não quebra o modal nem bloqueia o salvamento', async () => {
+    mockGetPadrao(null, 'erro')
+    mockPost.mockResolvedValue({ ...saidaExistente, id: 'novo-sem-vendas-anteriores' })
+    const onSalvo = vi.fn()
+    render(<ModalSaida saidaId={null} onSalvo={onSalvo} onFechar={() => {}} />)
+    await selecionarCliente('cli-2', 'Mercado B')
+    await lancarItem('100', '100') // venda enorme — mas sem dado de vendas anteriores, sem aviso possivel
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/número do pedido/i), { target: { value: 'S-0300' } })
+    fireEvent.change(screen.getByLabelText(/data do pedido/i), { target: { value: '2026-08-10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    await waitFor(() => expect(onSalvo).toHaveBeenCalled())
+  })
+
+  // Protege a decisao do dono do produto: o aviso e so informativo. Se
+  // alguem tentar "endurecer" isto depois (desabilitar o Salvar, adicionar
+  // confirmacao, bloquear no backend), este teste quebra primeiro.
+  it('venda salva normalmente mesmo com o aviso de limite de crédito visível na tela', async () => {
+    mockGetPadrao(null, [saidaAbertaClienteComLimite])
+    mockPost.mockResolvedValue({ ...saidaExistente, id: 'novo-com-aviso' })
+    const onSalvo = vi.fn()
+    render(<ModalSaida saidaId={null} onSalvo={onSalvo} onFechar={() => {}} />)
+    await selecionarCliente('cli-2', 'Mercado B')
+    await lancarItem('10', '3') // 80 + 30 = 110 > 100 -> aviso visivel
+
+    expect(await screen.findByRole('status')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Salvar' })).not.toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText(/número do pedido/i), { target: { value: 'S-0301' } })
+    fireEvent.change(screen.getByLabelText(/data do pedido/i), { target: { value: '2026-08-10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    await waitFor(() => expect(onSalvo).toHaveBeenCalled())
+    // continua visivel depois: nao houve dialogo de confirmacao nem bloqueio
+    // no meio do caminho — so o POST normal, com o aviso ainda na tela.
+    expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  it('edição: a própria saída sendo editada não conta duas vezes no valor em aberto', async () => {
+    const saidaEditando: Saida = {
+      id: 'saida-1', numero: 'S-0001', cliente_id: 'cli-2', rota: 'Sul',
+      data_pedido: '2026-08-01', entrega: '2026-08-05', status: 'Pendente',
+      pag: 'Pendente', venc: '2026-08-19', data_pag: null, forma_pag: '',
+      perda_kg: 0, motivo: '', obs: '',
+      itens: [{ id: 'item-1', produto_id: 'prod-1', un: 'KG', qtd: 10, preco: 6, perda_kg: 0 }], // total 60
+    }
+    // GET /api/saidas (listagem) traz a versao GRAVADA da propria saida em
+    // edicao (valor antigo, 60) + uma saida de outro pedido do mesmo
+    // cliente (valor 20). Sem excluir a propria saida da soma, o em aberto
+    // ficaria 60 + 20 + 60 (total atual do formulario) = 140 > limite 100,
+    // avisando errado; excluindo (ignorarId=saidaId), fica 20 + 60 = 80 < 100.
+    const versaoGravadaDaEditada: Saida = { ...saidaEditando, valor: 60 }
+    const outraSaida: Saida = { ...saidaAbertaClienteComLimite, id: 'outra', valor: 20 }
+    mockGetPadrao(saidaEditando, [versaoGravadaDaEditada, outraSaida])
+    render(<ModalSaida saidaId="saida-1" onSalvo={() => {}} onFechar={() => {}} />)
+    await screen.findByLabelText(/número do pedido/i)
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 })

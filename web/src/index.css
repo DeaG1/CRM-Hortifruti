@@ -131,3 +131,35 @@ input[type='number'] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
+
+/*
+ * Estado vazio: card centralizado na area de conteudo.
+ *
+ * Cada tela tem sua propria classe (.saidas-vazio, .clientes-vazio, ...) com
+ * fundo, borda e espacamento. Todas fixavam `max-width: 560px` sem centralizar,
+ * entao o card ficava encostado a esquerda com a tela inteira vazia ao lado —
+ * parecia conteudo cortado, nao uma tela sem dados.
+ *
+ * `margin-inline: auto` centraliza horizontalmente. O `min-height` com `flex`
+ * empurra o card para o meio vertical da area util, que e o que faz a tela
+ * parecer deliberadamente vazia em vez de quebrada.
+ *
+ * A largura do card NAO foi esticada de proposito: um cartao de 1800px com
+ * tres linhas de texto no meio fica pior que um card estreito bem posicionado.
+ * O que incomodava era a posicao, nao o tamanho.
+ *
+ * Esta classe e adicional, nunca substitui a especifica da tela — por isso as
+ * regras aqui usam so propriedades de posicionamento, sem tocar em cor,
+ * borda ou tipografia, que continuam pertencendo a cada tela.
+ */
+.estado-vazio {
+  margin-inline: auto;
+  margin-block: clamp(24px, 8vh, 96px);
+}
+
+/* Contorno visivel ao navegar por teclado, ja que o card costuma conter o
+ * unico botao da tela. */
+.estado-vazio :focus-visible {
+  outline: 2px solid #5a7d3a;
+  outline-offset: 2px;
+}

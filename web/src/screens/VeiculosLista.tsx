@@ -197,7 +197,7 @@ export function VeiculosLista({ papel = 'colaborador', onSessaoExpirada }: Veicu
   if (veiculos.length === 0) {
     return (
       <>
-        <div className="veiculos-vazio">
+        <div className="estado-vazio veiculos-vazio">
           <div className="veiculos-vazio-titulo">Nenhum veículo cadastrado ainda.</div>
           <div className="veiculos-vazio-sub">
             {isAdmin

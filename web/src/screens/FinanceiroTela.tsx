@@ -107,7 +107,7 @@ export function FinanceiroTela({ onSessaoExpirada }: FinanceiroTelaProps) {
 
   if (saidas.length === 0 && entradas.length === 0 && lancamentos.length === 0) {
     return (
-      <div className="financeiro-vazio">
+      <div className="estado-vazio financeiro-vazio">
         <div className="financeiro-vazio-titulo">Ainda não há dado suficiente para calcular o financeiro.</div>
         <div className="financeiro-vazio-sub">
           Financeiro não guarda dado próprio: o resultado, o ciclo de caixa e os lançamentos aparecem aqui assim

@@ -155,7 +155,7 @@ export function PerdasLista({ onSessaoExpirada }: PerdasListaProps) {
 
       {perdas.length === 0
         ? (
-          <div className="perdas-vazio">
+          <div className="estado-vazio perdas-vazio">
             <div className="perdas-vazio-titulo">Nenhuma perda registrada</div>
             <div className="perdas-vazio-sub">
               Registre aqui o que estraga ou some no depósito depois que a mercadoria já entrou — vencimento,

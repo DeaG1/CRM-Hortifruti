@@ -251,7 +251,7 @@ export function RelatoriosTela({ onSessaoExpirada }: RelatoriosTelaProps) {
   if (clientes.length === 0 && saidas.length === 0 && entradas.length === 0
     && lancamentos.length === 0 && perdas.length === 0) {
     return (
-      <div className="relatorios-vazio">
+      <div className="estado-vazio relatorios-vazio">
         <div className="relatorios-vazio-titulo">Ainda não há dados para gerar relatórios.</div>
         <div className="relatorios-vazio-sub">
           Cadastre clientes e lance as primeiras vendas, compras e custos — os relatórios aparecem aqui

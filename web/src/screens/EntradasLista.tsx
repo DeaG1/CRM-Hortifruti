@@ -197,7 +197,7 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
 
       {entradas.length === 0
         ? (
-          <div className="entradas-vazio">
+          <div className="estado-vazio entradas-vazio">
             <div className="entradas-vazio-titulo">Nenhuma entrada lançada</div>
             <div className="entradas-vazio-sub">
               Lance a primeira compra do produtor. Ela abastece o estoque e vira a compra de mercadoria no

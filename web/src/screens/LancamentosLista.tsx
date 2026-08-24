@@ -121,7 +121,7 @@ export function LancamentosLista({ onSessaoExpirada }: LancamentosListaProps) {
       </div>
 
       {lancamentos.length === 0 ? (
-        <div className="lancamentos-vazio">
+        <div className="estado-vazio lancamentos-vazio">
           <div className="lancamentos-vazio-titulo">Nenhum lançamento registrado ainda.</div>
           <div className="lancamentos-vazio-sub">
             Clique em <strong>Novo lançamento</strong> para registrar custos como frete, gasolina ou folha.

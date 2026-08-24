@@ -91,7 +91,7 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
         )}
 
         {!carregando && !erro && linhas.length === 0 && (
-          <div className="estoque-vazio">
+          <div className="estado-vazio estoque-vazio">
             <div className="estoque-vazio-titulo">Nada em estoque ainda</div>
             <div className="estoque-vazio-sub">
               O estoque se preenche sozinho: lance uma <strong>Entrada (compra)</strong> e a

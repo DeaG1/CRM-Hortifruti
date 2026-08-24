@@ -139,7 +139,7 @@ export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
   if (saidas.length === 0) {
     return (
       <>
-        <div className="saidas-vazio">
+        <div className="estado-vazio saidas-vazio">
           <div className="saidas-vazio-titulo">Nenhuma saída lançada ainda.</div>
           <div className="saidas-vazio-sub">
             Lance a primeira venda entregue a um minimercado. Ela alimenta faturamento, ticket médio e estoque.

@@ -61,7 +61,7 @@ export function ProdutosLista({ onSessaoExpirada }: ProdutosListaProps) {
   if (produtos.length === 0) {
     return (
       <>
-        <div className="produtos-vazio">
+        <div className="estado-vazio produtos-vazio">
           <div className="produtos-vazio-titulo">Nenhum produto cadastrado</div>
           <div className="produtos-vazio-sub">
             Comece por aqui: sem produto não é possível lançar entrada nem saída. Cadastre o nome e a

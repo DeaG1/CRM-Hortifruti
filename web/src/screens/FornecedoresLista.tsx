@@ -75,7 +75,7 @@ export function FornecedoresLista({ onSessaoExpirada }: FornecedoresListaProps) 
             ＋ Novo fornecedor
           </button>
         </div>
-        <div className="fornecedores-vazio">
+        <div className="estado-vazio fornecedores-vazio">
           <div className="fornecedores-vazio-titulo">Nenhum fornecedor cadastrado</div>
           <div className="fornecedores-vazio-sub">
             Cadastre os produtores de quem você compra. Sem fornecedor não é possível lançar uma entrada.

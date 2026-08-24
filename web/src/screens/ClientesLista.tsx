@@ -95,7 +95,7 @@ export function ClientesLista({ onAbrir, onSessaoExpirada }: ClientesListaProps)
   if (erro) return <p className="clientes-estado clientes-estado--erro" role="alert">{erro}</p>
   if (clientes.length === 0) {
     return (
-      <div className="clientes-vazio">
+      <div className="estado-vazio clientes-vazio">
         <div className="clientes-vazio-titulo">Nenhum cliente cadastrado ainda.</div>
         <div className="clientes-vazio-sub">
           Cadastre os minimercados que você atende. Sem cliente não é possível lançar uma saída (venda).

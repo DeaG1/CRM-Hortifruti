@@ -83,7 +83,7 @@ export function FuncionariosLista({ onSessaoExpirada }: FuncionariosListaProps) 
       </div>
 
       {funcionarios.length === 0 ? (
-        <div className="funcionarios-vazio">
+        <div className="estado-vazio funcionarios-vazio">
           <div className="funcionarios-vazio-titulo">Nenhum funcionário cadastrado ainda.</div>
           <div className="funcionarios-vazio-sub">
             Clique em <strong>Novo funcionário</strong> para cadastrar a equipe.

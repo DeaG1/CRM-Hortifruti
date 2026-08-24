@@ -133,7 +133,7 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
   if (erro) return <p className="dashboard-estado dashboard-estado--erro" role="alert">{erro}</p>
   if (clientes.length === 0) {
     return (
-      <div className="dashboard-vazio">
+      <div className="estado-vazio dashboard-vazio">
         <div className="dashboard-vazio-titulo">Nenhum cliente cadastrado ainda.</div>
         <div className="dashboard-vazio-sub">
           Cadastre os minimercados que você atende para começar a acompanhar a saúde do negócio — os

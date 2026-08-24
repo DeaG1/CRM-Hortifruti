@@ -201,7 +201,7 @@ describe('statusTicketMes', () => {
 
 describe('inadimplenciaGeral', () => {
   it('indisponivel sem pedidos entregues (sem base de receita)', () => {
-    expect(inadimplenciaGeral([])).toEqual({ disponivel: false, motivo: 'sem pedidos entregues registrados' })
+    expect(inadimplenciaGeral([], '2026-06-15')).toEqual({ disponivel: false, motivo: 'sem pedidos entregues registrados' })
   })
 
   it('valor atrasado (de QUALQUER status) sobre a receita entregue', () => {
@@ -209,9 +209,52 @@ describe('inadimplenciaGeral', () => {
       saida({ status: 'Entregue', pag: 'Pago', valor: 800 }),
       saida({ status: 'Entregue', pag: 'Atrasado', valor: 200 }),
       saida({ status: 'Em rota', pag: 'Atrasado', valor: 300 }), // conta no atraso mesmo nao entregue
-    ])
+    ], '2026-06-15')
     // atraso = 200+300=500; receita entregue = 800+200=1000 => 50%
     expect(r).toEqual({ disponivel: true, valor: 50 })
+  })
+
+  // DEFEITO CORRIGIDO: a UI parou de gravar 'Atrasado' (SaidasLista/ModalSaida
+  // só oferecem Pendente/Pago — ver derive/pagamento.ts); 'Atrasado' passou a
+  // ser CALCULADO a partir de pag='Pendente' + venc vencido. Antes desta
+  // correção, este indicador filtrava só o campo `pag` gravado e caminhava
+  // pra zero conforme os registros antigos fossem substituídos por vendas
+  // novas — mesmo com dívida real se acumulando.
+  describe('deriva "atrasado" via situacaoExibidaSaida (nao so o pag gravado)', () => {
+    it('pendente com vencimento passado conta como atrasada', () => {
+      const r = inadimplenciaGeral([
+        saida({ status: 'Entregue', pag: 'Pendente', venc: '2026-06-01', valor: 1000 }),
+      ], '2026-06-15')
+      expect(r).toEqual({ disponivel: true, valor: 100 })
+    })
+
+    it('pendente com vencimento futuro NAO conta', () => {
+      const r = inadimplenciaGeral([
+        saida({ status: 'Entregue', pag: 'Pendente', venc: '2026-07-01', valor: 1000 }),
+      ], '2026-06-15')
+      expect(r).toEqual({ disponivel: true, valor: 0 })
+    })
+
+    it('pendente sem vencimento NAO conta (nao inventa data default)', () => {
+      const r = inadimplenciaGeral([
+        saida({ status: 'Entregue', pag: 'Pendente', venc: null, valor: 1000 }),
+      ], '2026-06-15')
+      expect(r).toEqual({ disponivel: true, valor: 0 })
+    })
+
+    it('paga nunca conta, mesmo com vencimento passado', () => {
+      const r = inadimplenciaGeral([
+        saida({ status: 'Entregue', pag: 'Pago', venc: '2026-01-01', valor: 1000 }),
+      ], '2026-06-15')
+      expect(r).toEqual({ disponivel: true, valor: 0 })
+    })
+
+    it('registro gravado como Atrasado (dado antigo, de antes da mudanca) continua contando', () => {
+      const r = inadimplenciaGeral([
+        saida({ status: 'Entregue', pag: 'Atrasado', venc: null, valor: 1000 }),
+      ], '2026-06-15')
+      expect(r).toEqual({ disponivel: true, valor: 100 })
+    })
   })
 })
 

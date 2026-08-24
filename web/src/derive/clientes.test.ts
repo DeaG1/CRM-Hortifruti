@@ -42,20 +42,54 @@ describe('healthDoCliente', () => {
 })
 
 describe('inadimplenciaPorCliente', () => {
+  const HOJE = '2026-06-15'
+
   it('e a fracao do faturado que esta atrasada', () => {
     const pedidos = [
       pedido({ valor: 1000, pag: 'Pago' }),
       pedido({ valor: 1000, pag: 'Atrasado' }),
     ]
     // faturado = so os Entregues = 2000; atrasado = 1000 => 50%
-    expect(inadimplenciaPorCliente(pedidos, 'Mercado A')).toBeCloseTo(50)
+    expect(inadimplenciaPorCliente(pedidos, 'Mercado A', HOJE)).toBeCloseTo(50)
   })
   it('e zero quando nao ha faturamento', () => {
-    expect(inadimplenciaPorCliente([], 'Mercado A')).toBe(0)
+    expect(inadimplenciaPorCliente([], 'Mercado A', HOJE)).toBe(0)
   })
   it('ignora pedidos de outro cliente', () => {
     const pedidos = [pedido({ cliente: 'Outro', valor: 500, pag: 'Atrasado' })]
-    expect(inadimplenciaPorCliente(pedidos, 'Mercado A')).toBe(0)
+    expect(inadimplenciaPorCliente(pedidos, 'Mercado A', HOJE)).toBe(0)
+  })
+
+  // DEFEITO CORRIGIDO: desde que a UI parou de gravar 'Atrasado' (o seletor
+  // de SaidasLista so oferece Pendente/Pago — ver derive/pagamento.ts),
+  // 'Atrasado' passou a ser CALCULADO a partir de pag='Pendente' + venc
+  // vencido. Filtrar so pelo `pag` gravado cru caminharia pra zero conforme
+  // vendas antigas fossem substituidas por vendas novas.
+  describe('deriva "atrasado" via situacaoExibidaSaida (nao so o pag gravado)', () => {
+    it('pendente com vencimento passado conta como atrasada', () => {
+      const pedidos = [pedido({ valor: 1000, pag: 'Pendente', venc: '2026-06-01' })]
+      expect(inadimplenciaPorCliente(pedidos, 'Mercado A', HOJE)).toBe(100)
+    })
+
+    it('pendente com vencimento futuro NAO conta', () => {
+      const pedidos = [pedido({ valor: 1000, pag: 'Pendente', venc: '2026-07-01' })]
+      expect(inadimplenciaPorCliente(pedidos, 'Mercado A', HOJE)).toBe(0)
+    })
+
+    it('pendente sem vencimento NAO conta (nao inventa data default)', () => {
+      const pedidos = [pedido({ valor: 1000, pag: 'Pendente', venc: null })]
+      expect(inadimplenciaPorCliente(pedidos, 'Mercado A', HOJE)).toBe(0)
+    })
+
+    it('paga nunca conta, mesmo com vencimento passado', () => {
+      const pedidos = [pedido({ valor: 1000, pag: 'Pago', venc: '2026-01-01' })]
+      expect(inadimplenciaPorCliente(pedidos, 'Mercado A', HOJE)).toBe(0)
+    })
+
+    it('registro gravado como Atrasado (dado antigo) continua contando', () => {
+      const pedidos = [pedido({ valor: 1000, pag: 'Atrasado', venc: null })]
+      expect(inadimplenciaPorCliente(pedidos, 'Mercado A', HOJE)).toBe(100)
+    })
   })
 })
 
@@ -80,7 +114,7 @@ describe('derivarClientes', () => {
       pedido({ cliente: 'A', valor: 750 }),
       pedido({ cliente: 'B', valor: 250 }),
     ]
-    const saida = derivarClientes(clientes, pedidos, 'all')
+    const saida = derivarClientes(clientes, pedidos, 'all', '2026-06-15')
     expect(saida.find(c => c.nome === 'A')!.participacao).toBe(75)
     expect(saida.find(c => c.nome === 'B')!.participacao).toBe(25)
   })
@@ -91,6 +125,6 @@ describe('derivarClientes', () => {
       pedido({ cliente: 'A', entrega: '2026-06-10', valor: 1000 }),
       pedido({ cliente: 'A', entrega: '2026-05-10', valor: 9999 }),
     ]
-    expect(derivarClientes(clientes, pedidos, '06')[0].faturado).toBe(1000)
+    expect(derivarClientes(clientes, pedidos, '06', '2026-06-15')[0].faturado).toBe(1000)
   })
 })

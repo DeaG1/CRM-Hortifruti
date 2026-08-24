@@ -42,6 +42,15 @@ const NEUTRO = '#6a685c'
 const money = (n: number) => 'R$ ' + Math.round(n).toLocaleString('pt-BR')
 const pct1 = (n: number) => n.toFixed(1).replace('.', ',') + '%'
 
+/** Data de hoje em 'AAAA-MM-DD', usando os componentes LOCAIS (não UTC) —
+ * mesmo `hojeIsoLocal()` de RelatoriosTela.tsx/SaidasLista.tsx. Fica na tela
+ * porque toca `new Date()`; inadimplenciaGeral() continua pura recebendo a
+ * data como parâmetro (ver derive/dashboard.ts). */
+function hojeIsoLocal(): string {
+  const n = new Date()
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
+}
+
 /** Texto do card quando o indicador nao esta disponivel: nunca "0", sempre
  * "—" com o motivo — o ponto central desta tela (ver derive/dashboard.ts). */
 function valorOuTracejado(ind: Indicador, formatar: (v: number) => string): string {
@@ -162,7 +171,7 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
   const markup = markupMedio(produtosAgregados)
   const ticketMes = ticketMedioPorMinimercado(saidas)
   const ticketEntrega = ticketMedioPorEntrega(saidas)
-  const inad = inadimplenciaGeral(saidas)
+  const inad = inadimplenciaGeral(saidas, hojeIsoLocal())
 
   const kpis: CartaoKpi[] = [
     cartaoDeIndicador('Índice de perdas (%)', perdas1, pct1, '≤ 10%', statusIndiceDePerdas, METAS_DASHBOARD.perdaMetaPct),

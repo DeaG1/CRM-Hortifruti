@@ -1,3 +1,5 @@
+import { situacaoExibidaSaida } from './pagamento'
+
 export type StatusCliente = 'ativo' | 'negociacao' | 'inadimplente' | 'inativo'
 export type Tendencia = '↑' | '→' | '↓'
 export type Health = 'green' | 'amber' | 'red'
@@ -55,6 +57,13 @@ export interface Pedido {
   valor: number
   status: 'Entregue' | 'Em rota' | 'Cancelado' | 'Devolvido'
   pag: 'Pago' | 'Pendente' | 'Atrasado' | '—'
+  /** Vencimento (ISO), usado por `situacaoExibidaSaida` (derive/pagamento.ts)
+   * pra derivar 'Atrasado' quando `pag` gravado é 'Pendente'. Já vem de
+   * GET /api/saidas (ver api/src/routes/saidas.ts); opcional aqui só pra
+   * não obrigar os fixtures de teste existentes a declarar o campo — ausente
+   * e `null` significam a mesma coisa pra situacaoExibidaSaida (sem
+   * vencimento não há "atraso" pra calcular). */
+  venc?: string | null
 }
 
 export interface ClienteDerivado extends Cliente {
@@ -82,14 +91,37 @@ export function ticketPorEntrega(pedidos: Pedido[], nome: string): number {
   return Math.round(total / entregues.length)
 }
 
-export function inadimplenciaPorCliente(pedidos: Pedido[], nome: string): number {
+/**
+ * Fração do faturado do cliente que está atrasada. Usa `situacaoExibidaSaida`
+ * (derive/pagamento.ts) para decidir "atrasado", não o `pag` gravado cru.
+ *
+ * Até a Task que tornou 'Atrasado' um valor CALCULADO (a interface só grava
+ * 'Pendente'/'Pago' agora; 'Atrasado' passa a ser derivado de
+ * `pag==='Pendente'` + vencimento vencido — ver o comentário no topo de
+ * pagamento.ts), filtrar por `pag === 'Atrasado'` bastava, porque era o
+ * único jeito de um registro ficar assim. Continuar filtrando pelo campo
+ * cru faria a inadimplência da carteira caminhar pra zero conforme as
+ * vendas antigas (gravadas 'Atrasado' à mão) fossem sendo substituídas por
+ * vendas novas — mesmo com dívida real se acumulando: o número não some,
+ * ele mente com aparência de normalidade. Não é infidelidade ao protótipo,
+ * é a consequência necessária de 'Atrasado' ter deixado de ser um campo
+ * digitado; manter o filtro antigo preservaria a letra e perderia o
+ * sentido. `hojeIso` é parâmetro (não `new Date()` interno) pelo mesmo
+ * motivo de situacaoExibidaSaida: função pura, testável sem mockar relógio.
+ *
+ * ASSIMETRIA JÁ CONHECIDA, NÃO CORRIGIR AQUI: o numerador (atrasado)
+ * considera pedidos de QUALQUER status, mas o denominador (faturado) só
+ * conta `status === 'Entregue'` — fiel ao protótipo original, já reportada
+ * ao dono do produto. Não é o defeito que esta função corrige.
+ */
+export function inadimplenciaPorCliente(pedidos: Pedido[], nome: string, hojeIso: string): number {
   const meus = doCliente(pedidos, nome)
   const faturado = meus
     .filter(p => p.status === 'Entregue')
     .reduce((s, p) => s + (p.valor || 0), 0)
   if (faturado <= 0) return 0
   const atrasado = meus
-    .filter(p => p.pag === 'Atrasado')
+    .filter(p => situacaoExibidaSaida(p.pag, p.venc, hojeIso) === 'Atrasado')
     .reduce((s, p) => s + (p.valor || 0), 0)
   return (atrasado / faturado) * 100
 }
@@ -119,6 +151,7 @@ export function derivarClientes(
   clientes: Cliente[],
   pedidos: Pedido[],
   periodo: string,
+  hojeIso: string,
 ): ClienteDerivado[] {
   const doPeriodo = periodo === 'all'
     ? pedidos
@@ -131,7 +164,7 @@ export function derivarClientes(
     const meus = entregues.filter(p => p.cliente === c.nome)
     const faturado = meus.reduce((s, p) => s + (p.valor || 0), 0)
     const ticketEntrega = ticketPorEntrega(doPeriodo, c.nome)
-    const inadimplencia = inadimplenciaPorCliente(doPeriodo, c.nome)
+    const inadimplencia = inadimplenciaPorCliente(doPeriodo, c.nome, hojeIso)
     return {
       ...c,
       faturado,

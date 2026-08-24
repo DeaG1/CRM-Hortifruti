@@ -23,6 +23,7 @@
 import { healthDoCliente, type Cliente, type Health, type StatusCliente } from './clientes'
 import type { Fornecedor } from './fornecedores'
 import type { Lancamento } from './lancamentos'
+import { situacaoExibidaSaida } from './pagamento'
 
 // ---------------------------------------------------------------- entrada
 
@@ -217,12 +218,24 @@ export interface RelatorioClientesTotais {
  * `cliente_id` (chave estrangeira real) — a migration 009 já registra essa
  * troca como intencional ("REFERENCIA POR ID, NAO POR NOME": renomear um
  * cliente não pode órfã o histórico dele). O cálculo em si é o mesmo.
+ *
+ * "Em atraso" (pra atrasoPorCliente/inadimplenciaPct) usa situacaoExibidaSaida
+ * (derive/pagamento.ts), não `pag === 'Atrasado'` cru — mesma razão de
+ * inadimplenciaPorCliente em derive/clientes.ts: desde que a interface
+ * parou de gravar 'Atrasado' à mão, o campo cru só reflete registros
+ * ANTIGOS, e filtrar por ele faria a inadimplência da carteira caminhar pra
+ * zero conforme esses registros forem sendo substituídos por vendas novas
+ * (sempre 'Pendente'/'Pago'), mesmo com dívida real se acumulando. Não é
+ * infidelidade ao protótipo, é consequência de 'Atrasado' ter deixado de
+ * ser um campo digitado. `hojeIso` é parâmetro pelo mesmo motivo de
+ * situacaoExibidaSaida: função pura, testável sem mockar relógio.
  */
 export function derivarRelatorioClientes(
   clientes: Cliente[],
   saidas: SaidaResumo[],
   de: string,
   ate: string,
+  hojeIso: string,
 ): { linhas: LinhaRelatorioCliente[]; totais: RelatorioClientesTotais } {
   const doPeriodo = saidas.filter(s => noPeriodo(s.entrega, de, ate))
   const entregues = doPeriodo.filter(s => s.status === 'Entregue')
@@ -236,7 +249,7 @@ export function derivarRelatorioClientes(
     fatPorCliente.set(p.cliente_id, (fatPorCliente.get(p.cliente_id) || 0) + (p.valor || 0))
     entPorCliente.set(p.cliente_id, (entPorCliente.get(p.cliente_id) || 0) + 1)
   })
-  doPeriodo.filter(p => p.pag === 'Atrasado').forEach(p => {
+  doPeriodo.filter(p => situacaoExibidaSaida(p.pag, p.venc, hojeIso) === 'Atrasado').forEach(p => {
     if (!p.cliente_id) return
     atrasoPorCliente.set(p.cliente_id, (atrasoPorCliente.get(p.cliente_id) || 0) + (p.valor || 0))
   })
@@ -271,7 +284,9 @@ export function derivarRelatorioClientes(
   const clientesAtendidos = new Set(
     entregues.map(p => p.cliente_id).filter((id): id is string => !!id),
   ).size
-  const valorAtraso = doPeriodo.filter(p => p.pag === 'Atrasado').reduce((s, p) => s + (p.valor || 0), 0)
+  const valorAtraso = doPeriodo
+    .filter(p => situacaoExibidaSaida(p.pag, p.venc, hojeIso) === 'Atrasado')
+    .reduce((s, p) => s + (p.valor || 0), 0)
 
   return {
     linhas,
@@ -315,6 +330,15 @@ export interface RelatorioInadimplentesTotais {
  * Porta o bloco `relInad`/`relInadTot` (linhas 2716-2740 do protótipo).
  * `hojeIso` é parâmetro (não `new Date()` interno) para a função continuar
  * pura e testável — a tela passa a data corrente.
+ *
+ * "Em atraso" (o agrupamento `atrasados` abaixo) usa situacaoExibidaSaida
+ * (derive/pagamento.ts), não `pag === 'Atrasado'` cru — mesma razão
+ * documentada em derivarRelatorioClientes, acima: a interface parou de
+ * gravar 'Atrasado' à mão, então o campo cru só continua correto pra
+ * registros ANTIGOS (que situacaoExibidaSaida também reconhece, pelo
+ * primeiro ramo da regra). Filtrar pelo campo gravado esvaziaria este
+ * relatório aos poucos, o oposto do que uma lista de inadimplentes deveria
+ * fazer conforme a dívida cresce.
  */
 export function derivarRelatorioInadimplentes(
   clientes: Cliente[],
@@ -331,7 +355,7 @@ export function derivarRelatorioInadimplentes(
     if (p.cliente_id) fatPorCliente.set(p.cliente_id, (fatPorCliente.get(p.cliente_id) || 0) + (p.valor || 0))
   })
 
-  const atrasados = doPeriodo.filter(p => p.pag === 'Atrasado')
+  const atrasados = doPeriodo.filter(p => situacaoExibidaSaida(p.pag, p.venc, hojeIso) === 'Atrasado')
   const agg = new Map<string, { peds: number; valor: number; maisAntigo: number | null; vencs: string[] }>()
   atrasados.forEach(p => {
     if (!p.cliente_id) return
@@ -411,11 +435,26 @@ export interface RelatorioPedidosTotais {
 const ORDEM_STATUS: SaidaResumo['status'][] = ['Entregue', 'Em rota', 'Pendente', 'Devolvido', 'Cancelado']
 
 /** Porta o bloco `relPedidosTot`/`relStatus`/`relRotas` (linhas 2645-2649 e
- * 2766-2772 do protótipo). */
+ * 2766-2772 do protótipo).
+ *
+ * `aReceber` NÃO precisou trocar para situacaoExibidaSaida: soma pedidos com
+ * `pag` 'Atrasado' OU 'Pendente', e como 'Atrasado' derivado só existe a
+ * partir de um `pag` gravado 'Pendente' (ver pagamento.ts), o conjunto
+ * {pag==='Atrasado' ∪ pag==='Pendente'} já é idêntico ao conjunto
+ * {situacao exibida==='Atrasado' ∪ situacao exibida==='Pendente'} —
+ * matematicamente a mesma soma, com ou sem `hojeIso`.
+ *
+ * `pedidosAtrasados`, por outro lado, conta SÓ o subconjunto 'Atrasado' —
+ * aí a troca importa: usa situacaoExibidaSaida (derive/pagamento.ts) pra não
+ * subcontar pedidos 'Pendente' com vencimento já vencido, mesma razão
+ * documentada em derivarRelatorioClientes/derivarRelatorioInadimplentes,
+ * acima. `hojeIso` novo parâmetro por isso.
+ */
 export function derivarRelatorioPedidos(
   saidas: SaidaResumo[],
   de: string,
   ate: string,
+  hojeIso: string,
 ): { totais: RelatorioPedidosTotais; porStatus: LinhaStatusPedido[]; porRota: LinhaRota[] } {
   const doPeriodo = saidas.filter(s => noPeriodo(s.entrega, de, ate))
   const entregues = doPeriodo.filter(s => s.status === 'Entregue')
@@ -423,7 +462,7 @@ export function derivarRelatorioPedidos(
   const aReceber = doPeriodo
     .filter(p => p.pag === 'Atrasado' || p.pag === 'Pendente')
     .reduce((s, p) => s + (p.valor || 0), 0)
-  const pedidosAtrasados = doPeriodo.filter(p => p.pag === 'Atrasado').length
+  const pedidosAtrasados = doPeriodo.filter(p => situacaoExibidaSaida(p.pag, p.venc, hojeIso) === 'Atrasado').length
 
   const porStatus = ORDEM_STATUS.map(status => {
     const arr = doPeriodo.filter(p => p.status === status)

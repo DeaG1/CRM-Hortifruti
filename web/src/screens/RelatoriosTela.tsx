@@ -262,9 +262,9 @@ export function RelatoriosTela({ onSessaoExpirada }: RelatoriosTelaProps) {
   }
 
   const hojeIso = hojeIsoLocal()
-  const relClientes = derivarRelatorioClientes(clientes, saidas, de, ate)
+  const relClientes = derivarRelatorioClientes(clientes, saidas, de, ate, hojeIso)
   const relInad = derivarRelatorioInadimplentes(clientes, saidas, de, ate, hojeIso)
-  const relPedidos = derivarRelatorioPedidos(saidas, de, ate)
+  const relPedidos = derivarRelatorioPedidos(saidas, de, ate, hojeIso)
   const relCompras = derivarRelatorioCompras(fornecedores, entradas, de, ate)
   const relProdutos = derivarRelatorioProdutos(produtosAgregados, produtos.length)
   const relPerdas = derivarRelatorioPerdas(entradas, perdas, relProdutos.linhas, de, ate)

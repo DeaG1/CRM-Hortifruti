@@ -18,6 +18,15 @@ const HEALTH_INFO: Record<Health, { cor: string; bg: string; label: string }> = 
 
 const money = (n: number) => 'R$ ' + n.toLocaleString('pt-BR')
 
+/** Data de hoje em 'AAAA-MM-DD', usando os componentes LOCAIS (não UTC) —
+ * mesmo `hojeIsoLocal()` de RelatoriosTela.tsx/ClientesLista.tsx. Fica na
+ * tela porque toca `new Date()`; `derivarClientes` continua pura recebendo
+ * a data como parâmetro. */
+function hojeIsoLocal(): string {
+  const n = new Date()
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
+}
+
 function iniciais(nome: string): string {
   return nome
     .split(' ')
@@ -92,7 +101,7 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
 
   // Ainda nao ha endpoint de pedidos (Fase 1): lista vazia, mesma convencao
   // de ClientesLista — as derivacoes tratam ausencia de pedido sem quebrar.
-  const [derivado] = derivarClientes([cliente], [], 'all')
+  const [derivado] = derivarClientes([cliente], [], 'all', hojeIsoLocal())
   const health = HEALTH_INFO[derivado.health]
   const statusLabel = STATUS_LABEL[cliente.status] ?? cliente.status
 

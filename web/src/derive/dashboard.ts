@@ -2,6 +2,7 @@ import type { Cliente, Health } from './clientes'
 import type { Lancamento } from './lancamentos'
 import { diasEstoque, calcularCicloCaixa } from './financeiro'
 import { derivarRelatorioProdutos, type ProdutoAgregado, perdaColetaEfetiva } from './relatorios'
+import { situacaoExibidaSaida } from './pagamento'
 
 /**
  * Formas mínimas de Saida/Entrada/Perda como a API devolve (ver
@@ -38,6 +39,12 @@ export interface Saida {
   data_pag: string | null
   valor?: number
   peso?: number
+  /** Vencimento (ISO), necessário para inadimplenciaGeral() derivar
+   * 'Atrasado' via situacaoExibidaSaida (derive/pagamento.ts) em vez do
+   * `pag` gravado cru — ver o comentário grande em inadimplenciaGeral, mais
+   * abaixo. Já vem de GET /api/saidas; só não estava modelado aqui. Opcional
+   * pelo mesmo motivo de `valor`/`peso` acima: fixtures de teste parciais. */
+  venc?: string | null
 }
 
 export interface Entrada {
@@ -218,14 +225,30 @@ export function ticketMedioPorMinimercado(saidas: Saida[]): Indicador {
  * Inadimplência GERAL (não é a média por cliente de derive/clientes.ts —
  * outra métrica, outro escopo): quanto do faturado está atrasado, na
  * operação inteira. Porta design/CRM Hortifruti.dc.html:2162-2166: valor em
- * atraso vem de TODOS os pedidos do período com pag='Atrasado' (qualquer
- * status), não só dos entregues; o denominador é só a receita dos
- * entregues.
+ * atraso vem de TODOS os pedidos do período em atraso (qualquer status),
+ * não só dos entregues; o denominador é só a receita dos entregues. Essa
+ * assimetria (numerador "qualquer status", denominador só Entregue) é fiel
+ * ao protótipo, já reportada ao dono do produto, e NÃO é o que esta função
+ * corrige — não mexer nela aqui.
+ *
+ * "Em atraso" usa situacaoExibidaSaida (derive/pagamento.ts), não mais
+ * `pag === 'Atrasado'` cru: desde que a interface parou de gravar
+ * 'Atrasado' à mão (o seletor só oferece Pendente/Pago; 'Atrasado' passou a
+ * ser CALCULADO a partir de `pag==='Pendente'` + vencimento vencido),
+ * filtrar pelo campo gravado faria este indicador caminhar pra zero
+ * conforme as vendas antigas ('Atrasado' gravado à mão) fossem sendo
+ * substituídas por vendas novas — mostrando carteira saudável com dívida
+ * real se acumulando. Não é infidelidade ao protótipo: é a consequência
+ * necessária de 'Atrasado' ter deixado de ser um campo digitado.
+ * `hojeIso` é parâmetro (não `new Date()` interno) pelo mesmo motivo de
+ * situacaoExibidaSaida: função pura, testável sem mockar relógio.
  */
-export function inadimplenciaGeral(saidas: Saida[]): Indicador {
+export function inadimplenciaGeral(saidas: Saida[], hojeIso: string): Indicador {
   const receita = receitaBruta(saidas)
   if (!receita.disponivel) return receita
-  const valorAtraso = saidas.filter(p => p.pag === 'Atrasado').reduce((s, p) => s + (p.valor || 0), 0)
+  const valorAtraso = saidas
+    .filter(p => situacaoExibidaSaida(p.pag, p.venc, hojeIso) === 'Atrasado')
+    .reduce((s, p) => s + (p.valor || 0), 0)
   return disponivel((valorAtraso / receita.valor) * 100)
 }
 

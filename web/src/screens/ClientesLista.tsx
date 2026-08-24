@@ -35,6 +35,16 @@ const NEUTRO = '#9a9784'
 
 const money = (n: number) => 'R$ ' + n.toLocaleString('pt-BR')
 
+/** Data de hoje em 'AAAA-MM-DD', usando os componentes LOCAIS (não UTC) —
+ * mesmo `hojeIsoLocal()` de RelatoriosTela.tsx/SaidasLista.tsx. Fica na tela
+ * (não em derive/clientes.ts) porque toca `new Date()`: a função pura
+ * (`derivarClientes` → `inadimplenciaPorCliente` → `situacaoExibidaSaida`)
+ * recebe isso como parâmetro, pra continuar testável sem mockar relógio. */
+function hojeIsoLocal(): string {
+  const n = new Date()
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
+}
+
 /** Cor do ticket por entrega: portado de entregaColor do protótipo. Zero fica
  * neutro (ainda não há pedidos), em vez de vermelho — sem pedido não é risco. */
 function corTicketEntrega(v: number): string {
@@ -86,7 +96,7 @@ export function ClientesLista({ onAbrir, onSessaoExpirada }: ClientesListaProps)
     return () => { cancelado = true }
   }, [onSessaoExpirada])
 
-  const derivados: ClienteDerivado[] = derivarClientes(clientes, pedidos, periodo)
+  const derivados: ClienteDerivado[] = derivarClientes(clientes, pedidos, periodo, hojeIsoLocal())
   const visiveis = filtro === 'Todos'
     ? derivados
     : derivados.filter(c => rotuloStatus(c.status) === filtro)

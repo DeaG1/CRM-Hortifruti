@@ -146,7 +146,7 @@ describe('derivarRelatorioClientes', () => {
       saida({ cliente_id: '1', valor: 750, status: 'Entregue' }),
       saida({ cliente_id: '2', valor: 250, status: 'Entregue' }),
     ]
-    const { linhas, totais } = derivarRelatorioClientes(clientes, saidas, '', '')
+    const { linhas, totais } = derivarRelatorioClientes(clientes, saidas, '', '', '2026-06-15')
     expect(linhas.find(l => l.nome === 'A')!.participacaoPct).toBe(75)
     expect(linhas.find(l => l.nome === 'B')!.participacaoPct).toBe(25)
     expect(totais.faturamentoPeriodo).toBe(1000)
@@ -158,7 +158,7 @@ describe('derivarRelatorioClientes', () => {
       saida({ cliente_id: '1', valor: 100 }),
       saida({ cliente_id: '2', valor: 900 }),
     ]
-    const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '')
+    const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '', '2026-06-15')
     expect(linhas.map(l => l.nome)).toEqual(['Maior', 'Menor'])
   })
 
@@ -168,7 +168,7 @@ describe('derivarRelatorioClientes', () => {
       saida({ valor: 500, status: 'Entregue' }),
       saida({ valor: 9999, status: 'Cancelado' }),
     ]
-    const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '')
+    const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '', '2026-06-15')
     expect(linhas[0].faturado).toBe(500)
   })
 
@@ -178,7 +178,7 @@ describe('derivarRelatorioClientes', () => {
       saida({ valor: 1000, status: 'Entregue', pag: 'Pago' }),
       saida({ valor: 1000, status: 'Entregue', pag: 'Atrasado' }),
     ]
-    const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '')
+    const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '', '2026-06-15')
     // faturado = 2000 (ambos Entregue); atrasado = 1000 => 50%
     expect(linhas[0].inadimplenciaPct).toBeCloseTo(50)
   })
@@ -189,7 +189,7 @@ describe('derivarRelatorioClientes', () => {
       saida({ entrega: '2026-06-10', valor: 1000 }),
       saida({ entrega: '2026-05-10', valor: 9999 }),
     ]
-    const { linhas } = derivarRelatorioClientes(clientes, saidas, '2026-06', '2026-06')
+    const { linhas } = derivarRelatorioClientes(clientes, saidas, '2026-06', '2026-06', '2026-06-15')
     expect(linhas[0].faturado).toBe(1000)
   })
 
@@ -197,14 +197,14 @@ describe('derivarRelatorioClientes', () => {
     // ticket = 149 (arredondado) -> health vermelho, mesmo com inadimplencia zero
     const clientes = [cliente({ status: 'ativo', tend: '→' })]
     const saidas = [saida({ valor: 149, status: 'Entregue', pag: 'Pago' })]
-    const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '')
+    const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '', '2026-06-15')
     expect(linhas[0].ticketEntrega).toBe(149)
     expect(linhas[0].health).toBe('red')
   })
 
   it('cliente inadimplente cadastrado e sempre vermelho, mesmo sem pedido no periodo', () => {
     const clientes = [cliente({ status: 'inadimplente' })]
-    const { linhas } = derivarRelatorioClientes(clientes, [], '', '')
+    const { linhas } = derivarRelatorioClientes(clientes, [], '', '', '2026-06-15')
     expect(linhas[0].health).toBe('red')
     expect(linhas[0].faturado).toBe(0)
   })
@@ -214,7 +214,7 @@ describe('derivarRelatorioClientes', () => {
       cliente({ id: '1', status: 'ativo' }),
       cliente({ id: '2', status: 'inativo' }),
     ]
-    const { totais } = derivarRelatorioClientes(clientes, [], '', '')
+    const { totais } = derivarRelatorioClientes(clientes, [], '', '', '2026-06-15')
     expect(totais.clientesAtivos).toBe(1)
     expect(totais.clientesTotal).toBe(2)
   })
@@ -226,15 +226,60 @@ describe('derivarRelatorioClientes', () => {
       saida({ cliente_id: '1', valor: 400, status: 'Entregue' }), // mesmo cliente, 2 entregas
       saida({ cliente_id: '2', valor: 1000, status: 'Entregue' }),
     ]
-    const { totais } = derivarRelatorioClientes(clientes, saidas, '', '')
+    const { totais } = derivarRelatorioClientes(clientes, saidas, '', '', '2026-06-15')
     // receita 2000, 2 clientes distintos atendidos => 1000
     expect(totais.ticketMedioCliente).toBe(1000)
   })
 
   it('sem receita no periodo, inadimplencia media e ticket medio ficam zerados (sem dividir por zero)', () => {
-    const { totais } = derivarRelatorioClientes([cliente()], [], '', '')
+    const { totais } = derivarRelatorioClientes([cliente()], [], '', '', '2026-06-15')
     expect(totais.inadimplenciaMediaPct).toBe(0)
     expect(totais.ticketMedioCliente).toBe(0)
+  })
+
+  // DEFEITO CORRIGIDO: a UI parou de gravar 'Atrasado' (SaidasLista/ModalSaida
+  // so oferecem Pendente/Pago — ver derive/pagamento.ts); 'Atrasado' passou a
+  // ser CALCULADO a partir de pag='Pendente' + venc vencido. Antes desta
+  // correcao, a inadimplencia por cliente filtrava so o `pag` gravado e
+  // caminhava pra zero conforme os registros antigos fossem substituidos por
+  // vendas novas — mesmo com divida real se acumulando.
+  describe('deriva "atrasado" via situacaoExibidaSaida (nao so o pag gravado)', () => {
+    const HOJE = '2026-06-15'
+
+    it('pendente com vencimento passado conta como atrasada', () => {
+      const clientes = [cliente()]
+      const saidas = [saida({ status: 'Entregue', pag: 'Pendente', venc: '2026-06-01', valor: 1000 })]
+      const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '', HOJE)
+      expect(linhas[0].inadimplenciaPct).toBe(100)
+    })
+
+    it('pendente com vencimento futuro NAO conta', () => {
+      const clientes = [cliente()]
+      const saidas = [saida({ status: 'Entregue', pag: 'Pendente', venc: '2026-07-01', valor: 1000 })]
+      const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '', HOJE)
+      expect(linhas[0].inadimplenciaPct).toBe(0)
+    })
+
+    it('pendente sem vencimento NAO conta (nao inventa data default)', () => {
+      const clientes = [cliente()]
+      const saidas = [saida({ status: 'Entregue', pag: 'Pendente', venc: null, valor: 1000 })]
+      const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '', HOJE)
+      expect(linhas[0].inadimplenciaPct).toBe(0)
+    })
+
+    it('paga nunca conta, mesmo com vencimento passado', () => {
+      const clientes = [cliente()]
+      const saidas = [saida({ status: 'Entregue', pag: 'Pago', venc: '2026-01-01', valor: 1000 })]
+      const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '', HOJE)
+      expect(linhas[0].inadimplenciaPct).toBe(0)
+    })
+
+    it('registro gravado como Atrasado (dado antigo) continua contando', () => {
+      const clientes = [cliente()]
+      const saidas = [saida({ status: 'Entregue', pag: 'Atrasado', venc: null, valor: 1000 })]
+      const { linhas } = derivarRelatorioClientes(clientes, saidas, '', '', HOJE)
+      expect(linhas[0].inadimplenciaPct).toBe(100)
+    })
   })
 })
 
@@ -315,6 +360,49 @@ describe('derivarRelatorioInadimplentes', () => {
     const { totais } = derivarRelatorioInadimplentes(clientes, saidas, '2026-06', '2026-06', '2026-06-15')
     expect(totais.totalEmAtraso).toBe(200)
   })
+
+  // DEFEITO CORRIGIDO: a UI parou de gravar 'Atrasado' (SaidasLista/ModalSaida
+  // so oferecem Pendente/Pago — ver derive/pagamento.ts); 'Atrasado' passou a
+  // ser CALCULADO a partir de pag='Pendente' + venc vencido. Antes desta
+  // correcao, o relatorio de inadimplentes so agrupava `pag === 'Atrasado'`
+  // cru e esvaziaria aos poucos conforme vendas antigas fossem substituidas
+  // por vendas novas — o oposto do que uma lista de inadimplentes deveria
+  // fazer conforme a divida cresce.
+  describe('deriva "atrasado" via situacaoExibidaSaida (nao so o pag gravado)', () => {
+    const HOJE = '2026-06-15'
+
+    it('pendente com vencimento passado conta como atrasada', () => {
+      const saidas = [saida({ cliente_id: '1', pag: 'Pendente', venc: '2026-06-01', valor: 500 })]
+      const { linhas } = derivarRelatorioInadimplentes(clientes, saidas, '', '', HOJE)
+      expect(linhas).toHaveLength(1)
+      expect(linhas[0].valorAtraso).toBe(500)
+    })
+
+    it('pendente com vencimento futuro NAO conta', () => {
+      const saidas = [saida({ cliente_id: '1', pag: 'Pendente', venc: '2026-07-01', valor: 500 })]
+      const { linhas } = derivarRelatorioInadimplentes(clientes, saidas, '', '', HOJE)
+      expect(linhas).toHaveLength(0)
+    })
+
+    it('pendente sem vencimento NAO conta (nao inventa data default)', () => {
+      const saidas = [saida({ cliente_id: '1', pag: 'Pendente', venc: null, valor: 500 })]
+      const { linhas } = derivarRelatorioInadimplentes(clientes, saidas, '', '', HOJE)
+      expect(linhas).toHaveLength(0)
+    })
+
+    it('paga nunca conta, mesmo com vencimento passado', () => {
+      const saidas = [saida({ cliente_id: '1', pag: 'Pago', venc: '2026-01-01', valor: 500 })]
+      const { linhas } = derivarRelatorioInadimplentes(clientes, saidas, '', '', HOJE)
+      expect(linhas).toHaveLength(0)
+    })
+
+    it('registro gravado como Atrasado (dado antigo) continua contando', () => {
+      const saidas = [saida({ cliente_id: '1', pag: 'Atrasado', venc: null, valor: 500 })]
+      const { linhas } = derivarRelatorioInadimplentes(clientes, saidas, '', '', HOJE)
+      expect(linhas).toHaveLength(1)
+      expect(linhas[0].valorAtraso).toBe(500)
+    })
+  })
 })
 
 // ------------------------------------------------------------ 3. relatório de pedidos
@@ -326,7 +414,7 @@ describe('derivarRelatorioPedidos', () => {
       saida({ status: 'Em rota', pag: 'Pendente', valor: 500, peso: 50 }),
       saida({ status: 'Entregue', pag: 'Atrasado', valor: 300, peso: 30 }),
     ]
-    const { totais } = derivarRelatorioPedidos(saidas, '', '')
+    const { totais } = derivarRelatorioPedidos(saidas, '', '', '2026-06-15')
     expect(totais.pedidosNoPeriodo).toBe(3)
     expect(totais.faturadoEntregue).toBe(1300) // so os Entregue: 1000+300
     expect(totais.aReceber).toBe(800) // Pendente + Atrasado: 500+300
@@ -339,7 +427,7 @@ describe('derivarRelatorioPedidos', () => {
       saida({ status: 'Entregue', valor: 100 }),
       saida({ status: 'Cancelado', valor: 50 }),
     ]
-    const { porStatus } = derivarRelatorioPedidos(saidas, '', '')
+    const { porStatus } = derivarRelatorioPedidos(saidas, '', '', '2026-06-15')
     expect(porStatus.map(s => s.status)).toEqual(['Entregue', 'Cancelado'])
     expect(porStatus.every(s => s.quantidade > 0)).toBe(true)
   })
@@ -350,7 +438,7 @@ describe('derivarRelatorioPedidos', () => {
       saida({ rota: 'Sul A', valor: 500, peso: 50 }),
       saida({ rota: 'Norte C', valor: 300, peso: 30 }),
     ]
-    const { porRota } = derivarRelatorioPedidos(saidas, '', '')
+    const { porRota } = derivarRelatorioPedidos(saidas, '', '', '2026-06-15')
     const sul = porRota.find(r => r.rota === 'Sul A')!
     expect(sul.pedidos).toBe(2)
     expect(sul.peso).toBe(150)
@@ -359,7 +447,7 @@ describe('derivarRelatorioPedidos', () => {
   })
 
   it('rota ausente vira "—"', () => {
-    const { porRota } = derivarRelatorioPedidos([saida({ rota: '' })], '', '')
+    const { porRota } = derivarRelatorioPedidos([saida({ rota: '' })], '', '', '2026-06-15')
     expect(porRota[0].rota).toBe('—')
   })
 
@@ -368,8 +456,42 @@ describe('derivarRelatorioPedidos', () => {
       saida({ entrega: '2026-06-10', valor: 1000, status: 'Entregue' }),
       saida({ entrega: '2026-05-10', valor: 500, status: 'Entregue' }),
     ]
-    const { totais } = derivarRelatorioPedidos(saidas, '2026-06', '2026-06')
+    const { totais } = derivarRelatorioPedidos(saidas, '2026-06', '2026-06', '2026-06-15')
     expect(totais.faturadoEntregue).toBe(1000)
+  })
+
+  // DEFEITO CORRIGIDO: a UI parou de gravar 'Atrasado' (SaidasLista/ModalSaida
+  // so oferecem Pendente/Pago — ver derive/pagamento.ts); 'Atrasado' passou a
+  // ser CALCULADO a partir de pag='Pendente' + venc vencido. `pedidosAtrasados`
+  // contava so `pag === 'Atrasado'` cru e subcontaria pedidos 'Pendente' com
+  // vencimento ja vencido.
+  describe('pedidosAtrasados deriva "atrasado" via situacaoExibidaSaida (nao so o pag gravado)', () => {
+    const HOJE = '2026-06-15'
+
+    it('pendente com vencimento passado conta como atrasada', () => {
+      const { totais } = derivarRelatorioPedidos([saida({ pag: 'Pendente', venc: '2026-06-01' })], '', '', HOJE)
+      expect(totais.pedidosAtrasados).toBe(1)
+    })
+
+    it('pendente com vencimento futuro NAO conta', () => {
+      const { totais } = derivarRelatorioPedidos([saida({ pag: 'Pendente', venc: '2026-07-01' })], '', '', HOJE)
+      expect(totais.pedidosAtrasados).toBe(0)
+    })
+
+    it('pendente sem vencimento NAO conta (nao inventa data default)', () => {
+      const { totais } = derivarRelatorioPedidos([saida({ pag: 'Pendente', venc: null })], '', '', HOJE)
+      expect(totais.pedidosAtrasados).toBe(0)
+    })
+
+    it('paga nunca conta, mesmo com vencimento passado', () => {
+      const { totais } = derivarRelatorioPedidos([saida({ pag: 'Pago', venc: '2026-01-01' })], '', '', HOJE)
+      expect(totais.pedidosAtrasados).toBe(0)
+    })
+
+    it('registro gravado como Atrasado (dado antigo) continua contando', () => {
+      const { totais } = derivarRelatorioPedidos([saida({ pag: 'Atrasado', venc: null })], '', '', HOJE)
+      expect(totais.pedidosAtrasados).toBe(1)
+    })
   })
 })
 

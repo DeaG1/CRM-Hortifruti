@@ -246,3 +246,84 @@ describe('ProdutosLista — recarrega apos salvar/excluir no modal', () => {
     expect(chamadasProdutos).toBe(2)
   })
 })
+
+/**
+ * As quantidades de GET /api/relatorios/produtos chegam em kg, com cada
+ * lancamento convertido pela unidade dele. Lancamento em unidade nao-KG cujo
+ * produto nao tem peso medio cadastrado nao e convertivel: a API o deixa de
+ * fora e diz quantos foram em `itens_sem_conversao`, em vez de inventar fator
+ * 1. Como o valor em reais desses lancamentos continua inteiro, a compra
+ * media (valor/qtd) sai PARA CIMA — e esta e a tela onde o dono decide preco
+ * de venda. Um markup incompleto exibido limpo seria a pior das opcoes.
+ */
+describe('ProdutosLista — metricas incompletas (lancamento sem peso medio)', () => {
+  it('produto 100% convertivel: as cinco metricas saem limpas, sem marca nem nota', async () => {
+    mockRotas(
+      [produto({ id: '1', nome: 'Batata' })],
+      [agregado({
+        produto_id: '1', compra_qtd: 10, compra_valor: 50, venda_qtd: 10, venda_valor: 80,
+        perda_deposito_qtd: 1,
+      })],
+    )
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    const linha = (await screen.findByText('Batata')).closest('.produtos-linha') as HTMLElement
+
+    expect(within(linha).getByText('R$ 5,00')).toBeInTheDocument()
+    expect(within(linha).queryByText('R$ 5,00*')).not.toBeInTheDocument()
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
+  it('produto com lancamento nao convertivel: as cinco metricas marcadas com * e title explicando', async () => {
+    mockRotas(
+      [produto({ id: '1', nome: 'Batata' })],
+      [agregado({
+        produto_id: '1', compra_qtd: 10, compra_valor: 50, venda_qtd: 10, venda_valor: 80,
+        perda_deposito_qtd: 1, itens_sem_conversao: 2,
+      })],
+    )
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    const linha = (await screen.findByText('Batata')).closest('.produtos-linha') as HTMLElement
+
+    // compra media 5,00 · venda media 8,00 · markup 60% · margem R$ 30 · perda 10,0%
+    const marcados = ['R$ 5,00*', 'R$ 8,00*', '60%*', 'R$ 30*', '10,0%*']
+    for (const texto of marcados) expect(within(linha).getByText(texto)).toBeInTheDocument()
+    // A explicacao vive no title da propria celula — o asterisco sozinho
+    // sinalizaria sem dizer o que falta.
+    const celula = within(linha).getByText('R$ 5,00*')
+    expect(celula.getAttribute('title')).toContain('2 lançamentos')
+    expect(celula.getAttribute('title')).toContain('peso médio')
+  })
+
+  it('a nota de rodape aparece com o total e diz como resolver', async () => {
+    mockRotas(
+      [produto({ id: '1', nome: 'Batata' }), produto({ id: '2', nome: 'Cenoura' })],
+      [
+        agregado({ produto_id: '1', compra_qtd: 10, compra_valor: 50, itens_sem_conversao: 2 }),
+        agregado({ produto_id: '2', nome: 'Cenoura', compra_qtd: 10, compra_valor: 50, itens_sem_conversao: 1 }),
+      ],
+    )
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+
+    const nota = screen.getByRole('note')
+    expect(nota).toHaveTextContent('3 lançamentos')
+    expect(nota).toHaveTextContent('fora das quantidades')
+    expect(nota).toHaveTextContent('Cadastre o peso médio da embalagem')
+  })
+
+  it('produto sem metrica nenhuma (fora do agregado) nao ganha marca — nao ha o que sinalizar', async () => {
+    mockRotas([produto({ id: '1', nome: 'Batata' })], [])
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
+  it('a dica do topo diz que os precos sao por quilo, nao "por unidade do produto"', async () => {
+    mockRotas([produto()])
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    // Depois da conversao na API, compra media e venda media sao R$/kg para
+    // qualquer produto — inclusive os comprados em caixa.
+    expect(screen.getByText(/por quilo/i)).toBeInTheDocument()
+  })
+})

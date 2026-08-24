@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { api, ErroApi } from '../api/client'
 import {
   derivarRelatorioClientes, derivarRelatorioInadimplentes, derivarRelatorioPedidos,
@@ -109,23 +109,62 @@ const pct1 = (n: number) => n.toFixed(1).replace('.', ',') + '%'
 const pctInt = (n: number) => Math.round(n) + '%'
 
 /**
- * Texto do aviso de quantidade incompleta na aba Compras. `peso_total` (e
- * portanto a QTD e o PREÇO MÉD. do relatório) sai da API em quilos, com
- * cada item convertido pela unidade dele — mas item lançado em unidade
- * diferente de KG cujo produto não tem peso médio cadastrado NÃO é
- * convertível, e a API prefere deixá-lo de fora a inventar um fator (ver
- * `itens_sem_conversao` em api/src/routes/entradas.ts). Quando isso
- * acontece o preço médio ainda sai — mas sai para cima, porque o valor
- * desses itens continua no numerador e o peso deles não entra no
+ * Texto do aviso de quantidade incompleta — usado por três abas (Compras,
+ * Pedidos e Produtos), com a mesma primeira metade e uma `consequencia`
+ * própria de cada uma.
+ *
+ * As quantidades destas abas saem da API em quilos, com cada lançamento
+ * convertido pela unidade dele — mas lançamento em unidade diferente de KG
+ * cujo produto não tem peso médio cadastrado NÃO é convertível, e a API
+ * prefere deixá-lo de fora a inventar um fator (ver `itens_sem_conversao` em
+ * api/src/routes/entradas.ts, saidas.ts e relatorios.ts). Quando isso
+ * acontece os números derivados ainda saem — mas saem para cima, porque o
+ * valor desses lançamentos continua no numerador e o peso deles não entra no
  * denominador. Por isso a célula é marcada com `*` e este texto explica o
  * que falta: um número errado é pior que um número faltando, e um número
  * incompleto exibido limpo é a pior das três opções. */
-function avisoSemConversao(n: number): string {
+function avisoSemConversao(n: number, consequencia: string): string {
   const itens = n === 1 ? '1 item lançado' : `${n} itens lançados`
   const verbo = n === 1 ? 'ficou' : 'ficaram'
   return `${itens} em unidade diferente de KG, sem peso médio cadastrado no produto, ${verbo} `
-    + 'fora da quantidade — sem o peso da embalagem não há como somar em quilos. '
-    + 'O preço médio acima está calculado sobre uma quantidade incompleta.'
+    + `fora da quantidade — sem o peso da embalagem não há como somar em quilos. ${consequencia}`
+}
+
+/** Consequência por aba — o que exatamente o leitor não pode ler como número
+ * fechado enquanto houver lançamento fora da conta. */
+const CONSEQ_PRECO_MEDIO = 'O preço médio acima está calculado sobre uma quantidade incompleta.'
+const CONSEQ_QTD = 'A quantidade acima está incompleta.'
+const CONSEQ_METRICAS_PRODUTO =
+  'Os números desta linha (quantidades, margem, markup e perda) estão calculados sobre '
+  + 'quantidade incompleta.'
+
+/** Frase final das notas de rodapé — a saída do problema, não só o aviso. */
+const CADASTRE_PESO_MEDIO = 'Cadastre o peso médio da embalagem em Produtos para que entrem na conta.'
+
+/**
+ * Um número que pode estar incompleto: com `n` = 0 sai limpo (o caso normal,
+ * sem marca nem tooltip); com `n` > 0 ganha o `*` e a explicação no `title`.
+ * Um componente só para as três abas afetadas, para o sinal ser literalmente
+ * o mesmo em todas — duas marcações divergentes ensinariam o leitor duas
+ * convenções diferentes para o mesmo problema.
+ */
+function NumIncompleto({ texto, n, consequencia }: { texto: string; n: number; consequencia: string }) {
+  if (!n) return <>{texto}</>
+  return (
+    <span className="relatorios-incompleto" title={avisoSemConversao(n, consequencia)}>
+      {texto}*
+    </span>
+  )
+}
+
+/** Nota de rodapé da aba, quando algum número dela saiu incompleto. */
+function NotaSemConversao({ n, consequencia }: { n: number; consequencia: string }) {
+  if (!n) return null
+  return (
+    <div className="relatorios-nota relatorios-nota--incompleto" role="note">
+      <strong>*</strong> {avisoSemConversao(n, consequencia)} {CADASTRE_PESO_MEDIO}
+    </div>
+  )
 }
 
 /** 'AAAA-MM-DD' -> 'DD/MM'. Travessão sem data válida — mesmo `_fmtDM` do protótipo. */
@@ -170,7 +209,10 @@ function baixarCsv(nomeArquivo: string, conteudo: string) {
 
 // ------------------------------------------------------------- cartão-resumo
 
-function Cartao({ label, valor, sub }: { label: string; valor: string; sub: string }) {
+/** `valor` é ReactNode, não string, só para o cartão poder exibir um número
+ * marcado como incompleto (<NumIncompleto>, acima) — a esmagadora maioria dos
+ * cartões continua passando uma string simples. */
+function Cartao({ label, valor, sub }: { label: string; valor: ReactNode; sub: string }) {
   return (
     <div className="relatorios-cartao">
       <div className="relatorios-cartao-label">{label}</div>
@@ -180,7 +222,7 @@ function Cartao({ label, valor, sub }: { label: string; valor: string; sub: stri
   )
 }
 
-function Cartoes({ itens }: { itens: { label: string; valor: string; sub: string }[] }) {
+function Cartoes({ itens }: { itens: { label: string; valor: ReactNode; sub: string }[] }) {
   return (
     <div className="relatorios-cartoes">
       {itens.map(c => <Cartao key={c.label} {...c} />)}
@@ -306,8 +348,14 @@ export function RelatoriosTela({ onSessaoExpirada }: RelatoriosTelaProps) {
         // Igual ao protótipo: o CSV de "Pedidos" exporta a tabela de
         // desempenho por rota, não o resumo de status.
         return {
-          header: ['Rota', 'Pedidos', 'Qtd', 'Faturado', 'Ticket'],
-          rows: relPedidos.porRota.map(r => [r.rota, r.pedidos, qtd(r.peso), money(r.faturado), money(r.ticket)]),
+          header: ['Rota', 'Pedidos', 'Qtd (kg)', 'Faturado', 'Ticket'],
+          rows: relPedidos.porRota.map(r => [
+            r.rota, r.pedidos,
+            // Mesmo asterisco da tela: o CSV sai da mesma leitura, não de uma
+            // versão "limpa" que esconderia a quantidade incompleta.
+            qtd(r.peso) + (r.itensSemConversao > 0 ? '*' : ''),
+            money(r.faturado), money(r.ticket),
+          ]),
         }
       case 'lancamentos':
         return {
@@ -329,12 +377,18 @@ export function RelatoriosTela({ onSessaoExpirada }: RelatoriosTelaProps) {
         }
       case 'produtos':
         return {
-          header: ['Produto', 'Qtd comprada', 'Qtd vendida', 'Faturamento', 'Margem', 'Markup', 'Perda'],
-          rows: relProdutos.linhas.map(l => [
-            l.nome, qtd(l.compradoQtd), qtd(l.vendidoQtd), money(l.faturamento),
-            l.vendidoQtd ? money(l.margem) : '—', l.markupPct != null ? pctInt(l.markupPct) : '—',
-            l.perdaPct != null ? pct1(l.perdaPct) : '—',
-          ]),
+          header: ['Produto', 'Qtd comprada (kg)', 'Qtd vendida (kg)', 'Faturamento', 'Margem', 'Markup', 'Perda'],
+          rows: relProdutos.linhas.map(l => {
+            // Mesmo asterisco da tela, nas mesmas cinco colunas: o CSV sai da
+            // mesma leitura, não de uma versão "limpa".
+            const marca = l.itensSemConversao > 0 ? '*' : ''
+            return [
+              l.nome, qtd(l.compradoQtd) + marca, qtd(l.vendidoQtd) + marca, money(l.faturamento),
+              l.vendidoQtd ? money(l.margem) + marca : '—',
+              l.markupPct != null ? pctInt(l.markupPct) + marca : '—',
+              l.perdaPct != null ? pct1(l.perdaPct) + marca : '—',
+            ]
+          }),
         }
       case 'inadimplentes':
         return {
@@ -534,7 +588,19 @@ function AbaPedidos({ dados }: { dados: ReturnType<typeof derivarRelatorioPedido
         { label: 'Pedidos no período', valor: String(totais.pedidosNoPeriodo), sub: 'no período filtrado' },
         { label: 'Faturado (entregue)', valor: money(totais.faturadoEntregue), sub: 'pedidos entregues' },
         { label: 'A receber / atrasado', valor: money(totais.aReceber), sub: `${totais.pedidosAtrasados} em atraso` },
-        { label: 'Qtd entregue', valor: qtd(totais.qtdEntregueKg), sub: 'no período' },
+        {
+          label: 'Qtd entregue',
+          // Em kg — cada item convertido pela unidade dele na API. Marcado
+          // quando algum item entregue do período não era convertível.
+          valor: (
+            <NumIncompleto
+              texto={qtd(totais.qtdEntregueKg)}
+              n={totais.itensSemConversao}
+              consequencia={CONSEQ_QTD}
+            />
+          ),
+          sub: 'kg no período',
+        },
       ]}
       />
       <div className="relatorios-duas-colunas">
@@ -562,7 +628,9 @@ function AbaPedidos({ dados }: { dados: ReturnType<typeof derivarRelatorioPedido
             <div key={r.rota} className="relatorios-linha relatorios-grid-rotas">
               <div className="relatorios-forte">{r.rota}</div>
               <div className="relatorios-num relatorios-mono">{r.pedidos}</div>
-              <div className="relatorios-num relatorios-mono relatorios-suave">{qtd(r.peso)}</div>
+              <div className="relatorios-num relatorios-mono relatorios-suave">
+                <NumIncompleto texto={qtd(r.peso)} n={r.itensSemConversao} consequencia={CONSEQ_QTD} />
+              </div>
               <div className="relatorios-num relatorios-mono relatorios-forte">{money(r.faturado)}</div>
               <div className="relatorios-num relatorios-mono relatorios-suave">{money(r.ticket)}</div>
             </div>
@@ -570,7 +638,17 @@ function AbaPedidos({ dados }: { dados: ReturnType<typeof derivarRelatorioPedido
           {porRota.length === 0 && <div className="relatorios-tabela-vazia">Nenhum pedido no período.</div>}
         </div>
       </div>
-      <div className="relatorios-nota">Todos os números respeitam o período selecionado e são somados dos pedidos lançados.</div>
+      <div className="relatorios-nota">
+        Todos os números respeitam o período selecionado e são somados dos pedidos lançados. Quantidades
+        em <strong>kg</strong> (caixas convertidas pelo peso médio do produto).
+      </div>
+      <NotaSemConversao
+        // A soma por rota, não a dos entregues + a por rota: os entregues são
+        // um SUBCONJUNTO dos pedidos do período, e somar os dois contaria o
+        // mesmo item duas vezes. Este total cobre tudo que a aba exibe.
+        n={porRota.reduce((s, r) => s + r.itensSemConversao, 0)}
+        consequencia={CONSEQ_QTD}
+      />
     </>
   )
 }
@@ -603,13 +681,13 @@ function AbaCompras({ dados }: { dados: ReturnType<typeof derivarRelatorioCompra
             <div className="relatorios-num relatorios-mono relatorios-suave">
               {l.precoMedio == null
                 ? '—'
-                : l.itensSemConversao > 0
-                  ? (
-                    <span className="relatorios-incompleto" title={avisoSemConversao(l.itensSemConversao)}>
-                      {moneyDetalhado(l.precoMedio)}*
-                    </span>
-                  )
-                  : moneyDetalhado(l.precoMedio)}
+                : (
+                  <NumIncompleto
+                    texto={moneyDetalhado(l.precoMedio)}
+                    n={l.itensSemConversao}
+                    consequencia={CONSEQ_PRECO_MEDIO}
+                  />
+                )}
             </div>
             <div className="relatorios-num relatorios-mono relatorios-forte">{money(l.valor)}</div>
             <div className="relatorios-num relatorios-mono" style={{ color: corPerda(l.perdaPct) }}>{pct1(l.perdaPct)}</div>
@@ -623,12 +701,7 @@ function AbaCompras({ dados }: { dados: ReturnType<typeof derivarRelatorioCompra
         Ordenado por valor comprado. Quantidades em <strong>kg</strong> (caixas convertidas pelo peso médio do
         produto). <strong>Aproveitamento</strong> = quanto da carga chegou em condição de venda.
       </div>
-      {totais.itensSemConversao > 0 && (
-        <div className="relatorios-nota relatorios-nota--incompleto" role="note">
-          <strong>*</strong> {avisoSemConversao(totais.itensSemConversao)} Cadastre o peso médio da embalagem
-          em Produtos para que entrem na conta.
-        </div>
-      )}
+      <NotaSemConversao n={totais.itensSemConversao} consequencia={CONSEQ_PRECO_MEDIO} />
     </>
   )
 }
@@ -652,26 +725,48 @@ function AbaProdutos({ dados }: { dados: ReturnType<typeof derivarRelatorioProdu
           <div className="relatorios-num">FATURAMENTO</div><div className="relatorios-num">MARGEM</div>
           <div className="relatorios-num">MARKUP</div><div className="relatorios-num">PERDA</div>
         </div>
-        {linhas.map(l => (
-          <div key={l.produtoId} className="relatorios-linha relatorios-grid-produtos">
-            <div className="relatorios-forte">{l.nome}</div>
-            <div className="relatorios-num relatorios-mono relatorios-suave">{qtd(l.compradoQtd)}</div>
-            <div className="relatorios-num relatorios-mono relatorios-suave">{qtd(l.vendidoQtd)}</div>
-            <div className="relatorios-num relatorios-mono relatorios-forte">{money(l.faturamento)}</div>
-            <div className="relatorios-num relatorios-mono" style={{ color: '#2f5d3f' }}>{l.vendidoQtd ? money(l.margem) : '—'}</div>
-            <div className="relatorios-num relatorios-mono" style={{ color: corMarkup(l.markupPct) }}>
-              {l.markupPct != null ? pctInt(l.markupPct) : '—'}
+        {linhas.map(l => {
+          // Uma linha com lançamento não convertível tem TODOS os números
+          // derivados de quantidade errados na mesma medida — comprado,
+          // vendido, margem, markup e perda. Só FATURAMENTO escapa: reais são
+          // reais, independem da unidade. Marcar só um deles sugeriria que os
+          // outros estão fechados.
+          const inc = l.itensSemConversao
+          return (
+            <div key={l.produtoId} className="relatorios-linha relatorios-grid-produtos">
+              <div className="relatorios-forte">{l.nome}</div>
+              <div className="relatorios-num relatorios-mono relatorios-suave">
+                <NumIncompleto texto={qtd(l.compradoQtd)} n={inc} consequencia={CONSEQ_METRICAS_PRODUTO} />
+              </div>
+              <div className="relatorios-num relatorios-mono relatorios-suave">
+                <NumIncompleto texto={qtd(l.vendidoQtd)} n={inc} consequencia={CONSEQ_METRICAS_PRODUTO} />
+              </div>
+              <div className="relatorios-num relatorios-mono relatorios-forte">{money(l.faturamento)}</div>
+              <div className="relatorios-num relatorios-mono" style={{ color: '#2f5d3f' }}>
+                {l.vendidoQtd
+                  ? <NumIncompleto texto={money(l.margem)} n={inc} consequencia={CONSEQ_METRICAS_PRODUTO} />
+                  : '—'}
+              </div>
+              <div className="relatorios-num relatorios-mono" style={{ color: corMarkup(l.markupPct) }}>
+                {l.markupPct != null
+                  ? <NumIncompleto texto={pctInt(l.markupPct)} n={inc} consequencia={CONSEQ_METRICAS_PRODUTO} />
+                  : '—'}
+              </div>
+              <div className="relatorios-num relatorios-mono" style={{ color: l.perdaPct != null ? corPerda(l.perdaPct) : NEUTRO }}>
+                {l.perdaPct != null
+                  ? <NumIncompleto texto={pct1(l.perdaPct)} n={inc} consequencia={CONSEQ_METRICAS_PRODUTO} />
+                  : '—'}
+              </div>
             </div>
-            <div className="relatorios-num relatorios-mono" style={{ color: l.perdaPct != null ? corPerda(l.perdaPct) : NEUTRO }}>
-              {l.perdaPct != null ? pct1(l.perdaPct) : '—'}
-            </div>
-          </div>
-        ))}
+          )
+        })}
         {linhas.length === 0 && <div className="relatorios-tabela-vazia">Nenhum produto movimentado no período.</div>}
       </div>
       <div className="relatorios-nota">
-        Ordenado por faturamento. <strong>Margem</strong> = faturamento menos o custo de compra da quantidade vendida.
+        Ordenado por faturamento. Quantidades em <strong>kg</strong> (caixas convertidas pelo peso médio do
+        produto). <strong>Margem</strong> = faturamento menos o custo de compra da quantidade vendida.
       </div>
+      <NotaSemConversao n={totais.itensSemConversao} consequencia={CONSEQ_METRICAS_PRODUTO} />
     </>
   )
 }

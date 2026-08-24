@@ -43,7 +43,25 @@ export interface SaidaResumo {
   data_pag: string | null
   perda_kg: number
   valor: number
+  /** SEMPRE em kg — a API converte cada item pela unidade dele (item em 'KG'
+   * conta `qtd`; em outra unidade conta `qtd * produtos.peso_medio`). Ver
+   * `itens_sem_conversao` abaixo para o que fica de fora. */
   peso: number
+  /**
+   * Quantos itens desta saída ficaram FORA de `peso`: produto lançado em
+   * unidade diferente de KG sem `produtos.peso_medio` cadastrado (0 = não
+   * informado), portanto não convertível em quilos. A API não inventa fator
+   * nenhum (uma caixa não pesa um quilo) e não some com o problema: exclui a
+   * contribuição do item e conta quantos foram, para a tela poder dizer que
+   * o total está incompleto. Mesma convenção de
+   * `EntradaResumo.itens_sem_conversao` — ver o comentário grande em
+   * api/src/routes/saidas.ts (GET /).
+   *
+   * Opcional pelo mesmo motivo do campo irmão em EntradaResumo: a API sempre
+   * envia, mas fixtures de teste montam saídas parciais e ausente tem
+   * exatamente o mesmo significado que 0 (nada ficou de fora).
+   */
+  itens_sem_conversao?: number
 }
 
 /** Cabeçalho de uma entrada (compra), como GET /api/entradas devolve — ver
@@ -134,13 +152,34 @@ export interface PerdaDeposito {
 export interface ProdutoAgregado {
   produto_id: string
   nome: string
+  /** Unidade PADRÃO do cadastro do produto (produtos.un) — só um rótulo do
+   * cadastro. As quantidades abaixo NÃO estão nela: saem todas em kg. */
   un: string
+  /** Em kg (a API converte cada lançamento pela unidade dele). */
   compra_qtd: number
   compra_valor: number
+  /** Em kg — `entrada_itens.perda_kg` já é kg por contrato, sem conversão. */
   perda_coleta_qtd: number
+  /** Em kg (a API converte cada lançamento pela unidade dele). */
   venda_qtd: number
   venda_valor: number
+  /** Em kg — `perdas.qtd` é uma quantidade na unidade da própria perda, e por
+   * isso a API converte (ao contrário de `perda_coleta_qtd`). */
   perda_deposito_qtd: number
+  /**
+   * Quantos lançamentos deste produto ficaram FORA das três quantidades
+   * acima: unidade diferente de KG sem `produtos.peso_medio` cadastrado,
+   * portanto não convertível em quilos. Um contador só para as três fontes
+   * (compra, venda e perda de depósito) porque as cinco métricas da linha —
+   * compra média, venda média, markup, margem e perda % — saem todas de
+   * quantidades DESTE produto: qualquer lançamento de fora deixa a linha
+   * inteira incompleta. Ver o comentário grande em api/src/routes/relatorios.ts.
+   *
+   * Opcional pelo mesmo motivo dos campos irmãos em EntradaResumo/SaidaResumo:
+   * a API sempre envia, mas fixtures de teste montam agregados parciais e
+   * ausente significa exatamente 0 (nada ficou de fora).
+   */
+  itens_sem_conversao?: number
 }
 
 // ------------------------------------------------------------- utilidades
@@ -432,7 +471,14 @@ export interface LinhaStatusPedido {
 export interface LinhaRota {
   rota: string
   pedidos: number
+  /** Em kg — a API já converte cada item pela unidade dele. Incompleta
+   * quando `itensSemConversao > 0`. */
   peso: number
+  /** Itens dos pedidos desta rota, no período, que ficaram fora de `peso`
+   * por não serem convertíveis em quilos (unidade ≠ KG sem
+   * `produtos.peso_medio`). 0 = o total está completo. Ver
+   * `SaidaResumo.itens_sem_conversao`. */
+  itensSemConversao: number
   faturado: number
   ticket: number
 }
@@ -442,7 +488,13 @@ export interface RelatorioPedidosTotais {
   faturadoEntregue: number
   aReceber: number
   pedidosAtrasados: number
+  /** Em kg de verdade, agora que a API converte cada item — o nome do campo
+   * prometia quilos desde sempre, mas somava caixa com quilo no mesmo total.
+   * Incompleta quando `itensSemConversao > 0`. */
   qtdEntregueKg: number
+  /** Itens dos pedidos ENTREGUES do período que ficaram fora de
+   * `qtdEntregueKg` por não serem convertíveis em quilos. */
+  itensSemConversao: number
 }
 
 /** Ordem fixa de exibição dos status — mesma lista de `statusList` no
@@ -465,6 +517,15 @@ const ORDEM_STATUS: SaidaResumo['status'][] = ['Entregue', 'Em rota', 'Pendente'
  * subcontar pedidos 'Pendente' com vencimento já vencido, mesma razão
  * documentada em derivarRelatorioClientes/derivarRelatorioInadimplentes,
  * acima. `hojeIso` novo parâmetro por isso.
+ *
+ * `qtdEntregueKg` e o `peso` por rota vêm de `SaidaResumo.peso`, que a API
+ * entrega em kg (cada item convertido pela unidade dele). Nem todo pedido é
+ * 100% convertível: item em unidade diferente de KG cujo produto não tem
+ * `peso_medio` cadastrado fica de fora do peso — a API conta esses itens em
+ * `itens_sem_conversao` em vez de inventar um fator, e aqui esse contador é
+ * somado por rota e no total, para a tela marcar a quantidade afetada em vez
+ * de exibi-la como número fechado. Mesma convenção do relatório de compras
+ * (derivarRelatorioCompras, abaixo).
  */
 export function derivarRelatorioPedidos(
   saidas: SaidaResumo[],
@@ -485,18 +546,22 @@ export function derivarRelatorioPedidos(
     return { status, quantidade: arr.length, valor: arr.reduce((s, p) => s + (p.valor || 0), 0) }
   }).filter(s => s.quantidade > 0)
 
-  const rotasAgg = new Map<string, { ped: number; peso: number; fat: number }>()
+  const rotasAgg = new Map<string, { ped: number; peso: number; fat: number; semConversao: number }>()
   doPeriodo.forEach(p => {
     const r = p.rota || '—'
-    const o = rotasAgg.get(r) ?? { ped: 0, peso: 0, fat: 0 }
+    const o = rotasAgg.get(r) ?? { ped: 0, peso: 0, fat: 0, semConversao: 0 }
     o.ped++
     o.peso += p.peso || 0
     o.fat += p.valor || 0
+    o.semConversao += p.itens_sem_conversao || 0
     rotasAgg.set(r, o)
   })
   const porRota = Array.from(rotasAgg.entries())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([rota, o]) => ({ rota, pedidos: o.ped, peso: o.peso, faturado: o.fat, ticket: o.ped ? o.fat / o.ped : 0 }))
+    .map(([rota, o]) => ({
+      rota, pedidos: o.ped, peso: o.peso, itensSemConversao: o.semConversao,
+      faturado: o.fat, ticket: o.ped ? o.fat / o.ped : 0,
+    }))
 
   return {
     totais: {
@@ -505,6 +570,10 @@ export function derivarRelatorioPedidos(
       aReceber,
       pedidosAtrasados,
       qtdEntregueKg: entregues.reduce((s, p) => s + (p.peso || 0), 0),
+      // Só dos ENTREGUES, o mesmo conjunto de `qtdEntregueKg` — o contador
+      // tem que descrever exatamente a soma que ele qualifica. A tabela por
+      // rota tem o dela, sobre o conjunto dela (todos os pedidos do período).
+      itensSemConversao: entregues.reduce((s, p) => s + (p.itens_sem_conversao || 0), 0),
     },
     porStatus,
     porRota,
@@ -641,9 +710,23 @@ export function derivarRelatorioCompras(
 export interface LinhaRelatorioProduto {
   produtoId: string
   nome: string
+  /** Em kg — a API já converte cada lançamento pela unidade dele. Incompleta
+   * quando `itensSemConversao > 0`. */
   compradoQtd: number
+  /** Em kg, mesma regra de `compradoQtd`. */
   vendidoQtd: number
   faturamento: number
+  /**
+   * Lançamentos deste produto, no período, que ficaram fora das quantidades
+   * por não serem convertíveis em quilos (unidade ≠ KG sem
+   * `produtos.peso_medio`). Quando > 0, TODOS os números derivados desta
+   * linha — compradoQtd, vendidoQtd, margem, markupPct e perdaPct — estão
+   * calculados sobre quantidade incompleta e a tela os marca: o valor em
+   * reais dos lançamentos de fora continua inteiro, mas o peso deles não
+   * entra, então preço médio e markup saem para cima. Ver
+   * `ProdutoAgregado.itens_sem_conversao`.
+   */
+  itensSemConversao: number
   /** Sempre calculado (nunca null) — igual a `_margem` no protótipo, mesmo
    * quando vendidoQtd é 0 (vira 0 nesse caso). A tela mostra '—' quando
    * vendidoQtd===0, mas o "maior margem" do total é escolhido sobre ESTE
@@ -662,6 +745,10 @@ export interface RelatorioProdutosTotais {
   maisFatura: { nome: string; faturamento: number } | null
   maiorMargem: { nome: string; margem: number } | null
   maiorPerda: { nome: string; perdaPct: number } | null
+  /** Total de lançamentos do período que ficaram fora das quantidades (soma
+   * do `itensSemConversao` de todas as linhas) — 0 quando o relatório inteiro
+   * está completo. É o que decide se a nota de rodapé aparece. */
+  itensSemConversao: number
 }
 
 /**
@@ -671,6 +758,17 @@ export interface RelatorioProdutosTotais {
  * pronta de GET /api/relatorios/produtos (ver justificativa no topo do
  * arquivo e em api/src/routes/relatorios.ts). A partir do agregado, a conta
  * é a mesma: preço médio de compra/venda, markup, margem em R$ e % de perda.
+ *
+ * As três quantidades do agregado vêm da API EM KG, com cada lançamento
+ * convertido pela unidade dele — antes disso, um produto comprado ora em
+ * caixa ora em quilo tinha os dois somados no mesmo total e o
+ * `cm = compra_valor / compra_qtd` daqui dividia reais por "caixas mais
+ * quilos", o mesmo defeito de preço médio que derivarRelatorioCompras já
+ * tinha. Lançamento não convertível (unidade ≠ KG sem `peso_medio`) fica
+ * fora da quantidade e é contado em `itens_sem_conversao`; aqui esse contador
+ * é repassado por linha e somado no total, para as duas telas que consomem
+ * este relatório (Relatórios/aba Produtos e Produtos) marcarem os números
+ * afetados em vez de exibi-los limpos.
  */
 export function derivarRelatorioProdutos(
   agregados: ProdutoAgregado[],
@@ -689,6 +787,7 @@ export function derivarRelatorioProdutos(
       compradoQtd: o.compra_qtd,
       vendidoQtd: o.venda_qtd,
       faturamento: o.venda_valor,
+      itensSemConversao: o.itens_sem_conversao || 0,
       margem,
       markupPct,
       perdaPct,
@@ -712,6 +811,7 @@ export function derivarRelatorioProdutos(
       maisFatura: maisVend ? { nome: maisVend.nome, faturamento: maisVend.faturamento } : null,
       maiorMargem: maiorMargem ? { nome: maiorMargem.nome, margem: maiorMargem.margem } : null,
       maiorPerda: maiorPerda ? { nome: maiorPerda.nome, perdaPct: maiorPerda.perdaPct as number } : null,
+      itensSemConversao: linhas.reduce((s, l) => s + l.itensSemConversao, 0),
     },
   }
 }

@@ -377,3 +377,184 @@ describe('RelatoriosTela — perdas', () => {
     expect(within(painel).getByText('vencimento')).toBeInTheDocument()
   })
 })
+
+// As quantidades das abas Pedidos e Produtos vem da API em kg, mas
+// lancamento em unidade nao-KG sem peso medio cadastrado nao e convertivel e
+// fica de fora (a API conta quantos em itens_sem_conversao). O valor em reais
+// desses lancamentos continua nas contas e o peso deles nao: os numeros saem
+// para cima e nao podem aparecer como se fossem fechados. Mesma sinalizacao
+// da aba Compras — asterisco na celula, explicacao no title, nota no rodape.
+
+describe('RelatoriosTela — pedidos: quantidade incompleta', () => {
+  it('quantidade completa: qtd entregue e qtd por rota saem limpas, sem marca nem aviso', async () => {
+    mockCarga({ '/api/clientes': [cliente()], '/api/saidas': [saida({ peso: 100 })] })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Pedidos' }))
+
+    // Duas ocorrencias: o cartao "Qtd entregue" e a celula QTD da rota.
+    expect(await screen.findAllByText('100')).toHaveLength(2)
+    expect(screen.queryByText('100*')).not.toBeInTheDocument()
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
+  it('quantidade incompleta: cartao e celula da rota marcados com * e nota explicando', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/saidas': [saida({ peso: 100, itens_sem_conversao: 2 })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Pedidos' }))
+
+    const marcados = await screen.findAllByText('100*')
+    expect(marcados).toHaveLength(2)
+    // A explicacao vive no title da propria celula — o asterisco sozinho
+    // sinalizaria sem dizer o que falta.
+    expect(marcados[0]).toHaveAttribute('title', expect.stringContaining('2 itens lançados'))
+    expect(marcados[0].getAttribute('title')).toContain('peso médio')
+
+    const nota = screen.getByRole('note')
+    expect(nota).toHaveTextContent('fora da quantidade')
+    expect(nota).toHaveTextContent('Cadastre o peso médio da embalagem')
+  })
+
+  it('pedido nao entregue nao entra no cartao, mas continua contado na tabela por rota', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/saidas': [saida({ status: 'Em rota', peso: 100, itens_sem_conversao: 1 })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Pedidos' }))
+
+    // Cartao "Qtd entregue" = 0 (nada entregue) e sem marca: o contador dele
+    // descreve so os entregues. A celula da rota, que soma todos os pedidos
+    // do periodo, sai marcada.
+    expect(await screen.findByText('100*')).toBeInTheDocument()
+    expect(screen.getByRole('note')).toBeInTheDocument()
+  })
+})
+
+describe('RelatoriosTela — produtos: quantidade incompleta', () => {
+  it('quantidade completa: as cinco metricas saem limpas, sem marca nem aviso', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      'produtos-agregados': [produtoAgregado({ compra_qtd: 100, compra_valor: 200, venda_qtd: 80, venda_valor: 400 })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+
+    // "Batata" aparece tambem nos cartoes do topo (mais fatura/maior
+    // margem/maior perda) — a linha da tabela e a unica dentro de
+    // .relatorios-linha.
+    const linha = (await screen.findAllByText('Batata'))
+      .map(el => el.closest('.relatorios-linha'))
+      .find((el): el is HTMLElement => el != null)!
+    expect(within(linha).getByText('100')).toBeInTheDocument()
+    expect(within(linha).getByText('80')).toBeInTheDocument()
+    expect(within(linha).queryByText('100*')).not.toBeInTheDocument()
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
+  it('quantidade incompleta: comprado, vendido, margem, markup e perda marcados com *', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      'produtos-agregados': [produtoAgregado({
+        compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 5,
+        venda_qtd: 80, venda_valor: 400, itens_sem_conversao: 2,
+      })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+
+    // "Batata" aparece tambem nos cartoes do topo (mais fatura/maior
+    // margem/maior perda) — a linha da tabela e a unica dentro de
+    // .relatorios-linha.
+    const linha = (await screen.findAllByText('Batata'))
+      .map(el => el.closest('.relatorios-linha'))
+      .find((el): el is HTMLElement => el != null)!
+    // Todos os numeros derivados de quantidade: comprado (100), vendido (80),
+    // margem (400 - 80*2 = R$ 240), markup ((5-2)/2 = 150%) e perda (5%).
+    // Faturamento (R$ 400) escapa — reais sao reais.
+    expect(within(linha).getByText('100*')).toBeInTheDocument()
+    expect(within(linha).getByText('80*')).toBeInTheDocument()
+    expect(within(linha).getByText('R$ 240*')).toBeInTheDocument()
+    expect(within(linha).getByText('150%*')).toBeInTheDocument()
+    expect(within(linha).getByText('5,0%*')).toBeInTheDocument()
+    expect(within(linha).getByText('R$ 400')).toBeInTheDocument()
+
+    expect(within(linha).getByText('100*')).toHaveAttribute('title', expect.stringContaining('2 itens lançados'))
+
+    const nota = screen.getByRole('note')
+    expect(nota).toHaveTextContent('fora da quantidade')
+    expect(nota).toHaveTextContent('Cadastre o peso médio da embalagem')
+  })
+})
+
+describe('RelatoriosTela — CSV das quantidades incompletas', () => {
+  let blobsCriados: Blob[]
+
+  beforeEach(() => {
+    blobsCriados = []
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((b: Blob | MediaSource) => {
+      blobsCriados.push(b as Blob)
+      return 'blob:mock'
+    })
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  })
+
+  it('CSV de pedidos leva o mesmo asterisco da tela na coluna de quantidade', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/saidas': [saida({ peso: 100, itens_sem_conversao: 1 })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Pedidos' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar CSV' }))
+
+    await waitFor(() => expect(blobsCriados).toHaveLength(1))
+    const texto = await lerBlobComoTexto(blobsCriados[0])
+    // O cabecalho diz a unidade e a linha diz que aquele total esta incompleto.
+    expect(texto).toContain('Qtd (kg)')
+    expect(texto).toContain('100*')
+  })
+
+  it('CSV de produtos marca as mesmas cinco colunas da tela', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      'produtos-agregados': [produtoAgregado({
+        compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 5,
+        venda_qtd: 80, venda_valor: 400, itens_sem_conversao: 1,
+      })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar CSV' }))
+
+    await waitFor(() => expect(blobsCriados).toHaveLength(1))
+    const texto = await lerBlobComoTexto(blobsCriados[0])
+    expect(texto).toContain('Qtd comprada (kg)')
+    expect(texto).toContain('100*;80*;R$ 400;R$ 240*;150%*;5,0%*')
+  })
+
+  it('sem lancamento fora da conversao, o CSV sai sem asterisco nenhum', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      'produtos-agregados': [produtoAgregado({ compra_qtd: 100, compra_valor: 200, venda_qtd: 80, venda_valor: 400 })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar CSV' }))
+
+    await waitFor(() => expect(blobsCriados).toHaveLength(1))
+    const texto = await lerBlobComoTexto(blobsCriados[0])
+    expect(texto).not.toContain('*')
+  })
+})

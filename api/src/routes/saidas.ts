@@ -52,10 +52,12 @@ function dataParaTexto(v: unknown): string | null {
 /**
  * numeric vem como string do postgres.js — converter na borda da API.
  * tenant_id sai do corpo pelo mesmo motivo de clientes.ts (RLS ja isola no
- * servidor, ninguem "usa" isso no cliente). `valor`/`peso` so aparecem nas
- * linhas agregadas de GET / (sum(qtd*preco) e sum(qtd), vindos do join com
- * saida_itens) — convertidos so quando presentes, porque POST/PUT/GET /:id
- * nao os incluem.
+ * servidor, ninguem "usa" isso no cliente). `valor`/`peso`/
+ * `itens_sem_conversao` so aparecem nas linhas agregadas de GET / (vindos do
+ * join com saida_itens) — convertidos so quando presentes, porque
+ * POST/PUT/GET /:id nao os incluem. `itens_sem_conversao` e um count(), que
+ * o Postgres devolve como bigint (string no postgres.js): mesma conversao na
+ * borda que os numeric recebem — igual a paraJsonLista de entradas.ts.
  */
 function paraJson<T extends Record<string, unknown>>(linha: T) {
   const { tenant_id: _tenantId, ...resto } = linha
@@ -65,6 +67,9 @@ function paraJson<T extends Record<string, unknown>>(linha: T) {
   }
   if ('valor' in linha) convertido.valor = Number(linha.valor ?? 0)
   if ('peso' in linha) convertido.peso = Number(linha.peso ?? 0)
+  if ('itens_sem_conversao' in linha) {
+    convertido.itens_sem_conversao = Number(linha.itens_sem_conversao ?? 0)
+  }
   return convertido
 }
 
@@ -221,13 +226,55 @@ saidas.use('*', exigirSessao)
 // nessa tela. group by s.id funciona porque id e a chave primaria de
 // saidas: Postgres permite selecionar as demais colunas de s sem agrega-las
 // quando o group by cobre a PK inteira (dependencia funcional).
+//
+// `peso` sai SEMPRE EM KG, pela MESMA regra de api/src/routes/entradas.ts
+// (peso_total) e de api/src/routes/estoque.ts (paraJson/equivalente_kg) —
+// item em 'KG' conta `qtd`; item em qualquer outra unidade conta
+// `qtd * produtos.peso_medio` (peso de UMA embalagem, em kg), e so quando
+// peso_medio > 0. Nao existem tres convencoes de conversao no projeto: e
+// esta, nas tres rotas.
+//
+// Por muito tempo esta soma era `sum(i.qtd)` cru sobre saida_itens, cuja
+// coluna `un` aceita as mesmas unidades de produtos.un ('KG','CX','UN',
+// 'DZ','MC', migration 009): 30 KG + 12 CX viravam "42", um numero sem
+// significado fisico. O defeito virou URGENTE quando entradas.ts foi
+// corrigido: `diasEstoque` (web/src/derive/financeiro.ts) calcula
+// `qEnt - qPer - qSai` com qEnt vindo de entradas.peso_total e qSai deste
+// `peso` — antes os dois lados erravam JUNTOS (as duas somas eram cruas),
+// depois da correcao de la um lado passou a ser kg e o outro continuou
+// misturado, e a subtracao passou a inflar o saldo. Esse saldo alimenta o
+// giro de estoque e o ciclo de caixa do Dashboard. Este `peso` tambem
+// alimenta a aba Pedidos do relatorio (`qtdEntregueKg` — que ja se chamava
+// "Kg" enquanto somava caixa com quilo) e a coluna QTD por rota.
+//
+// itens_sem_conversao: item em unidade nao-KG cujo produto tem peso_medio =
+// 0 ("nao informado", ver migration 009) nao e convertivel. O `case` nao
+// tem `else`, entao esse item vira NULL e `sum` o ignora — a contribuicao
+// dele fica FORA do peso, nunca convertida por um fator inventado (1 seria
+// mentira: uma caixa nao pesa um quilo). Faltar em silencio tambem nao
+// serve, entao o contador sai junto na resposta pra a tela poder dizer
+// quantos itens ficaram de fora. `i.id is not null` no filter exclui a
+// linha fantasma do left join (saida sem nenhum item, so possivel por
+// insert direto no banco — a API exige >= 1 item).
+//
+// `perda_kg` (cabecalho da saida) NAO passa por conversao nenhuma: e KG por
+// contrato, mesma razao documentada em entradas.ts para perda_itens_qtd.
 saidas.get('/', async (c) => {
   const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx => tx`
     select s.*,
            coalesce(sum(i.qtd * i.preco), 0) as valor,
-           coalesce(sum(i.qtd), 0) as peso
+           coalesce(sum(
+             case
+               when i.un = 'KG' then i.qtd
+               when coalesce(p.peso_medio, 0) > 0 then i.qtd * p.peso_medio
+             end
+           ), 0) as peso,
+           count(*) filter (
+             where i.id is not null and i.un <> 'KG' and coalesce(p.peso_medio, 0) = 0
+           ) as itens_sem_conversao
     from saidas s
     left join saida_itens i on i.saida_id = s.id
+    left join produtos p on p.id = i.produto_id
     group by s.id
     order by s.data_pedido desc, s.numero`)
   return c.json(linhas.map(paraJson))

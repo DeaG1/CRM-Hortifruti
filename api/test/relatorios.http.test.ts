@@ -327,3 +327,227 @@ describe('soma por produto', () => {
     expect(linhaB.perda_coleta_qtd).toBe(50)  // 200 * 500/2000
   })
 })
+
+// ---------------------------------------------------------------------------
+// As tres quantidades saem em KG
+// ---------------------------------------------------------------------------
+//
+// compra_qtd, venda_qtd e perda_deposito_qtd somavam `qtd` cru agrupando so
+// por produto_id, sem olhar a unidade de cada lancamento: um produto comprado
+// ora em caixa ora em quilo tinha os dois no mesmo total, e
+// `cm = compra_valor / compra_qtd` (derivarRelatorioProdutos) dividia reais
+// por "caixas mais quilos" — o mesmo defeito de preco medio que
+// api/src/routes/entradas.ts corrigiu nas compras. Esta rota alimenta a tela
+// de Produtos, que e onde o dono decide preco de venda.
+//
+// A regra e a MESMA de entradas.ts (peso_total) e estoque.ts
+// (paraJson/equivalente_kg): 'KG' conta qtd, o resto conta
+// qtd * produtos.peso_medio, e so quando peso_medio > 0.
+
+/** Produto em unidade nao-KG. `pesoMedio` 0 = "nao informado" (migration 009),
+ * o caso nao convertivel. */
+async function criarProdutoUn(tid: string, nome: string, un: string, pesoMedio: number) {
+  const [p] = await admin`
+    insert into produtos (tenant_id, nome, un, peso_medio)
+    values (${tid}, ${nome}, ${un}, ${pesoMedio}) returning id`
+  return p.id as string
+}
+
+/** Igual a criarEntradaComItens, mas com `un` por item — os helpers antigos
+ * omitem a coluna e caem no default 'KG' (que e o caso "so KG", no-op). */
+async function criarEntradaComUn(
+  tid: string,
+  opts: {
+    numero: string; data: string; perdaKgCabecalho?: number
+    itens: { produtoId: string; un: string; qtd: number; preco: number; perdaKg?: number }[]
+  },
+) {
+  const [e] = await admin`
+    insert into entradas (tenant_id, numero, data, perda_kg)
+    values (${tid}, ${opts.numero}, ${opts.data}, ${opts.perdaKgCabecalho ?? 0}) returning id`
+  for (const it of opts.itens) {
+    await admin`
+      insert into entrada_itens (tenant_id, entrada_id, produto_id, un, qtd, preco, perda_kg)
+      values (${tid}, ${e.id}, ${it.produtoId}, ${it.un}, ${it.qtd}, ${it.preco}, ${it.perdaKg ?? 0})`
+  }
+  return e.id as string
+}
+
+async function criarSaidaComUn(
+  tid: string,
+  opts: {
+    numero: string; entrega: string; status: string
+    itens: { produtoId: string; un: string; qtd: number; preco: number }[]
+  },
+) {
+  const [s] = await admin`
+    insert into saidas (tenant_id, numero, data_pedido, entrega, status)
+    values (${tid}, ${opts.numero}, ${opts.entrega}, ${opts.entrega}, ${opts.status}) returning id`
+  for (const it of opts.itens) {
+    await admin`
+      insert into saida_itens (tenant_id, saida_id, produto_id, un, qtd, preco)
+      values (${tid}, ${s.id}, ${it.produtoId}, ${it.un}, ${it.qtd}, ${it.preco})`
+  }
+  return s.id as string
+}
+
+async function criarPerdaDeposito(
+  tid: string,
+  opts: { data: string; produtoId: string; un: string; qtd: number },
+) {
+  await admin`
+    insert into perdas (tenant_id, data, produto_id, un, qtd, motivo)
+    values (${tid}, ${opts.data}, ${opts.produtoId}, ${opts.un}, ${opts.qtd}, 'armazenagem')`
+}
+
+describe('quantidades em KG (conversao por produtos.peso_medio)', () => {
+  async function linhaDoProduto(produtoId: string) {
+    const res = await pedir('/api/relatorios/produtos?de=2026-06&ate=2026-06', comoAdmin())
+    expect(res.status).toBe(200)
+    const linhas = await res.json() as Array<Record<string, unknown>>
+    return linhas.find(l => l.produto_id === produtoId)!
+  }
+
+  it('so KG: as tres quantidades sao a soma crua (conversao no-op) e nada fica de fora', async () => {
+    const produtoId = await criarProduto(tenantId, 'Conv So KG')
+    await criarEntradaComUn(tenantId, {
+      numero: 'CONV-E-KG', data: '2026-06-08',
+      itens: [{ produtoId, un: 'KG', qtd: 100, preco: 2, perdaKg: 5 }],
+    })
+    await criarSaidaComUn(tenantId, {
+      numero: 'CONV-S-KG', entrega: '2026-06-10', status: 'Entregue',
+      itens: [{ produtoId, un: 'KG', qtd: 80, preco: 4 }],
+    })
+    await criarPerdaDeposito(tenantId, { data: '2026-06-15', produtoId, un: 'KG', qtd: 7 })
+
+    const linha = await linhaDoProduto(produtoId)
+    // Identico ao que a rota devolvia antes da conversao existir: quem lanca
+    // tudo em KG nao pode ver numero nenhum mudar.
+    expect(linha.compra_qtd).toBe(100)
+    expect(linha.compra_valor).toBe(200)
+    expect(linha.perda_coleta_qtd).toBe(5)
+    expect(linha.venda_qtd).toBe(80)
+    expect(linha.venda_valor).toBe(320)
+    expect(linha.perda_deposito_qtd).toBe(7)
+    expect(linha.itens_sem_conversao).toBe(0)
+  })
+
+  it('CX com peso medio cadastrado: compra, venda e perda de deposito viram kg', async () => {
+    const produtoId = await criarProdutoUn(tenantId, 'Conv CX Com Peso', 'CX', 20)
+    await criarEntradaComUn(tenantId, {
+      numero: 'CONV-E-CX', data: '2026-06-08',
+      itens: [{ produtoId, un: 'CX', qtd: 10, preco: 45 }],
+    })
+    await criarSaidaComUn(tenantId, {
+      numero: 'CONV-S-CX', entrega: '2026-06-10', status: 'Entregue',
+      itens: [{ produtoId, un: 'CX', qtd: 6, preco: 80 }],
+    })
+    await criarPerdaDeposito(tenantId, { data: '2026-06-15', produtoId, un: 'CX', qtd: 2 })
+
+    const linha = await linhaDoProduto(produtoId)
+    expect(linha.compra_qtd).toBe(200) // 10 CX x 20 kg — nao "10"
+    expect(linha.venda_qtd).toBe(120)  // 6 CX x 20 kg — nao "6"
+    expect(linha.perda_deposito_qtd).toBe(40) // 2 CX x 20 kg
+    // Valores em reais nao mudam com unidade nenhuma; o preco medio e que
+    // passa a ser por quilo: 450/200 = R$ 2,25/kg (antes 450/10 = R$ 45).
+    expect(linha.compra_valor).toBe(450)
+    expect(linha.venda_valor).toBe(480)
+    expect(linha.itens_sem_conversao).toBe(0)
+  })
+
+  it('CX sem peso medio: os lancamentos ficam FORA das quantidades e sao contados', async () => {
+    const produtoId = await criarProdutoUn(tenantId, 'Conv CX Sem Peso', 'CX', 0)
+    await criarEntradaComUn(tenantId, {
+      numero: 'CONV-E-SEM', data: '2026-06-08',
+      itens: [{ produtoId, un: 'CX', qtd: 10, preco: 45 }],
+    })
+    await criarSaidaComUn(tenantId, {
+      numero: 'CONV-S-SEM', entrega: '2026-06-10', status: 'Entregue',
+      itens: [{ produtoId, un: 'CX', qtd: 6, preco: 80 }],
+    })
+    await criarPerdaDeposito(tenantId, { data: '2026-06-15', produtoId, un: 'CX', qtd: 2 })
+
+    const linha = await linhaDoProduto(produtoId)
+    // Sem peso_medio nao ha como converter caixa em quilo — e o fator NAO e
+    // inventado como 1 (uma caixa nao pesa um quilo).
+    expect(linha.compra_qtd).toBe(0)
+    expect(linha.venda_qtd).toBe(0)
+    expect(linha.perda_deposito_qtd).toBe(0)
+    // Os reais continuam inteiros: o que falta e o peso, nao o dinheiro.
+    expect(linha.compra_valor).toBe(450)
+    expect(linha.venda_valor).toBe(480)
+    // Um de cada fonte: compra, venda e perda de deposito.
+    expect(linha.itens_sem_conversao).toBe(3)
+  })
+
+  it('mesmo produto comprado ora em KG ora em CX: soma so depois de converter cada lancamento', async () => {
+    const produtoId = await criarProdutoUn(tenantId, 'Conv Mistura KG CX', 'CX', 20)
+    await criarEntradaComUn(tenantId, {
+      numero: 'CONV-E-MIX', data: '2026-06-08',
+      itens: [
+        { produtoId, un: 'KG', qtd: 30, preco: 2 },
+        { produtoId, un: 'CX', qtd: 12, preco: 45 },
+      ],
+    })
+
+    const linha = await linhaDoProduto(produtoId)
+    // 30 kg + (12 CX x 20 kg) = 270 kg. Antes da correcao: 30 + 12 = "42",
+    // e o preco medio saia 600/42 = R$ 14,29 de "alguma coisa" em vez de
+    // 600/270 = R$ 2,22 por quilo.
+    expect(linha.compra_qtd).toBe(270)
+    expect(linha.compra_valor).toBe(30 * 2 + 12 * 45)
+    expect(linha.itens_sem_conversao).toBe(0)
+  })
+
+  it('mistura convertivel + nao convertivel no mesmo produto: soma o que da e conta o resto', async () => {
+    const produtoId = await criarProdutoUn(tenantId, 'Conv Mistura Parcial', 'CX', 0)
+    const produtoConvertivel = await criarProdutoUn(tenantId, 'Conv Parceiro Convertivel', 'CX', 20)
+    await criarEntradaComUn(tenantId, {
+      numero: 'CONV-E-PARCIAL', data: '2026-06-08',
+      itens: [
+        { produtoId, un: 'KG', qtd: 30, preco: 2 },
+        { produtoId, un: 'CX', qtd: 5, preco: 40 },
+        { produtoId: produtoConvertivel, un: 'CX', qtd: 3, preco: 40 },
+      ],
+    })
+
+    const linha = await linhaDoProduto(produtoId)
+    // As 5 caixas sem peso medio nao entram (e nao viram 5 "quilos"), mas os
+    // R$ 200 delas continuam no valor.
+    expect(linha.compra_qtd).toBe(30)
+    expect(linha.compra_valor).toBe(30 * 2 + 5 * 40)
+    expect(linha.itens_sem_conversao).toBe(1)
+    // O contador e por produto: o vizinho convertivel da mesma entrada nao
+    // e contaminado.
+    const outra = await linhaDoProduto(produtoConvertivel)
+    expect(outra.compra_qtd).toBe(60)
+    expect(outra.itens_sem_conversao).toBe(0)
+  })
+
+  it('perda_coleta_qtd NAO e convertida — perda_kg e KG por contrato, em item de qualquer unidade', async () => {
+    const produtoId = await criarProdutoUn(tenantId, 'Conv Perda Coleta CX', 'CX', 20)
+    await criarEntradaComUn(tenantId, {
+      numero: 'CONV-E-PERDA', data: '2026-06-08',
+      itens: [{ produtoId, un: 'CX', qtd: 10, preco: 45, perdaKg: 6 }],
+    })
+
+    const linha = await linhaDoProduto(produtoId)
+    // Multiplicar por peso_medio aqui viraria 6*20=120 e estragaria um numero
+    // que ja esta certo — o rotulo em ModalEntrada.tsx diz kg. So a
+    // quantidade muda de unidade. De quebra, perdaPct (perda / compra_qtd)
+    // passa a comparar kg com kg: 6/200.
+    expect(linha.perda_coleta_qtd).toBe(6)
+    expect(linha.compra_qtd).toBe(200)
+  })
+
+  it('itens_sem_conversao sai como number (count e bigint no Postgres)', async () => {
+    const produtoId = await criarProdutoUn(tenantId, 'Conv Tipo Contador', 'CX', 0)
+    await criarEntradaComUn(tenantId, {
+      numero: 'CONV-E-TIPO', data: '2026-06-08',
+      itens: [{ produtoId, un: 'CX', qtd: 1, preco: 1 }],
+    })
+    const linha = await linhaDoProduto(produtoId)
+    expect(typeof linha.itens_sem_conversao).toBe('number')
+    expect(linha.itens_sem_conversao).toBe(1)
+  })
+})

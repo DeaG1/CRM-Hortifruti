@@ -18,6 +18,41 @@ const money = (n: number) => 'R$ ' + Math.round(n).toLocaleString('pt-BR')
 const pctInt = (n: number) => Math.round(n) + '%'
 const pct1 = (n: number) => n.toFixed(1).replace('.', ',') + '%'
 
+// ------------------------------------------- métrica incompleta (sem peso médio)
+
+/**
+ * Texto do aviso de quantidade incompleta — mesmo texto e mesma regra do
+ * relatório de produtos (RelatoriosTela.tsx, avisoSemConversao), porque é o
+ * MESMO agregado (GET /api/relatorios/produtos) exibido nas duas telas.
+ *
+ * As quantidades do agregado saem da API em quilos, com cada lançamento
+ * convertido pela unidade dele; lançamento em unidade diferente de KG cujo
+ * produto não tem peso médio cadastrado NÃO é convertível, e a API prefere
+ * deixá-lo de fora a inventar um fator (ver `itens_sem_conversao` em
+ * api/src/routes/relatorios.ts). Quando isso acontece as cinco métricas ainda
+ * saem — mas compra média e venda média saem PARA CIMA, porque o valor desses
+ * lançamentos continua no numerador e o peso deles não entra no denominador.
+ * Esta é a tela onde o dono decide preço de venda: exibir markup incompleto
+ * como número limpo seria a pior das opções.
+ */
+function avisoSemConversao(n: number): string {
+  const itens = n === 1 ? '1 lançamento' : `${n} lançamentos`
+  const verbo = n === 1 ? 'ficou' : 'ficaram'
+  return `${itens} deste produto em unidade diferente de KG, sem peso médio cadastrado, ${verbo} `
+    + 'fora das quantidades — sem o peso da embalagem não há como somar em quilos. '
+    + 'As métricas desta linha estão calculadas sobre quantidade incompleta.'
+}
+
+/** Um número que pode estar incompleto: com `n` = 0 sai limpo (o caso normal);
+ * com `n` > 0 ganha o `*` e a explicação no `title`. Mesmo sinal das outras
+ * duas telas afetadas (EntradasLista, RelatoriosTela). */
+function NumIncompleto({ texto, n }: { texto: string; n: number }) {
+  if (!n) return <>{texto}</>
+  return (
+    <span className="produtos-incompleto" title={avisoSemConversao(n)}>{texto}*</span>
+  )
+}
+
 interface ProdutosListaProps {
   onSessaoExpirada: () => void
 }
@@ -131,7 +166,7 @@ export function ProdutosLista({ onSessaoExpirada }: ProdutosListaProps) {
   // valores por dentro, pra calcular markup) — são a única conta feita no
   // ponto de uso, abaixo: uma divisão simples guardada por qtd > 0, não uma
   // fórmula composta como markup/margem.
-  const { linhas: linhasRelatorio } = derivarRelatorioProdutos(agregados, produtos.length)
+  const { linhas: linhasRelatorio, totais } = derivarRelatorioProdutos(agregados, produtos.length)
   const linhaPorProduto = new Map(linhasRelatorio.map(l => [l.produtoId, l]))
   const agregadoPorProduto = new Map(agregados.map(a => [a.produto_id, a]))
 
@@ -139,8 +174,13 @@ export function ProdutosLista({ onSessaoExpirada }: ProdutosListaProps) {
     <div className="produtos-lista">
       <div className="produtos-topo">
         <div className="produtos-dica">
-          Clique num produto para editar · preços são <strong>por unidade</strong> do produto (KG, CX…),
-          calculados das compras e vendas
+          {/* Antes dizia "por unidade do produto (KG, CX…)": as quantidades do
+              agregado somavam caixa com quilo, então o preço médio não era por
+              nada em particular. Agora a API converte cada lançamento pelo peso
+              médio da embalagem e as cinco métricas são por QUILO, para
+              qualquer produto — o que também as torna comparáveis entre si. */}
+          Clique num produto para editar · preços são <strong>por quilo</strong> (caixas convertidas pelo
+          peso médio do produto), calculados das compras e vendas
         </div>
         <button type="button" className="produtos-botao-novo" onClick={() => setModal(null)}>
           ＋ Novo produto
@@ -178,6 +218,11 @@ export function ProdutosLista({ onSessaoExpirada }: ProdutosListaProps) {
           // quando vendidoQtd é 0) — mesmo guard de vendidoQtd que
           // RelatoriosTela.tsx usa pra decidir entre valor e travessão.
           const temVenda = !!linha && linha.vendidoQtd > 0
+          // Lançamento não convertível (unidade ≠ KG sem peso médio) deixa as
+          // CINCO métricas desta linha calculadas sobre quantidade incompleta,
+          // não só uma — marcar apenas parte delas sugeriria que o resto está
+          // fechado. Ver `itensSemConversao` em derive/relatorios.ts.
+          const inc = linha?.itensSemConversao ?? 0
           return (
             <div key={p.id} className="produtos-linha produtos-linha--dados" onClick={() => setModal(p)}>
               <div className="produtos-celula-nome">
@@ -186,19 +231,19 @@ export function ProdutosLista({ onSessaoExpirada }: ProdutosListaProps) {
               </div>
               <div><span className="produtos-un-badge">{p.un}</span></div>
               <div className="produtos-col-num produtos-mono">
-                {compraMedia != null ? moneyDetalhado(compraMedia) : '—'}
+                {compraMedia != null ? <NumIncompleto texto={moneyDetalhado(compraMedia)} n={inc} /> : '—'}
               </div>
               <div className="produtos-col-num produtos-mono">
-                {vendaMedia != null ? moneyDetalhado(vendaMedia) : '—'}
+                {vendaMedia != null ? <NumIncompleto texto={moneyDetalhado(vendaMedia)} n={inc} /> : '—'}
               </div>
               <div className="produtos-col-num produtos-mono">
-                {linha?.markupPct != null ? pctInt(linha.markupPct) : '—'}
+                {linha?.markupPct != null ? <NumIncompleto texto={pctInt(linha.markupPct)} n={inc} /> : '—'}
               </div>
               <div className="produtos-col-num produtos-mono">
-                {temVenda ? money(linha!.margem) : '—'}
+                {temVenda ? <NumIncompleto texto={money(linha!.margem)} n={inc} /> : '—'}
               </div>
               <div className="produtos-col-num produtos-mono">
-                {linha?.perdaPct != null ? pct1(linha.perdaPct) : '—'}
+                {linha?.perdaPct != null ? <NumIncompleto texto={pct1(linha.perdaPct)} n={inc} /> : '—'}
               </div>
             </div>
           )
@@ -221,6 +266,20 @@ export function ProdutosLista({ onSessaoExpirada }: ProdutosListaProps) {
         A <strong>perda</strong> acumula da coleta e do depósito, não é estimada. Markup mínimo{' '}
         <strong>≥ 60%</strong> · Perda alvo <strong>≤ 10%</strong>.
       </div>
+
+      {totais.itensSemConversao > 0 && (
+        // A nota fala do total da tela, então tem redação própria: o texto de
+        // `avisoSemConversao` é "deste produto" (título de célula), e reusá-lo
+        // aqui diria "deste produto" sobre a soma de vários.
+        <div className="produtos-nota produtos-nota--incompleto" role="note">
+          <strong>*</strong> {totais.itensSemConversao === 1 ? '1 lançamento' : `${totais.itensSemConversao} lançamentos`}
+          {' '}em unidade diferente de KG, sem peso médio cadastrado no produto,
+          {totais.itensSemConversao === 1 ? ' ficou' : ' ficaram'} fora das quantidades — sem o peso da
+          embalagem não há como somar em quilos. As métricas marcadas com <strong>*</strong> estão
+          calculadas sobre quantidade incompleta. Cadastre o peso médio da embalagem (campo{' '}
+          <strong>Peso médio</strong> do produto) para que entrem na conta.
+        </div>
+      )}
 
       {modal !== undefined && (
         <ModalProduto

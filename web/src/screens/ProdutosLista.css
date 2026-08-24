@@ -183,3 +183,27 @@
   color: #8a8775;
   margin-top: 12px;
 }
+
+/* Métrica incompleta: o produto tem lançamento em unidade não-KG sem peso
+   médio cadastrado, então as quantidades (e tudo que sai delas) ignoram esse
+   lançamento — a API nunca inventa o fator, ver itens_sem_conversao em
+   api/src/routes/relatorios.ts. O asterisco sinaliza e o `title` explica.
+   Mesmo âmbar e mesmo pontilhado de EntradasLista/RelatoriosTela. */
+.produtos-incompleto {
+  border-bottom: 1px dotted #c79320;
+  cursor: help;
+}
+
+/* Nota de rodapé do mesmo aviso: visível o bastante para ninguém ler markup
+   ou margem como número fechado, discreta o bastante para não competir com a
+   tabela. */
+.produtos-nota--incompleto {
+  color: #8a6a12;
+  background: #f6efd8;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.produtos-nota--incompleto strong {
+  color: #8a6a12;
+}

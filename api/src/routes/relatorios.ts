@@ -45,6 +45,44 @@ import { exigirSessao, exigirAdmin, type Vars } from '../middleware/sessao'
  * Isto existe pra este número BATER com o que a tela de Estoque mostra —
  * antes da correção, os dois já divergiam (aqui só via itens, sem olhar o
  * cabeçalho; lá nem um nem outro).
+ *
+ * ---- as três quantidades saem EM KG ----
+ *
+ * compra_qtd, venda_qtd e perda_deposito_qtd somavam `qtd` cru agrupando só
+ * por `produto_id`, sem olhar a unidade de cada lançamento. `entrada_itens.un`,
+ * `saida_itens.un` e `perdas.un` aceitam as mesmas unidades de `produtos.un`
+ * ('KG','CX','UN','DZ','MC', migration 009): um produto comprado ora em caixa
+ * ora em quilo tinha os dois somados no mesmo total, e
+ * `cm = compra_valor / compra_qtd` (derivarRelatorioProdutos) dividia reais
+ * por "caixas mais quilos" — o MESMO defeito de preço médio que
+ * api/src/routes/entradas.ts (peso_total) acabou de corrigir nas compras.
+ * Aqui pesa ainda mais: esta rota alimenta a tela de Produtos, que é onde o
+ * dono decide preço de venda a partir de markup e margem.
+ *
+ * A regra de conversão é a MESMA das outras duas ocorrências dela no projeto
+ * (entradas.ts/peso_total e estoque.ts/paraJson/equivalente_kg), de propósito
+ * — três convenções divergentes seriam pior que o bug: lançamento em 'KG'
+ * conta `qtd`; em qualquer outra unidade conta `qtd * produtos.peso_medio`
+ * (peso de UMA embalagem, em kg), e só quando peso_medio > 0.
+ *
+ * Produto lançado em unidade não-KG com `peso_medio` = 0 (zero = "não
+ * informado") não é convertível e NÃO recebe fator inventado (1 seria
+ * mentira: uma caixa não pesa um quilo): o `case` sem `else` vira NULL, `sum`
+ * ignora, a contribuição fica FORA do total — e `itens_sem_conversao` conta
+ * quantos ficaram, somando as três fontes, para as telas marcarem a linha em
+ * vez de exibirem um número silenciosamente incompleto.
+ *
+ * `perda_coleta_qtd` (entrada_itens.perda_kg + rateio do cabeçalho) NÃO é
+ * convertida: é KG por contrato, para item de qualquer unidade — nome da
+ * coluna, rótulo em ModalEntrada.tsx ("Perda na coleta/transporte (kg)") e
+ * total dos itens no rodapé do mesmo modal. Converter estragaria um número
+ * que já está certo. `perdas.qtd` (depósito) é o caso oposto — é uma
+ * quantidade na unidade da própria perda, e por isso converte. Como efeito
+ * colateral, o `perdaPct` do relatório de produtos (perda / compra_qtd) passa
+ * a comparar kg com kg pela primeira vez. O rateio proporcional do cabeçalho
+ * (`ei.qtd / et.qtd_itens`) continua sobre as qtd CRUAS: é uma proporção
+ * entre itens da mesma entrada, e mexer nela aqui divergiria do rateio
+ * idêntico de buscarEstoque — outro conserto, não este.
  */
 const PERIODO_RE = /^\d{4}-\d{2}$/
 
@@ -83,11 +121,27 @@ relatorios.get('/produtos', async (c) => {
       coalesce(compra.perda_kg, 0) as perda_coleta_qtd,
       coalesce(venda.qtd, 0) as venda_qtd,
       coalesce(venda.valor, 0) as venda_valor,
-      coalesce(perda_dep.qtd, 0) as perda_deposito_qtd
+      coalesce(perda_dep.qtd, 0) as perda_deposito_qtd,
+      -- Um contador so, das tres fontes: as cinco metricas por produto
+      -- (compra media, venda media, markup, margem, perda %) saem todas de
+      -- quantidades deste mesmo produto, entao qualquer lancamento nao
+      -- convertivel — de compra, de venda ou de perda — deixa a LINHA
+      -- incompleta. Ver o comentario grande no topo do arquivo.
+      coalesce(compra.sem_conversao, 0)
+        + coalesce(venda.sem_conversao, 0)
+        + coalesce(perda_dep.sem_conversao, 0) as itens_sem_conversao
     from produtos p
     left join (
       select ei.produto_id,
-             sum(ei.qtd) as qtd,
+             sum(
+               case
+                 when ei.un = 'KG' then ei.qtd
+                 when coalesce(pc.peso_medio, 0) > 0 then ei.qtd * pc.peso_medio
+               end
+             ) as qtd,
+             count(*) filter (
+               where ei.un <> 'KG' and coalesce(pc.peso_medio, 0) = 0
+             ) as sem_conversao,
              sum(ei.qtd * ei.preco) as valor,
              -- Mesma regra de buscarEstoque (api/src/routes/estoque.ts): a
              -- perda do item, mais — so quando o cabecalho da entrada excede
@@ -106,6 +160,7 @@ relatorios.get('/produtos', async (c) => {
              ) as perda_kg
       from entrada_itens ei
       join entradas e on e.id = ei.entrada_id
+      join produtos pc on pc.id = ei.produto_id
       join (
         select entrada_id, sum(perda_kg) as perda_itens, sum(qtd) as qtd_itens
         from entrada_itens
@@ -117,21 +172,44 @@ relatorios.get('/produtos', async (c) => {
     ) compra on compra.produto_id = p.id
     left join (
       select si.produto_id,
-             sum(si.qtd) as qtd,
+             sum(
+               case
+                 when si.un = 'KG' then si.qtd
+                 when coalesce(pv.peso_medio, 0) > 0 then si.qtd * pv.peso_medio
+               end
+             ) as qtd,
+             count(*) filter (
+               where si.un <> 'KG' and coalesce(pv.peso_medio, 0) = 0
+             ) as sem_conversao,
              sum(si.qtd * si.preco) as valor
       from saida_itens si
       join saidas s on s.id = si.saida_id
+      join produtos pv on pv.id = si.produto_id
       where s.status = 'Entregue'
         and (${deVal}::text is null or to_char(s.entrega, 'YYYY-MM') >= ${deVal})
         and (${ateVal}::text is null or to_char(s.entrega, 'YYYY-MM') <= ${ateVal})
       group by si.produto_id
     ) venda on venda.produto_id = p.id
     left join (
-      select produto_id, sum(qtd) as qtd
-      from perdas
-      where (${deVal}::text is null or to_char(data, 'YYYY-MM') >= ${deVal})
-        and (${ateVal}::text is null or to_char(data, 'YYYY-MM') <= ${ateVal})
-      group by produto_id
+      -- perdas.qtd e uma quantidade na unidade da propria perda
+      -- (perdas.un), nao um kg por contrato como entrada_itens.perda_kg —
+      -- por isso ELA converte e aquela nao. buscarEstoque (estoque.ts)
+      -- trata as duas do mesmo jeito: agrupa perdas por (produto_id, un).
+      select pd.produto_id,
+             sum(
+               case
+                 when pd.un = 'KG' then pd.qtd
+                 when coalesce(pp.peso_medio, 0) > 0 then pd.qtd * pp.peso_medio
+               end
+             ) as qtd,
+             count(*) filter (
+               where pd.un <> 'KG' and coalesce(pp.peso_medio, 0) = 0
+             ) as sem_conversao
+      from perdas pd
+      join produtos pp on pp.id = pd.produto_id
+      where (${deVal}::text is null or to_char(pd.data, 'YYYY-MM') >= ${deVal})
+        and (${ateVal}::text is null or to_char(pd.data, 'YYYY-MM') <= ${ateVal})
+      group by pd.produto_id
     ) perda_dep on perda_dep.produto_id = p.id
     where compra.produto_id is not null
        or venda.produto_id is not null
@@ -151,5 +229,8 @@ relatorios.get('/produtos', async (c) => {
     venda_qtd: Number(l.venda_qtd),
     venda_valor: Number(l.venda_valor),
     perda_deposito_qtd: Number(l.perda_deposito_qtd),
+    // count() vem como bigint (string no postgres.js) — mesma conversão na
+    // borda que os numeric recebem, igual a paraJsonLista em entradas.ts.
+    itens_sem_conversao: Number(l.itens_sem_conversao),
   })))
 })

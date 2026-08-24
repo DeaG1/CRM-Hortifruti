@@ -36,6 +36,10 @@ export interface SaidaFin {
   status: 'Pendente' | 'Em rota' | 'Entregue' | 'Cancelado' | 'Devolvido'
   data_pag: string | null // ISO aaaa-mm-dd; null enquanto não pago
   valor?: number
+  /** Em kg — a API converte cada item pela unidade dele (KG conta direto,
+   * caixa conta `qtd * produtos.peso_medio`). Mesma unidade de
+   * `EntradaFin.peso_total`, o que é a condição para `diasEstoque` poder
+   * subtrair um do outro. */
   peso?: number
 }
 
@@ -47,9 +51,11 @@ export interface EntradaFin {
   data_pag: string | null
   /** Perda na coleta/transporte, antes de entrar no depósito (coluna do
    * cabeçalho de `entradas`; perda de depósito é outra tabela, `perdas`,
-   * fora do escopo desta tela — ver comentário em diasEstoque). */
+   * fora do escopo desta tela — ver comentário em diasEstoque). Em kg por
+   * contrato, em entrada de qualquer unidade: a API não converte este campo. */
   perda_kg: number
   valor_total?: number
+  /** Em kg — a API converte cada item pela unidade dele. Ver `SaidaFin.peso`. */
   peso_total?: number
 }
 
@@ -317,6 +323,19 @@ function diasDoPeriodo(periodo: string, datas: (string | null | undefined)[]): n
  * `null` quando não há nenhuma saída no período (qSai <= 0) — não há ritmo
  * de saída para estimar um giro, e um "giro 0" ou "giro infinito" seria
  * enganoso.
+ *
+ * UNIDADE (o que torna a subtração legítima): os três termos de
+ * `qEnt - qPer - qSai` estão em QUILOS. `qEnt` vem de `entradas.peso_total`
+ * e `qSai` de `saidas.peso`, os dois convertidos pela API item a item
+ * (unidade 'KG' conta a qtd; outra unidade conta `qtd * produtos.peso_medio`);
+ * `qPer` é `entradas.perda_kg`, kg por contrato desde sempre. Antes, as duas
+ * somas do banco eram `sum(qtd)` cru e misturavam caixa com quilo — erradas,
+ * mas erradas JUNTAS, o que mantinha a subtração aproximadamente coerente.
+ * Quando só o lado das entradas foi corrigido, os dois lados passaram a estar
+ * em unidades diferentes e o saldo inflou: um giro (e um ciclo de caixa)
+ * maior do que a realidade, exatamente no indicador que o dono olha. Só faz
+ * sentido subtrair grandezas na mesma unidade — por isso as duas rotas
+ * convertem, e nenhuma delas converte `perda_kg`.
  */
 export function diasEstoque(entradas: EntradaFin[], saidas: SaidaFin[], periodo: string): number | null {
   const entradasPeriodo = noPeriodo(entradas, periodo, e => e.data)

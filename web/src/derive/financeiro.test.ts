@@ -270,6 +270,44 @@ describe('diasEstoque', () => {
     expect(diasEstoque([entrada()], [], 'all')).toBeNull()
   })
 
+  // ---- unidade: os dois lados da subtracao estao em kg ----
+  //
+  // `qEnt - qPer - qSai` so significa alguma coisa com os tres termos na
+  // mesma unidade. peso_total (GET /api/entradas) e peso (GET /api/saidas)
+  // vem os dois convertidos em kg pela API (item em 'KG' conta a qtd, em
+  // outra unidade conta qtd * produtos.peso_medio); perda_kg sempre foi kg.
+  // Enquanto as duas somas eram `sum(qtd)` cru, os dois lados erravam JUNTOS.
+  // Quando so as entradas foram corrigidas, a subtracao passou a misturar kg
+  // com "caixas mais quilos" e o saldo inflou — giro de estoque e ciclo de
+  // caixa do Dashboard maiores que a realidade.
+
+  it('com os dois lados em kg, a mesma carga em caixas da o saldo fisico certo', () => {
+    // Um mes com um produto vendido em caixa de 20 kg: entraram 20 CX
+    // (400 kg), sairam 15 CX (300 kg), sobraram 5 CX (100 kg). No ritmo de
+    // 300 kg em 30 dias (10 kg/dia), 100 kg duram 10 dias.
+    const entradas = [entrada({ data: '2026-06-01', peso_total: 400, perda_kg: 0 })]
+    const saidas = [saida({ entrega: '2026-06-10', peso: 300, status: 'Entregue' })]
+    expect(diasEstoque(entradas, saidas, '2026-06')).toBe(10)
+  })
+
+  it('com so um lado convertido (o estado intermediario), o saldo inflava — prova do defeito', () => {
+    // Mesma carga fisica, mas com a saida ainda somando `qtd` cru: 15
+    // "caixas" subtraidas de 400 kg. O saldo vira 385 de nada e o giro salta
+    // de 10 para 770 dias — exatamente o erro que aparecia no Dashboard entre
+    // a correcao das entradas e esta.
+    const entradas = [entrada({ data: '2026-06-01', peso_total: 400, perda_kg: 0 })]
+    const saidaCrua = [saida({ entrega: '2026-06-10', peso: 15, status: 'Entregue' })]
+    expect(diasEstoque(entradas, saidaCrua, '2026-06')).toBe(770)
+  })
+
+  it('so KG dos dois lados: o numero e o mesmo de antes da conversao existir', () => {
+    // Quem lanca tudo em quilo nao pode ver numero nenhum mudar — a conversao
+    // e no-op nesse caso, nas duas rotas.
+    const entradas = [entrada({ data: '2026-06-01', peso_total: 1000, perda_kg: 0 })]
+    const saidas = [saida({ entrega: '2026-06-10', peso: 300, status: 'Entregue' })]
+    expect(diasEstoque(entradas, saidas, '2026-06')).toBe(70)
+  })
+
   // DEFEITO 3 (corrigido): a versao anterior usava o volume acumulado de
   // TODO o historico cadastrado, dividido por 30 fixo — com o passar dos
   // meses o numero deixa de significar "ritmo recente" e encolhe sozinho,

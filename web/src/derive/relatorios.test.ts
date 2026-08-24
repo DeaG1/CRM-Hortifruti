@@ -237,6 +237,73 @@ describe('derivarRelatorioClientes', () => {
     expect(totais.ticketMedioCliente).toBe(0)
   })
 
+  // ---- quantidade incompleta (itens sem peso medio cadastrado) ----
+  //
+  // `peso` chega da API ja em kg, com cada item convertido pela unidade dele.
+  // Item em unidade nao-KG cujo produto nao tem peso_medio nao e convertivel:
+  // a API o deixa FORA do peso e conta quantos foram em `itens_sem_conversao`,
+  // em vez de inventar fator 1. A contagem tem que chegar na linha da rota e
+  // no total dos entregues, para a tela poder marcar a quantidade em vez de
+  // exibi-la como numero fechado.
+
+  it('sem itens fora da conversao, os contadores sao 0 (nada a sinalizar)', () => {
+    const { porRota, totais } = derivarRelatorioPedidos([saida({ peso: 100 })], '', '', '2026-06-15')
+    expect(porRota[0].itensSemConversao).toBe(0)
+    expect(totais.itensSemConversao).toBe(0)
+    expect(totais.qtdEntregueKg).toBe(100)
+  })
+
+  it('pedido com item sem peso medio: o contador chega na rota e no total entregue', () => {
+    const saidas = [saida({ rota: 'Sul A', peso: 100, itens_sem_conversao: 2 })]
+    const { porRota, totais } = derivarRelatorioPedidos(saidas, '', '', '2026-06-15')
+    expect(porRota[0].itensSemConversao).toBe(2)
+    expect(totais.itensSemConversao).toBe(2)
+    // A quantidade continua saindo — mas incompleta, e por isso a tela a marca.
+    expect(totais.qtdEntregueKg).toBe(100)
+  })
+
+  it('soma o contador de varios pedidos da mesma rota', () => {
+    const saidas = [
+      saida({ rota: 'Sul A', itens_sem_conversao: 1 }),
+      saida({ rota: 'Sul A', itens_sem_conversao: 3 }),
+      saida({ rota: 'Sul A' }),
+    ]
+    const { porRota } = derivarRelatorioPedidos(saidas, '', '', '2026-06-15')
+    expect(porRota[0].itensSemConversao).toBe(4)
+  })
+
+  it('o contador e por rota: uma marcada nao contamina a outra', () => {
+    const saidas = [
+      saida({ rota: 'Sul A', itens_sem_conversao: 1 }),
+      saida({ rota: 'Norte C' }),
+    ]
+    const { porRota } = derivarRelatorioPedidos(saidas, '', '', '2026-06-15')
+    expect(porRota.find(r => r.rota === 'Sul A')!.itensSemConversao).toBe(1)
+    expect(porRota.find(r => r.rota === 'Norte C')!.itensSemConversao).toBe(0)
+  })
+
+  it('o total conta so os ENTREGUES — o mesmo conjunto de qtdEntregueKg', () => {
+    const saidas = [
+      saida({ status: 'Entregue', peso: 100, itens_sem_conversao: 1 }),
+      saida({ status: 'Em rota', peso: 999, itens_sem_conversao: 5 }),
+    ]
+    const { porRota, totais } = derivarRelatorioPedidos(saidas, '', '', '2026-06-15')
+    expect(totais.qtdEntregueKg).toBe(100)
+    expect(totais.itensSemConversao).toBe(1)
+    // A tabela por rota descreve TODOS os pedidos do periodo, entao o contador
+    // dela e o conjunto maior — cada numero qualificado pelo proprio conjunto.
+    expect(porRota[0].itensSemConversao).toBe(6)
+  })
+
+  it('so conta itens de pedidos DENTRO do periodo', () => {
+    const saidas = [
+      saida({ entrega: '2026-06-10', itens_sem_conversao: 1 }),
+      saida({ entrega: '2026-05-10', itens_sem_conversao: 5 }),
+    ]
+    const { totais } = derivarRelatorioPedidos(saidas, '2026-06', '2026-06', '2026-06-15')
+    expect(totais.itensSemConversao).toBe(1)
+  })
+
   // DEFEITO CORRIGIDO: a UI parou de gravar 'Atrasado' (SaidasLista/ModalSaida
   // so oferecem Pendente/Pago — ver derive/pagamento.ts); 'Atrasado' passou a
   // ser CALCULADO a partir de pag='Pendente' + venc vencido. Antes desta
@@ -769,6 +836,57 @@ describe('derivarRelatorioProdutos', () => {
     expect(totais.maiorMargem).toBeNull()
     expect(totais.maiorPerda).toBeNull()
   })
+
+  // ---- quantidade incompleta (lancamentos sem peso medio cadastrado) ----
+  //
+  // As tres quantidades do agregado chegam da API em kg, com cada lancamento
+  // convertido pela unidade dele. Lancamento em unidade nao-KG cujo produto
+  // nao tem peso_medio nao e convertivel: a API o deixa FORA e conta quantos
+  // foram em `itens_sem_conversao`. Como o valor em reais desses lancamentos
+  // continua inteiro, a compra media (valor/qtd) sai para cima — por isso a
+  // contagem tem que chegar na linha do produto, que e onde as duas telas
+  // (Relatorios/aba Produtos e Produtos) marcam as celulas.
+
+  it('sem lancamentos fora da conversao, o contador e 0 (nada a sinalizar)', () => {
+    const agregados = [produtoAgregado({ compra_qtd: 100, compra_valor: 200 })]
+    const { linhas, totais } = derivarRelatorioProdutos(agregados, 1)
+    expect(linhas[0].itensSemConversao).toBe(0)
+    expect(totais.itensSemConversao).toBe(0)
+  })
+
+  it('agregado com lancamento sem peso medio: o contador chega na linha e no total', () => {
+    const agregados = [
+      produtoAgregado({ compra_qtd: 100, compra_valor: 200, venda_qtd: 80, venda_valor: 320, itens_sem_conversao: 2 }),
+    ]
+    const { linhas, totais } = derivarRelatorioProdutos(agregados, 1)
+    expect(linhas[0].itensSemConversao).toBe(2)
+    expect(totais.itensSemConversao).toBe(2)
+    // As metricas continuam saindo — mas sobre quantidade incompleta, e por
+    // isso a tela as marca em vez de exibi-las limpas.
+    expect(linhas[0].markupPct).toBeCloseTo(100)
+  })
+
+  it('o contador e por produto: um marcado nao contamina o outro', () => {
+    const agregados = [
+      produtoAgregado({ produto_id: 'p1', nome: 'Com caixa sem peso', venda_valor: 900, itens_sem_conversao: 3 }),
+      produtoAgregado({ produto_id: 'p2', nome: 'So quilo', venda_valor: 100 }),
+    ]
+    const { linhas, totais } = derivarRelatorioProdutos(agregados, 2)
+    expect(linhas.find(l => l.produtoId === 'p1')!.itensSemConversao).toBe(3)
+    expect(linhas.find(l => l.produtoId === 'p2')!.itensSemConversao).toBe(0)
+    // O total soma todas as linhas — e o que decide se a nota de rodape sai.
+    expect(totais.itensSemConversao).toBe(3)
+  })
+
+  it('agregado sem o campo (fixture parcial) equivale a 0, nao a undefined', () => {
+    const { linhas, totais } = derivarRelatorioProdutos([produtoAgregado()], 1)
+    expect(linhas[0].itensSemConversao).toBe(0)
+    expect(totais.itensSemConversao).toBe(0)
+  })
+
+  it('sem produto nenhum, o total e 0 (a nota nao aparece)', () => {
+    expect(derivarRelatorioProdutos([], 3).totais.itensSemConversao).toBe(0)
+  })
 })
 
 // ------------------------------------------------------------- 6. relatório de perdas
@@ -834,8 +952,8 @@ describe('derivarRelatorioPerdas', () => {
 
   it('por produto reaproveita a view de produtos ja calculada, filtrando perdaPct null', () => {
     const produtosView = [
-      { produtoId: 'p1', nome: 'Com perda', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, margem: 0, markupPct: null, perdaPct: 20 },
-      { produtoId: 'p2', nome: 'Sem compra', compradoQtd: 0, vendidoQtd: 0, faturamento: 0, margem: 0, markupPct: null, perdaPct: null },
+      { produtoId: 'p1', nome: 'Com perda', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 0, margem: 0, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p2', nome: 'Sem compra', compradoQtd: 0, vendidoQtd: 0, faturamento: 0, itensSemConversao: 0, margem: 0, markupPct: null, perdaPct: null },
     ]
     const { porProduto } = derivarRelatorioPerdas([], [], produtosView, '', '')
     expect(porProduto).toHaveLength(1)

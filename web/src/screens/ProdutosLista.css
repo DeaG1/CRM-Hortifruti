@@ -15,7 +15,7 @@
   border-radius: 13px;
   padding: 30px 18px;
   text-align: center;
-  max-width: 560px;
+  max-width: 620px;
 }
 
 .produtos-vazio-titulo {
@@ -32,7 +32,7 @@
 }
 
 .produtos-lista {
-  max-width: 1280px;
+  max-width: 1800px;
 }
 
 /* ---------- topo ---------- */

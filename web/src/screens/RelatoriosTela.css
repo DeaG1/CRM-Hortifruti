@@ -21,7 +21,7 @@
   border-radius: 13px;
   padding: 40px 18px;
   text-align: center;
-  max-width: 560px;
+  max-width: 620px;
 }
 
 .relatorios-vazio-titulo {
@@ -37,7 +37,7 @@
 }
 
 .relatorios-tela {
-  max-width: 1280px;
+  max-width: 1800px;
 }
 
 /* ---------------------------------------------------------------- topo */

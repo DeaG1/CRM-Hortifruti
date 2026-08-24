@@ -237,3 +237,20 @@
 .shell-conteudo > * {
   margin-inline: auto;
 }
+
+/*
+ * DUAS LARGURAS DE PROPOSITO, e vale explicar a diferenca antes que alguem
+ * "uniformize" as duas:
+ *
+ * - Listas e tabelas usam ate 1800px. Elas ganham com espaco: mais colunas
+ *   legiveis de uma vez, menos truncamento. Limitar em 1280px deixava ~360px
+ *   de vazio a direita num monitor de 1920 enquanto as colunas se espremiam.
+ *
+ * - Cards de estado vazio ficam em 620px, centralizados. Aqui o oposto vale:
+ *   esticar um cartao com tres linhas de texto ate 1800px transforma a
+ *   mensagem numa faixa fina e ilegivel. O que resolve nao e largura, e
+ *   posicao.
+ *
+ * A regra pratica: conteudo denso ocupa o espaco, conteudo de leitura respeita
+ * um limite confortavel.
+ */

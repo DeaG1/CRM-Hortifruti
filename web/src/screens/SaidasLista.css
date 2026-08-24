@@ -15,7 +15,7 @@
   border-radius: 13px;
   padding: 40px 18px;
   text-align: center;
-  max-width: 560px;
+  max-width: 620px;
 }
 
 .saidas-vazio-titulo {
@@ -32,7 +32,7 @@
 }
 
 .saidas-lista {
-  max-width: 1320px;
+  max-width: 1800px;
 }
 
 /* ---------- topo ---------- */

@@ -100,6 +100,32 @@ export interface Pedido {
    * e `null` significam a mesma coisa pra situacaoExibidaSaida (sem
    * vencimento não há "atraso" pra calcular). */
   venc?: string | null
+  /**
+   * Número do pedido (`saidas.numero`, o identificador que a coluna PEDIDO de
+   * SaidasLista mostra) — é por ele que se acha o pedido na tela de Saídas.
+   * Opcional porque nem todo consumidor de `Pedido` precisa dele (a carteira
+   * de ClientesLista agrupa por cliente, não por pedido) e porque os fixtures
+   * de teste anteriores a "Pedidos recentes" não o declaram.
+   */
+  numero?: string
+  /**
+   * Quantidade da venda, SEMPRE em kg — `peso` de GET /api/saidas, que a API
+   * converte item a item pela unidade de cada um (ver `SaidaResumo.peso` em
+   * derive/relatorios.ts). Nunca somar com quantidade em outra unidade.
+   * Opcional pelo mesmo motivo de `numero`; ausente e 0 NÃO significam a
+   * mesma coisa para quem exibe (ver `quantidadeEntregueCliente`), mas as
+   * duas funções que o leem tratam ausente como 0 na soma.
+   */
+  peso?: number
+  /**
+   * Itens desta venda que ficaram FORA de `peso` por não serem convertíveis
+   * em quilos (unidade ≠ KG sem `produtos.peso_medio`) — repassado de
+   * `itens_sem_conversao` de GET /api/saidas. Quem soma `peso` precisa somar
+   * isto junto e marcar o total com `*`, senão exibe quantidade incompleta
+   * como número fechado. Mesma convenção de EntradaResumo/SaidaResumo/
+   * ProdutoAgregado.
+   */
+  itensSemConversao?: number
 }
 
 export interface ClienteDerivado extends Cliente {
@@ -207,6 +233,136 @@ export function statusCobrancaCliente(
     .filter(situacao => situacao !== '—')
   if (cobraveis.length === 0) return null
   return cobraveis.some(situacao => situacao === 'Atrasado') ? 'Atrasado' : 'Em dia'
+}
+
+/**
+ * Data ISO da última compra do cliente — a entrega mais recente entre os
+ * pedidos JÁ ENTREGUES dele. `null` quando ele nunca teve pedido entregue
+ * (ou quando as vendas não puderam ser carregadas): travessão, nunca uma
+ * data inventada nem a data de um pedido que ainda não chegou.
+ *
+ * Portado de `cUltPed`/`cUlt` (protótipo, `design/CRM Hortifruti.dc.html`
+ * ~2226-2227). Como no protótipo, NÃO é filtrada por período: "última
+ * compra" é um fato sobre o cliente, não sobre o recorte — se ele não
+ * comprou no mês escolhido, a resposta certa é a data em que comprou pela
+ * última vez, não um travessão. Achado CF-2 da auditoria.
+ *
+ * Entrega vazia (pedido entregue sem data registrada) fica de fora: uma
+ * string vazia perderia a comparação de qualquer jeito, e devolvê-la seria
+ * exibir "—" com aparência de data ausente do sistema.
+ */
+export function ultimaCompraCliente(pedidos: Pedido[], nome: string): string | null {
+  const datas = doCliente(pedidos, nome)
+    .filter(p => p.status === 'Entregue' && !!p.entrega)
+    .map(p => p.entrega)
+  if (datas.length === 0) return null
+  // 'AAAA-MM-DD' ordena igual como texto e como data — mesma comparação que
+  // `entregasCliente` usa em ClienteFicha.tsx para ordenar o histórico.
+  return datas.reduce((maior, d) => (d > maior ? d : maior))
+}
+
+/**
+ * Quantidade entregue ao cliente, em QUILOS, mais quantas entregas a
+ * compuseram. Portado de `cVolume` + `cEntregues.length` (protótipo ~2218 e
+ * 2233, métrica "Qtd no período") — achado CF-3.
+ *
+ * `null` quando o cliente não teve nenhuma entrega entre os pedidos
+ * recebidos (sem venda no recorte, ou GET /api/saidas fora do ar e a lista
+ * vazia): travessão, nunca "0 kg", que afirmaria uma medição que ninguém
+ * fez. Com entregas, a soma é devolvida mesmo se der zero — aí o zero É a
+ * medida (entregas cujos itens todos ficaram sem conversão, por exemplo).
+ *
+ * RESPEITA O PERÍODO, como o protótipo (que soma sobre `pedidosPeriodo`) e
+ * como o rótulo da métrica promete ("Qtd no período"). Recebe `periodo` e
+ * filtra aqui dentro, com a mesma `filtrarPorPeriodo` de `derivarClientes` —
+ * as duas métricas da mesma tela precisam recortar pelo mesmo critério, e
+ * deixar o recorte para a tela seria abrir a porta para elas divergirem.
+ *
+ * `itensSemConversao` sai somado junto: quem exibe o kg tem que marcar com
+ * `*` quando ele for > 0, senão mostra quantidade incompleta como fechada.
+ */
+export function quantidadeEntregueCliente(
+  pedidos: Pedido[],
+  nome: string,
+  periodo: string,
+): { kg: number; entregas: number; itensSemConversao: number } | null {
+  const doPeriodo = filtrarPorPeriodo(pedidos, periodo, p => p.entrega)
+  const entregues = doCliente(doPeriodo, nome).filter(p => p.status === 'Entregue')
+  if (entregues.length === 0) return null
+  return {
+    kg: entregues.reduce((s, p) => s + (p.peso || 0), 0),
+    entregas: entregues.length,
+    itensSemConversao: entregues.reduce((s, p) => s + (p.itensSemConversao || 0), 0),
+  }
+}
+
+/**
+ * Histórico de atrasos do cliente: quantos pedidos dele estão atrasados e
+ * quanto somam. Portado de `cAtrasados` (protótipo ~2222, exibido em 2250) —
+ * achado CF-5.
+ *
+ * Atraso vem de `situacaoExibidaSaida`, nunca do `pag` gravado, pela mesma
+ * razão já documentada em `inadimplenciaPorCliente` e
+ * `statusCobrancaCliente`: 'Atrasado' é calculado do vencimento, e comparar
+ * com o campo cru deixaria de fora justamente a venda vencida gravada como
+ * 'Pendente' — o caso normal.
+ *
+ * `null` quando o cliente não tem NENHUMA venda cobrável (sem venda, ou só
+ * canceladas/devolvidas, ou /api/saidas fora do ar): travessão. Com vendas
+ * cobráveis e nenhuma atrasada devolve `{ quantidade: 0 }` — zero MEDIDO, que
+ * a tela mostra como "0 atrasos" e é a boa notícia que o dono quer ver. Essa
+ * é a distinção que o projeto inteiro faz entre `—` e `0`, e é o mesmo corte
+ * de `statusCobrancaCliente` (as duas linhas ficam no mesmo bloco da ficha e
+ * não podem discordar sobre haver ou não o que cobrar).
+ *
+ * Como o status de cobrança, NÃO é filtrada por período (o protótipo usa
+ * `pedidosRaw`): dívida vencida em maio continua sendo dívida em agosto.
+ */
+export function atrasosDoCliente(
+  pedidos: Pedido[],
+  nome: string,
+  hojeIso: string,
+): { quantidade: number; valor: number } | null {
+  const cobraveis = doCliente(pedidos, nome)
+    .map(p => ({ pedido: p, situacao: situacaoExibidaSaida(p.pag, p.venc, hojeIso) }))
+    .filter(({ situacao }) => situacao !== '—')
+  if (cobraveis.length === 0) return null
+  const atrasados = cobraveis.filter(({ situacao }) => situacao === 'Atrasado')
+  return {
+    quantidade: atrasados.length,
+    valor: atrasados.reduce((s, { pedido }) => s + (pedido.valor || 0), 0),
+  }
+}
+
+/**
+ * Os `quantos` pedidos mais recentes do cliente, de QUALQUER status —
+ * portado de `sel.pedidos` (protótipo 2252-2255), achado CF-6.
+ *
+ * Inclui pendente, em rota, cancelado e devolvido de propósito: a pergunta
+ * do bloco é "o que está acontecendo com este cliente", e um pedido em rota
+ * é exatamente o que o vendedor precisa ver antes de ligar para ele. O
+ * bloco anterior desta ficha só mostrava `status === 'Entregue'` e escondia
+ * tudo o que ainda não chegou.
+ *
+ * Ordem: entrega mais recente primeiro, com desempate por `numero` (também
+ * decrescente) — sem o desempate, dois pedidos do mesmo dia sairiam na ordem
+ * em que a API os devolveu, e a lista mudaria de ordem entre dois
+ * carregamentos sem nada ter mudado. Pedido sem data de entrega ordena por
+ * último ('' perde toda comparação), mas continua na lista: ele existe e
+ * some-lo seria esconder um pedido real.
+ *
+ * Não é filtrada por período, como no protótipo (`pedidosRaw`): "pedidos
+ * recentes" é uma janela por CONTAGEM, não por mês — recortar por mês
+ * esvaziaria o bloco justamente no cliente que parou de comprar, que é
+ * quando ele mais importa.
+ */
+export function pedidosRecentesCliente(pedidos: Pedido[], nome: string, quantos: number): Pedido[] {
+  return doCliente(pedidos, nome)
+    .slice()
+    .sort((a, b) =>
+      (b.entrega || '').localeCompare(a.entrega || '')
+      || (b.numero || '').localeCompare(a.numero || ''))
+    .slice(0, quantos)
 }
 
 /**

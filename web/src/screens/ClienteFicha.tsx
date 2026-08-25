@@ -1,14 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { api, ErroApi } from '../api/client'
 import {
   derivarClientes,
   statusCobrancaCliente,
+  ultimaCompraCliente,
+  quantidadeEntregueCliente,
+  atrasosDoCliente,
+  pedidosRecentesCliente,
   type Cliente,
   type Pedido,
   type StatusCliente,
   type Health,
   type StatusCobranca,
 } from '../derive/clientes'
+import {
+  METAS_DASHBOARD,
+  statusFaturadoCliente,
+  statusTicketEntrega,
+  statusInadimplencia,
+} from '../derive/dashboard'
+import { rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import { situacaoExibidaSaida } from '../derive/pagamento'
 import './ClienteFicha.css'
 
@@ -25,6 +36,11 @@ const HEALTH_INFO: Record<Health, { cor: string; bg: string; label: string }> = 
   red: { cor: '#c2502f', bg: '#f6e4dc', label: 'Risco' },
 }
 
+/** Cor de um número sem julgamento a fazer (métrica sem meta) e de todo
+ * travessão: ausência de dado não é boa nem má notícia, e pintá-la de
+ * vermelho faria "não medi" parecer "está ruim". */
+const NEUTRO = '#2a2a24'
+
 /** Cor do status de cobranca — o prototipo pinta este campo de verde ou
  * vermelho (`design/CRM Hortifruti.dc.html` ~2249). Reaproveita os mesmos
  * hex do HEALTH_INFO acima pra tela nao ganhar um terceiro verde. Sem
@@ -35,7 +51,26 @@ const COBRANCA_COR: Record<StatusCobranca, string> = {
   'Atrasado': '#c2502f',
 }
 
+/** Selo de status do pedido no bloco "Pedidos recentes" (protótipo
+ * `pStatusColor`/`pStatusBg`, célula 344). Mesmas cores da coluna STATUS de
+ * SaidasLista.tsx — é paleta, não regra: o mesmo estado tem que ter a mesma
+ * cor nas duas telas, e um mapa de cor não é aritmética a centralizar em
+ * `derive/`. 'Em rota' fica neutro de propósito (é "em andamento", não um
+ * julgamento). */
+const STATUS_PEDIDO: Record<Pedido['status'], { cor: string; bg: string }> = {
+  Pendente: { cor: '#c79320', bg: '#f6efd8' },
+  'Em rota': { cor: '#9a9784', bg: '#f1eee2' },
+  Entregue: { cor: '#3f8f5b', bg: '#e7f1e8' },
+  Cancelado: { cor: '#c2502f', bg: '#f6e4dc' },
+  Devolvido: { cor: '#c2502f', bg: '#f6e4dc' },
+}
+
+/** Quantos pedidos o bloco "Pedidos recentes" mostra — `slice(0,4)` do
+ * protótipo (2252). */
+const QUANTOS_PEDIDOS_RECENTES = 4
+
 const money = (n: number) => 'R$ ' + n.toLocaleString('pt-BR')
+const pesoTxt = (n: number) => n.toLocaleString('pt-BR') + ' kg'
 
 /** Data de hoje em 'AAAA-MM-DD', usando os componentes LOCAIS (não UTC) —
  * mesmo `hojeIsoLocal()` de RelatoriosTela.tsx/ClientesLista.tsx. Fica na
@@ -59,15 +94,39 @@ function dataBr(iso: string | null | undefined): string {
   return `${dia}/${mes}`
 }
 
-/** Cabeçalho de uma saída (venda), como GET /api/saidas devolve — ver
+/** Igual a `dataBr`, COM o ano. Usada só na métrica "Última compra", que é a
+ * única desta tela que não respeita o filtro de período: "10/06" para uma
+ * compra de dois anos atrás leria como "mês passado" e é justamente o
+ * cliente parado que essa métrica existe pra denunciar. */
+function dataBrAno(iso: string | null | undefined): string {
+  if (!iso || iso.length < 10) return '—'
+  const [ano, mes, dia] = iso.split('-')
+  return `${dia}/${mes}/${ano}`
+}
+
+/** "1 entrega" / "3 entregas" — o "N entrega(s)" do protótipo (2233) sem o
+ * parêntese, que existia só pra não ter que decidir o plural. */
+function plural(n: number, singular: string, plural_: string): string {
+  return `${n.toLocaleString('pt-BR')} ${n === 1 ? singular : plural_}`
+}
+
+/**
+ * Cabeçalho de uma saída (venda), como GET /api/saidas devolve — ver
  * api/src/routes/saidas.ts (paraJson) e o mesmo tipo em
  * ClientesLista.tsx (par desta tela, mesma justificativa de tipo raso
- * duplicado por consumidor). */
+ * duplicado por consumidor).
+ */
 interface SaidaBruta {
   id: string
+  /** Identificador legível do pedido — a coluna PEDIDO de SaidasLista. É por
+   * ele que se acha o pedido lá a partir desta ficha. */
+  numero: string
   cliente_id: string | null
   entrega: string | null
   valor: number
+  /** Quantidade em kg, já convertida pela API (ver `itens_sem_conversao`). */
+  peso?: number
+  itens_sem_conversao?: number
   status: 'Pendente' | 'Em rota' | 'Entregue' | 'Cancelado' | 'Devolvido'
   pag: 'Pago' | 'Pendente' | 'Atrasado' | '—'
   venc: string | null
@@ -88,9 +147,12 @@ interface SaidaBruta {
 function paraPedidos(saidasBrutas: SaidaBruta[], alvo: Cliente): Pedido[] {
   return saidasBrutas.map(s => ({
     id: s.id,
+    numero: s.numero,
     cliente: s.cliente_id === alvo.id ? alvo.nome : (s.cliente_id || ''),
     entrega: s.entrega ?? '',
     valor: s.valor,
+    peso: s.peso,
+    itensSemConversao: s.itens_sem_conversao,
     status: s.status,
     pag: s.pag,
     venc: s.venc,
@@ -107,15 +169,65 @@ function iniciais(nome: string): string {
     .toUpperCase()
 }
 
+/**
+ * Texto do aviso de quantidade incompleta — mesma regra e mesmo `*` de
+ * SaidasLista/EntradasLista/Produtos: item em unidade diferente de KG cujo
+ * produto não tem peso médio cadastrado não é convertível, a API o deixa de
+ * fora de `peso` em vez de inventar um fator, e a tela diz que o total está
+ * incompleto em vez de exibi-lo como fechado.
+ */
+function avisoSemConversao(n: number): string {
+  const itens = n === 1 ? '1 item' : `${n} itens`
+  const verbo = n === 1 ? 'está' : 'estão'
+  return `${itens} das entregas deste cliente em unidade diferente de KG sem peso médio cadastrado no `
+    + `produto: ${verbo} fora desta quantidade, porque sem o peso da embalagem não há como converter em `
+    + 'quilos. Cadastre o peso médio em Produtos para que entrem na conta.'
+}
+
+/** Uma métrica do bloco "Métricas comerciais": rótulo, valor (com a cor do
+ * semáforo) e o sub-rótulo que diz qual é a meta — sem ele o número aparece
+ * sem a régua que diz se é bom (achado CF-4). */
+function Metrica({ label, valor, sub, cor }: {
+  label: string
+  valor: ReactNode
+  sub: ReactNode
+  cor?: string
+}) {
+  return (
+    <div className="ficha-metrica">
+      <div className="ficha-metrica-label">{label}</div>
+      <div className="ficha-metrica-valor" style={{ color: cor ?? NEUTRO }}>{valor}</div>
+      <div className="ficha-metrica-sub">{sub}</div>
+    </div>
+  )
+}
+
 interface ClienteFichaProps {
   id: string
+  /**
+   * Período global do cabeçalho (App.tsx, achado S-3) — o MESMO que
+   * ClientesLista recebe, para o faturado, o ticket, a participação e a
+   * inadimplência da ficha baterem com a linha da lista de onde o usuário
+   * acabou de clicar. Sem isso a ficha somava a base inteira e mostrava um
+   * número maior que o da lista, para o mesmo cliente, na mesma sessão.
+   *
+   * Nem tudo nesta tela segue o recorte, e é de propósito (o protótipo faz a
+   * mesma separação): "última compra", "histórico de atrasos", "status de
+   * cobrança" e "pedidos recentes" saem do histórico INTEIRO — dívida
+   * vencida em maio continua sendo dívida em agosto, e um cliente que parou
+   * de comprar precisa mostrar a data em que comprou pela última vez, não um
+   * travessão. A legenda do bloco de métricas diz qual é qual.
+   */
+  periodo?: Periodo
   onVoltar: () => void
   onEditar: (cliente: Cliente) => void
   /** Sessão expirou (401 da API) — a tela volta ao login em vez de mostrar erro. */
   onSessaoExpirada?: () => void
 }
 
-export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: ClienteFichaProps) {
+export function ClienteFicha(
+  { id, periodo = PERIODO_TODOS, onVoltar, onEditar, onSessaoExpirada }: ClienteFichaProps,
+) {
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
@@ -155,6 +267,10 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
   // da ficha em si, e falha SOZINHA: mesmo espirito de ClientesLista.tsx,
   // uma falha aqui nao pode apagar a ficha do cliente que ja carregou, so
   // deixa as metricas comerciais indisponiveis (ver `erroVendas`).
+  //
+  // A lista vem inteira e o recorte de periodo e aplicado em memoria (mesma
+  // decisao, e mesma nota de escala, de ClientesLista.tsx): trocar o mes no
+  // cabecalho nao dispara uma ida ao servidor.
   useEffect(() => {
     let cancelado = false
     api.get<SaidaBruta[]>('/api/saidas')
@@ -196,7 +312,7 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
   // duas chamadas separadas podem cair em lados opostos da virada da meia-noite.
   const hoje = hojeIsoLocal()
   const pedidos = paraPedidos(saidasBrutas, cliente)
-  const [derivado] = derivarClientes([cliente], pedidos, 'all', hoje)
+  const [derivado] = derivarClientes([cliente], pedidos, periodo, hoje)
   const health = HEALTH_INFO[derivado.health]
   const statusLabel = STATUS_LABEL[cliente.status] ?? cliente.status
   // Mesmo sinal de "sem dado real" que ClientesLista.tsx usa por linha:
@@ -211,13 +327,19 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
   // dele. `null` (cliente sem venda cobravel, ou /api/saidas fora do ar e
   // `saidasBrutas` vazio) vira travessao: nunca "Em dia" por omissao.
   const cobranca = statusCobrancaCliente(pedidos, cliente.nome, hoje)
-  // Entregas deste cliente, mais recente primeiro — alimenta o bloco
-  // "Histórico de entregas". So as ja entregues (mesmo recorte de
-  // `derivado.entregas`/faturado, que tambem so contam status 'Entregue');
-  // um pedido cancelado/em rota nao e uma "entrega" no sentido do bloco.
-  const entregasCliente = pedidos
-    .filter(p => p.cliente === cliente.nome && p.status === 'Entregue')
-    .sort((a, b) => (b.entrega || '').localeCompare(a.entrega || ''))
+  // As tres metricas/linhas que o protótipo calcula sobre o historico
+  // INTEIRO (`pedidosRaw`), nao sobre o periodo — ver o comentario da prop
+  // `periodo` para o porque de cada uma.
+  const ultimaCompra = ultimaCompraCliente(pedidos, cliente.nome)
+  const atrasos = atrasosDoCliente(pedidos, cliente.nome, hoje)
+  const recentes = pedidosRecentesCliente(pedidos, cliente.nome, QUANTOS_PEDIDOS_RECENTES)
+  // Qtd entregue: esta SEGUE o periodo (o rotulo promete "no periodo").
+  const qtd = quantidadeEntregueCliente(pedidos, cliente.nome, periodo)
+
+  const metaFaturado = `meta R$ ${METAS_DASHBOARD.ticketMesMetaBaixo.toLocaleString('pt-BR')}`
+    + `–${METAS_DASHBOARD.ticketMesMetaAlto.toLocaleString('pt-BR')}`
+  const subInadimplencia = `meta ≤ ${METAS_DASHBOARD.inadimplenciaMetaPct}%`
+    + (atrasos ? ` · ${plural(atrasos.quantidade, 'atraso', 'atrasos')}` : '')
 
   return (
     <div className="ficha">
@@ -282,42 +404,115 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
         <div className="ficha-col">
           <div className="ficha-bloco">
             <h3 className="ficha-bloco-titulo">Métricas comerciais</h3>
+            {/* Sem esta linha, um número menor aqui do que na lista pareceria
+                divergência, e "última compra" fora do recorte pareceria
+                inconsistência — as duas coisas são o recorte, dito. */}
+            <div className="ficha-bloco-legenda">
+              Números de <strong>{rotuloPeriodo(periodo)}</strong> · última compra, atrasos e pedidos
+              recentes consideram o histórico inteiro
+            </div>
             <div className="ficha-metricas">
-              <div className="ficha-metrica">
-                <div className="ficha-metrica-label">Faturado / mês</div>
-                <div className="ficha-metrica-valor">{moneyOuTraco(derivado.faturado)}</div>
-              </div>
-              <div className="ficha-metrica">
-                <div className="ficha-metrica-label">Ticket / entrega</div>
-                <div className="ficha-metrica-valor">{moneyOuTraco(derivado.ticketEntrega)}</div>
-              </div>
-              <div className="ficha-metrica">
-                <div className="ficha-metrica-label">% do faturamento</div>
-                <div className="ficha-metrica-valor">{temVendas ? `${derivado.participacao}%` : '—'}</div>
-              </div>
-              <div className="ficha-metrica">
-                <div className="ficha-metrica-label">Inadimplência</div>
-                <div className="ficha-metrica-valor">
-                  {temVendas ? derivado.inadimplencia.toFixed(1).replace('.', ',') + '%' : '—'}
-                </div>
-              </div>
+              <Metrica
+                label="Qtd no período"
+                valor={qtd
+                  ? (qtd.itensSemConversao > 0
+                    ? (
+                      <span className="ficha-incompleto" title={avisoSemConversao(qtd.itensSemConversao)}>
+                        {pesoTxt(qtd.kg)}*
+                      </span>
+                    )
+                    : pesoTxt(qtd.kg))
+                  : '—'}
+                sub={qtd ? plural(qtd.entregas, 'entrega', 'entregas') : 'sem entrega no período'}
+              />
+              <Metrica
+                label="Faturado / mês"
+                valor={moneyOuTraco(derivado.faturado)}
+                sub={metaFaturado}
+                // Semáforo só quando há faturamento medido: sem venda no
+                // período o vermelho diria "está péssimo" sobre um número que
+                // ninguém apurou.
+                cor={temVendas ? HEALTH_INFO[statusFaturadoCliente(derivado.faturado)].cor : undefined}
+              />
+              <Metrica
+                label="Ticket / entrega"
+                valor={moneyOuTraco(derivado.ticketEntrega)}
+                sub={`meta ≥ R$ ${METAS_DASHBOARD.ticketEntregaMeta.toLocaleString('pt-BR')}`}
+                cor={derivado.ticketEntrega > 0
+                  ? HEALTH_INFO[statusTicketEntrega(derivado.ticketEntrega)].cor
+                  : undefined}
+              />
+              <Metrica
+                label="% do faturamento"
+                valor={temVendas ? `${derivado.participacao}%` : '—'}
+                // Sem semáforo, como no protótipo: concentração alta é um
+                // risco, não uma nota — o Painel de Indicadores é quem
+                // destaca o cliente acima do limite.
+                sub={`risco de concentração acima de ${METAS_DASHBOARD.concentracaoCarteiraAlertaPct}%`}
+              />
+              <Metrica
+                label="Última compra"
+                valor={dataBrAno(ultimaCompra)}
+                sub={ultimaCompra ? 'do último pedido entregue' : 'nenhum pedido entregue ainda'}
+              />
+              <Metrica
+                label="Inadimplência"
+                valor={temVendas ? derivado.inadimplencia.toFixed(1).replace('.', ',') + '%' : '—'}
+                sub={subInadimplencia}
+                cor={temVendas ? HEALTH_INFO[statusInadimplencia(derivado.inadimplencia)].cor : undefined}
+              />
             </div>
           </div>
 
+          {/*
+            "Pedidos recentes" (achado CF-6). Este bloco chamava-se "Histórico
+            de entregas" e filtrava `status === 'Entregue'`: escondia
+            exatamente os pedidos que ainda vão acontecer — o pendente e o em
+            rota, que são o que o vendedor precisa ver antes de ligar pro
+            cliente — e não trazia nem o número do pedido (para achá-lo em
+            Saídas) nem a quantidade.
+          */}
           <div className="ficha-bloco">
-            <h3 className="ficha-bloco-titulo">Histórico de entregas</h3>
-            {entregasCliente.length === 0 ? (
-              <p className="ficha-historico-vazio">Nenhuma entrega registrada.</p>
+            <h3 className="ficha-bloco-titulo">Pedidos recentes</h3>
+            {recentes.length === 0 ? (
+              <p className="ficha-historico-vazio">Nenhum pedido registrado.</p>
             ) : (
-              <div className="ficha-historico">
-                {entregasCliente.map(p => (
-                  <div key={p.id} className="ficha-linha">
-                    <span className="ficha-linha-chave">
-                      {dataBr(p.entrega)} · {situacaoExibidaSaida(p.pag, p.venc, hoje)}
-                    </span>
-                    <span className="ficha-linha-valor">{money(p.valor)}</span>
-                  </div>
-                ))}
+              <div className="ficha-pedidos">
+                {recentes.map(p => {
+                  const selo = STATUS_PEDIDO[p.status]
+                  return (
+                    <div key={p.id} className="ficha-pedido">
+                      <span className="ficha-pedido-numero">{p.numero || '—'}</span>
+                      <span className="ficha-pedido-data">{dataBr(p.entrega)}</span>
+                      <span className="ficha-pedido-peso">
+                        {/* Pedido sem item convertível soma 0 kg de verdade;
+                            pedido sem `peso` na resposta é ausência de dado.
+                            Só o segundo vira travessão. */}
+                        {p.peso == null
+                          ? '—'
+                          : (p.itensSemConversao
+                            ? (
+                              <span
+                                className="ficha-incompleto"
+                                title={avisoSemConversao(p.itensSemConversao)}
+                              >
+                                {pesoTxt(p.peso)}*
+                              </span>
+                            )
+                            : pesoTxt(p.peso))}
+                      </span>
+                      <span className="ficha-pedido-valor">{money(p.valor)}</span>
+                      <span className="ficha-pedido-selo" style={{ color: selo.cor, background: selo.bg }}>
+                        {p.status}
+                      </span>
+                      {/* Situação de pagamento DERIVADA (não o `pag` gravado)
+                          — a mesma que a coluna PAGAMENTO de Saídas mostra. */}
+                      <span className="ficha-pedido-pag">
+                        {situacaoExibidaSaida(p.pag, p.venc, hoje)}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -371,6 +566,28 @@ export function ClienteFicha({ id, onVoltar, onEditar, onSessaoExpirada }: Clien
               <span className="ficha-linha-chave">Taxa de inadimplência</span>
               <span className="ficha-linha-valor">
                 {temVendas ? derivado.inadimplencia.toFixed(1).replace('.', ',') + '%' : '—'}
+              </span>
+            </div>
+            {/*
+              "Histórico de atrasos" (achado CF-5): a quinta linha do bloco de
+              crédito no protótipo (2250), a única que diz QUANTOS pedidos e
+              QUANTO em reais estão atrasados — a taxa acima é uma fração e
+              não responde nem uma coisa nem outra. `null` (nenhuma venda
+              cobrável, ou vendas indisponíveis) vira travessão; zero atraso
+              medido vira "0 atrasos", que é a boa notícia e não pode virar
+              travessão.
+            */}
+            <div className="ficha-linha">
+              <span className="ficha-linha-chave">Histórico de atrasos</span>
+              <span
+                className="ficha-linha-valor"
+                style={atrasos && atrasos.quantidade > 0 ? { color: COBRANCA_COR.Atrasado } : undefined}
+              >
+                {atrasos === null
+                  ? '—'
+                  : atrasos.quantidade === 0
+                    ? '0 atrasos'
+                    : `${plural(atrasos.quantidade, 'pedido', 'pedidos')} · ${money(atrasos.valor)}`}
               </span>
             </div>
           </div>

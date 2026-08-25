@@ -136,6 +136,17 @@ export const METAS_DASHBOARD = {
   ticketMesMetaBaixo: 3500,
   ticketMesMetaAlto: 3800,
   ticketMesAmbarAte: 3000,
+  /**
+   * Faturado de UM cliente no período (métrica "Faturado / mês" da ficha) —
+   * mesma meta 3.500–3.800 dos dois acima, mas faixa âmbar PRÓPRIA, a partir
+   * de 2.000 (protótipo, `design/CRM Hortifruti.dc.html` 2234). Não é
+   * descuido nem duplicação: `ticketMesAmbarAte` classifica a MÉDIA da
+   * carteira (receita ÷ minimercados atendidos), onde 2.900 já é um mês
+   * ruim; aqui se classifica UM minimercado, onde a dispersão entre o maior
+   * e o menor cliente é normal e 2.900 ainda é um cliente saudável. Mesma
+   * meta, réguas diferentes porque as duas perguntas são diferentes.
+   */
+  faturadoClienteAmbarAte: 2000,
   /** Inadimplência (%) — meta ≤1%, âmbar até 2%. */
   inadimplenciaMetaPct: 1,
   inadimplenciaAmbarAtePct: 2,
@@ -505,6 +516,18 @@ export function statusEquilibrioClientes(n: number): Health {
 export function statusTicketMes(v: number): Health {
   if (v >= METAS_DASHBOARD.ticketMesMetaBaixo) return 'green'
   if (v >= METAS_DASHBOARD.ticketMesAmbarAte) return 'amber'
+  return 'red'
+}
+
+/**
+ * Semáforo do "Faturado / mês" de UM cliente (ficha do cliente, achado CF-4).
+ * Mesma meta de `statusTicketMes`, faixa âmbar própria — ver
+ * `METAS_DASHBOARD.faturadoClienteAmbarAte` para o porquê de as duas réguas
+ * não serem a mesma.
+ */
+export function statusFaturadoCliente(v: number): Health {
+  if (v >= METAS_DASHBOARD.ticketMesMetaBaixo) return 'green'
+  if (v >= METAS_DASHBOARD.faturadoClienteAmbarAte) return 'amber'
   return 'red'
 }
 

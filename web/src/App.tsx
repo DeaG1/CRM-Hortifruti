@@ -105,9 +105,15 @@ function ClientesModulo({ periodo, onSessaoExpirada }: { periodo: Periodo; onSes
     <>
       {visao === 'ficha' && clienteId
         ? (
+          // `periodo` desce para a ficha pelo mesmo motivo que desce para a
+          // lista: o faturado, o ticket e a inadimplência do cliente têm que
+          // ser os MESMOS números na linha de onde se clicou e na ficha que
+          // abre. Ver o comentário da prop em ClienteFicha.tsx para o que
+          // nesta tela fica de fora do recorte (e por quê).
           <ClienteFicha
             key={`${clienteId}:${versao}`}
             id={clienteId}
+            periodo={periodo}
             onVoltar={voltarParaLista}
             onEditar={c => setModal(c)}
             onSessaoExpirada={onSessaoExpirada}

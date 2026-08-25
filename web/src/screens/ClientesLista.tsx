@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, ErroApi } from '../api/client'
 import { derivarClientes, type Cliente, type Pedido, type ClienteDerivado, type StatusCliente, type Health } from '../derive/clientes'
 import { PERIODO_TODOS, rotuloPeriodo, type Periodo } from '../derive/periodo'
+import { statusTicketEntrega, statusInadimplencia } from '../derive/dashboard'
 import './ClientesLista.css'
 
 const STATUS_LABEL: Record<StatusCliente, string> = {
@@ -46,19 +47,26 @@ function hojeIsoLocal(): string {
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
 }
 
-/** Cor do ticket por entrega: portado de entregaColor do protótipo. Zero fica
- * neutro (ainda não há pedidos), em vez de vermelho — sem pedido não é risco. */
+/**
+ * Cor do ticket por entrega: portado de entregaColor do protótipo. Zero fica
+ * neutro (ainda não há pedidos), em vez de vermelho — sem pedido não é risco.
+ *
+ * A CLASSIFICAÇÃO em si vem de `statusTicketEntrega` (derive/dashboard.ts), a
+ * mesma que o Painel de Indicadores e a ficha do cliente usam: aqui esta
+ * função repetia os limiares 430/150 escritos à mão, e o mesmo ticket podia
+ * sair verde numa tela e âmbar na outra no dia em que alguém mudasse a meta
+ * num lugar só. Aqui ficou só o que é DESTA tela: o caso "ainda não há
+ * pedido", que o semáforo do painel não precisa distinguir.
+ */
 function corTicketEntrega(v: number): string {
   if (v <= 0) return NEUTRO
-  if (v >= 430) return HEALTH_INFO.green.cor
-  if (v >= 150) return HEALTH_INFO.amber.cor
-  return HEALTH_INFO.red.cor
+  return HEALTH_INFO[statusTicketEntrega(v)].cor
 }
 
+/** Mesma história de `corTicketEntrega`: os limiares (1% / 2%) moram em
+ * METAS_DASHBOARD, e a classificação em `statusInadimplencia`. */
 function corInadimplencia(pct: number): string {
-  if (pct <= 1) return HEALTH_INFO.green.cor
-  if (pct <= 2) return HEALTH_INFO.amber.cor
-  return HEALTH_INFO.red.cor
+  return HEALTH_INFO[statusInadimplencia(pct)].cor
 }
 
 /** Cabeçalho de uma saída (venda), como GET /api/saidas devolve — ver
@@ -214,6 +222,14 @@ export function ClientesLista({ onAbrir, periodo = PERIODO_TODOS, onSessaoExpira
             <span className="clientes-filtro-contagem">{contagem(f)}</span>
           </button>
         ))}
+        {/* A linha é clicável desde sempre (o `onClick` da linha, abaixo), mas
+            nada na tela dizia isso: uma afordância que existe e está
+            invisível vale tanto quanto uma que não existe. Protótipo linha
+            251, achado CL-1 da auditoria. Fica AQUI, no fim da barra de
+            filtros, e não junto ao botão "Novo cliente" (que mora em
+            App.tsx), porque é sobre a tabela logo abaixo. */}
+        <div className="clientes-filtros-spacer" />
+        <div className="clientes-dica">Clique numa linha para abrir a ficha</div>
       </div>
 
       <div className="clientes-tabela">

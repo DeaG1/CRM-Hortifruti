@@ -244,3 +244,44 @@ describe('ClientesLista — periodo global', () => {
     expect(screen.getByText(/números da carteira/i)).toHaveTextContent('Junho/2026')
   })
 })
+
+// ============ dica de afordancia (achado CL-1 da auditoria)
+
+describe('ClientesLista — dica de que a linha abre a ficha', () => {
+  it('a tela diz que da pra clicar numa linha — a afordancia existia e era invisivel', async () => {
+    mockRotas([cliente()], [])
+    render(<ClientesLista onAbrir={() => {}} />)
+    await screen.findByText('Mercado A')
+    expect(screen.getByText('Clique numa linha para abrir a ficha')).toBeInTheDocument()
+  })
+
+  it('a dica so aparece quando ha linha para clicar (lista vazia nao a mostra)', async () => {
+    mockRotas([], [])
+    render(<ClientesLista onAbrir={() => {}} />)
+    await screen.findByText(/nenhum cliente cadastrado/i)
+    expect(screen.queryByText('Clique numa linha para abrir a ficha')).not.toBeInTheDocument()
+  })
+
+  it('cliente sem entrega no periodo: ticket em travessao e NEUTRO, nunca vermelho', async () => {
+    // O semaforo do ticket vem de `statusTicketEntrega` (derive/dashboard.ts),
+    // que classificaria zero como vermelho — certo para um ticket medido e
+    // baixo, errado para "ainda nao houve entrega". Sem esta guarda, todo
+    // cliente novo abriria a tela pintado de risco.
+    mockRotas([cliente()], [])
+    render(<ClientesLista onAbrir={() => {}} />)
+    const linha = (await screen.findByText('Mercado A')).closest('.clientes-linha') as HTMLElement
+    const celulas = Array.from(linha.querySelectorAll('.clientes-col-num')) as HTMLElement[]
+    // Coluna /ENTREGA (a segunda numerica): travessao, cor neutra.
+    expect(celulas[1]).toHaveTextContent('—')
+    expect(celulas[1].style.color).toBe('rgb(154, 151, 132)')
+  })
+
+  it('e a dica nao mente: clicar na linha realmente abre a ficha', async () => {
+    mockRotas([cliente({ id: 'c-7' })], [])
+    const onAbrir = vi.fn()
+    render(<ClientesLista onAbrir={onAbrir} />)
+    const linha = (await screen.findByText('Mercado A')).closest('.clientes-linha') as HTMLElement
+    fireEvent.click(linha)
+    expect(onAbrir).toHaveBeenCalledWith('c-7')
+  })
+})

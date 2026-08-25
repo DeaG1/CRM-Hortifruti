@@ -51,15 +51,34 @@ const entradaComItens = {
   itens: [{ id: 'i-1', produto_id: 'p-1', un: 'KG', qtd: 30, preco: 4, perda_kg: 0.5 }],
 }
 
+/** Uma perda de depósito, na forma que GET /api/perdas devolve (paraJsonLista
+ * em api/src/routes/perdas.ts) — `qtd_kg` já convertido pela unidade da
+ * própria perda, nunca o `qtd` cru. */
+const perda = (over: Record<string, unknown> = {}) => ({
+  id: 'pd-1',
+  data: '2026-08-10',
+  produto_id: 'p-1',
+  un: 'KG',
+  qtd: 0,
+  qtd_kg: 0,
+  motivo: 'vencimento',
+  obs: '',
+  itens_sem_conversao: 0,
+  ...over,
+})
+
 /** Router de URL padrao — cobre tanto a tela quanto o ModalEntrada real que
  * ela monta (produtos/fornecedores). Cada teste pode sobrescrever so o que
- * precisa com mockGet.mockImplementation de novo. */
-function mockRotasPadrao(entradas: unknown[] = [entrada()]) {
+ * precisa com mockGet.mockImplementation de novo. `perdas` default `[]`: a
+ * maioria dos testes não é sobre o índice de perdas e não quer que ele
+ * contribua com nada. */
+function mockRotasPadrao(entradas: unknown[] = [entrada()], perdas: unknown[] = []) {
   mockGet.mockImplementation((url: string) => {
     if (url === '/api/entradas') return Promise.resolve(entradas)
     if (url === '/api/entradas/e-1') return Promise.resolve(entradaComItens)
     if (url === '/api/fornecedores') return Promise.resolve(FORNECEDORES)
     if (url === '/api/produtos') return Promise.resolve([])
+    if (url === '/api/perdas') return Promise.resolve(perdas)
     return Promise.reject(new Error('rota nao mockada: ' + url))
   })
 }
@@ -361,12 +380,13 @@ describe('EntradasLista — cartao "A pagar ao produtor"', () => {
 })
 
 /**
- * Cartao "Perda media" (achado E-2; protótipo linha 2507). A perda aparecia
- * so em quilos absolutos e sempre em vermelho — 140 kg pode ser rotina ou
- * catastrofe, e a tela nao dizia qual. O indice contra o peso recebido e o
- * que da sentido ao numero; o alvo do protótipo e 10%.
+ * Cartao "ÍNDICE DE PERDAS" (antes "Perda média (coleta/transporte)") —
+ * unificado ao KPI do painel (derive/dashboard.ts, indiceDePerdas): soma
+ * perda de coleta (da própria entrada) + perda de depósito (GET /api/perdas),
+ * sobre o peso recebido. A régua do semáforo também deixou de ser própria
+ * desta tela (10/15) e passou a ser a do painel (10/13, METAS_DASHBOARD).
  */
-describe('EntradasLista — cartao "Perda media"', () => {
+describe('EntradasLista — cartao "Índice de perdas"', () => {
   const VERDE = 'rgb(63, 143, 91)'
   const AMBAR = 'rgb(199, 147, 32)'
   const VERMELHO = 'rgb(194, 80, 47)'
@@ -376,75 +396,130 @@ describe('EntradasLista — cartao "Perda media"', () => {
     mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 70, perda_itens_qtd: 0 })])
     render(<EntradasLista />)
     await screen.findByText('C-1040')
-    const c = cartao('PERDA MÉDIA (COLETA/TRANSPORTE)')
+    const c = cartao('ÍNDICE DE PERDAS')
     expect(within(c).getByText('7,0%')).toBeInTheDocument()
     expect(within(c).getByText('meta ≤ 10% · 70 kg perdidos')).toBeInTheDocument()
+  })
+
+  it('coleta + depósito somando: o cartão passa a incluir a perda de depósito', async () => {
+    // Antes desta unificação o cartão mostraria só 50/1000 = 5% (só coleta).
+    // Com a perda de depósito somada, (50+20)/1000 = 7% — o mesmo número que
+    // o KPI "Índice de perdas" do painel mostraria para este recorte.
+    mockRotasPadrao(
+      [entrada({ peso_total: 1000, perda_kg: 50, perda_itens_qtd: 0 })],
+      [perda({ qtd_kg: 20 })],
+    )
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    const c = cartao('ÍNDICE DE PERDAS')
+    expect(within(c).getByText('7,0%')).toBeInTheDocument()
+    expect(within(c).getByText('meta ≤ 10% · 70 kg perdidos')).toBeInTheDocument()
+  })
+
+  it('só coleta (sem perda de depósito no período): bate com o número que o KPI do painel mostraria', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 70, perda_itens_qtd: 0 })], [])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    // (70 coleta + 0 depósito) / 1000 = 7% — indiceDePerdas([...], []) dá o
+    // mesmo valor (ver a comparação número a número em resumoOperacional.test.ts).
+    expect(within(cartao('ÍNDICE DE PERDAS')).getByText('7,0%')).toBeInTheDocument()
   })
 
   it('abaixo do alvo fica verde', async () => {
     mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 99, perda_itens_qtd: 0 })])
     render(<EntradasLista />)
     await screen.findByText('C-1040')
-    expect(valorDo('PERDA MÉDIA (COLETA/TRANSPORTE)')).toHaveStyle({ color: VERDE })
+    expect(valorDo('ÍNDICE DE PERDAS')).toHaveStyle({ color: VERDE })
   })
 
   it('exatamente no alvo (10%) ainda e verde — "meta ≤ 10%" inclui o 10', async () => {
     mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 100, perda_itens_qtd: 0 })])
     render(<EntradasLista />)
     await screen.findByText('C-1040')
-    const c = cartao('PERDA MÉDIA (COLETA/TRANSPORTE)')
+    const c = cartao('ÍNDICE DE PERDAS')
     expect(within(c).getByText('10,0%')).toBeInTheDocument()
-    expect(valorDo('PERDA MÉDIA (COLETA/TRANSPORTE)')).toHaveStyle({ color: VERDE })
+    expect(valorDo('ÍNDICE DE PERDAS')).toHaveStyle({ color: VERDE })
   })
 
-  it('acima do alvo fica ambar', async () => {
-    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 120, perda_itens_qtd: 0 })])
+  it('acima do alvo (10%) e ate o limite ambar do painel (13%) fica ambar', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 130, perda_itens_qtd: 0 })])
     render(<EntradasLista />)
     await screen.findByText('C-1040')
-    expect(valorDo('PERDA MÉDIA (COLETA/TRANSPORTE)')).toHaveStyle({ color: AMBAR })
+    const c = cartao('ÍNDICE DE PERDAS')
+    expect(within(c).getByText('13,0%')).toBeInTheDocument()
+    expect(valorDo('ÍNDICE DE PERDAS')).toHaveStyle({ color: AMBAR })
+  })
+
+  it('acima de 13% (a régua do painel, não mais 15%) fica vermelho', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 131, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    const c = cartao('ÍNDICE DE PERDAS')
+    expect(within(c).getByText('13,1%')).toBeInTheDocument()
+    expect(valorDo('ÍNDICE DE PERDAS')).toHaveStyle({ color: VERMELHO })
   })
 
   it('perda alta fica vermelha — a cor agora significa alguma coisa', async () => {
     mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 300, perda_itens_qtd: 0 })])
     render(<EntradasLista />)
     await screen.findByText('C-1040')
-    expect(valorDo('PERDA MÉDIA (COLETA/TRANSPORTE)')).toHaveStyle({ color: VERMELHO })
+    expect(valorDo('ÍNDICE DE PERDAS')).toHaveStyle({ color: VERMELHO })
   })
 
   it('coleta sem perda: 0,0% MEDIDO, nunca travessao', async () => {
     mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 0, perda_itens_qtd: 0 })])
     render(<EntradasLista />)
     await screen.findByText('C-1040')
-    expect(within(cartao('PERDA MÉDIA (COLETA/TRANSPORTE)')).getByText('0,0%')).toBeInTheDocument()
+    expect(within(cartao('ÍNDICE DE PERDAS')).getByText('0,0%')).toBeInTheDocument()
   })
 
   it('sem peso recebido nao ha indice: travessao, nunca 0,0%', async () => {
     mockRotasPadrao([entrada({ peso_total: 0, perda_kg: 0, perda_itens_qtd: 0 })])
     render(<EntradasLista />)
     await screen.findByText('C-1040')
-    const c = cartao('PERDA MÉDIA (COLETA/TRANSPORTE)')
+    const c = cartao('ÍNDICE DE PERDAS')
     expect(within(c).getByText('—')).toBeInTheDocument()
     expect(within(c).queryByText('0,0%')).not.toBeInTheDocument()
   })
 
-  it('cabecalho e itens descrevem a MESMA perda: usa o maior, nunca a soma', async () => {
+  it('cabecalho e itens descrevem a MESMA perda de coleta: usa o maior, nunca a soma', async () => {
     mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 100, perda_itens_qtd: 60 })])
     render(<EntradasLista />)
     await screen.findByText('C-1040')
     // Somar daria 160 kg (16%); o certo e 100 kg (10%).
-    expect(within(cartao('PERDA MÉDIA (COLETA/TRANSPORTE)')).getByText('10,0%')).toBeInTheDocument()
+    expect(within(cartao('ÍNDICE DE PERDAS')).getByText('10,0%')).toBeInTheDocument()
   })
 
-  it('com item nao convertivel o indice sai marcado com * e a nota de rodape explica', async () => {
+  it('item de entrada nao convertivel: o indice sai marcado com * e a nota de rodape explica', async () => {
     mockRotasPadrao([
       entrada({ peso_total: 1000, perda_kg: 70, perda_itens_qtd: 0, itens_sem_conversao: 2 }),
     ])
     render(<EntradasLista />)
     await screen.findByText('C-1040')
-    const marcado = within(cartao('PERDA MÉDIA (COLETA/TRANSPORTE)')).getByText('7,0%*')
+    const marcado = within(cartao('ÍNDICE DE PERDAS')).getByText('7,0%*')
     expect(marcado.getAttribute('title')).toContain('peso médio')
     expect(marcado.getAttribute('title')).toContain('2 itens')
-    expect(screen.getByRole('note')).toHaveTextContent(/sai para cima/i)
+    // Duas notas (PESO RECEBIDO tambem esta marcado, mesma causa): a do peso
+    // recebido tem direcao conhecida ("sai para cima").
+    const notas = screen.getAllByRole('note')
+    expect(notas.some(n => /sai para cima/i.test(n.textContent ?? ''))).toBe(true)
+  })
+
+  it('item de perda de DEPÓSITO nao convertivel marca so o indice, nunca o peso recebido', async () => {
+    mockRotasPadrao(
+      [entrada({ peso_total: 1000, perda_kg: 70, perda_itens_qtd: 0, itens_sem_conversao: 0 })],
+      [perda({ qtd_kg: null, itens_sem_conversao: 1 })],
+    )
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    // PESO RECEBIDO continua limpo — a entrada em si converteu 100%.
+    expect(within(cartao('PESO RECEBIDO')).queryByText(/\*/)).not.toBeInTheDocument()
+    // O indice, nao: a perda de deposito que nao converteu deixa a soma
+    // (numerador) incompleta, mesmo com o peso recebido (denominador) inteiro.
+    const marcado = within(cartao('ÍNDICE DE PERDAS')).getByText('7,0%*')
+    expect(marcado.getAttribute('title')).toContain('nem a direção do desvio é conhecida')
+    const notas = screen.getAllByRole('note')
+    expect(notas.some(n => /nem a dire[cç][aã]o do desvio/i.test(n.textContent ?? ''))).toBe(true)
   })
 
   it('sem item fora da conversao nao ha nota de rodape nem asterisco', async () => {
@@ -453,6 +528,57 @@ describe('EntradasLista — cartao "Perda media"', () => {
     await screen.findByText('C-1040')
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
     expect(screen.queryByText('7,0%*')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Falha isolada de GET /api/perdas (regra desta unificação): o índice não
+ * pode cair de volta para "só perda de coleta" como se fosse o total — isso
+ * reintroduziria a divergência com o painel, agora escondida atrás de um
+ * número que parece fechado. Vira travessão com aviso `role="status"`
+ * próprio, diferente do aviso de `resumoFalhou`, e o resto da tela
+ * (lista + os outros quatro cartões) continua vivo — padrão de
+ * ClientesLista.tsx (`erroVendas`).
+ */
+describe('EntradasLista — falha isolada de /api/perdas', () => {
+  it('o índice vira travessão com aviso, mas os outros cartões e a lista continuam normais', async () => {
+    mockGet.mockImplementation((url: string) => {
+      if (url === '/api/entradas') {
+        return Promise.resolve([entrada({ peso_total: 1000, perda_kg: 70, valor_total: 120 })])
+      }
+      if (url === '/api/fornecedores') return Promise.resolve(FORNECEDORES)
+      if (url === '/api/perdas') return Promise.reject(new Error('falha de rede'))
+      return Promise.resolve([])
+    })
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+
+    expect(screen.getByRole('status')).toHaveTextContent(/n[aã]o foi poss[íi]vel carregar as perdas de dep[oó]sito/i)
+
+    const c = cartao('ÍNDICE DE PERDAS')
+    // Os dois — valor E sub-linha (quilos) — viram travessão: mostrar o
+    // quilo perdido sem o índice seria a mesma meia-verdade por outra porta.
+    expect(within(c).getAllByText('—')).toHaveLength(2)
+    expect(within(c).queryByText(/%/)).not.toBeInTheDocument()
+
+    // Os outros quatro cartões — que não dependem de perdas de depósito —
+    // continuam calculados normalmente, nunca travessão.
+    expect(within(cartao('ENTRADAS')).getByText('1')).toBeInTheDocument()
+    expect(within(cartao('PESO RECEBIDO')).getByText('1.000 kg')).toBeInTheDocument()
+    expect(within(cartao('VALOR TOTAL')).getByText('R$ 120,00')).toBeInTheDocument()
+  })
+
+  it('sessao expirada (401) em /api/perdas chama onSessaoExpirada em vez do aviso', async () => {
+    mockGet.mockImplementation((url: string) => {
+      if (url === '/api/entradas') return Promise.resolve([entrada()])
+      if (url === '/api/fornecedores') return Promise.resolve(FORNECEDORES)
+      if (url === '/api/perdas') return Promise.reject(new ErroApi(401, { erro: 'sessao invalida' }))
+      return Promise.resolve([])
+    })
+    const onSessaoExpirada = vi.fn()
+    render(<EntradasLista onSessaoExpirada={onSessaoExpirada} />)
+    await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 })
 
@@ -468,12 +594,37 @@ describe('EntradasLista — isolacao de falha dos cartoes', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/não foi possível calcular o resumo/i)
 
     const rotulos = [
-      'ENTRADAS', 'PESO RECEBIDO', 'PERDA MÉDIA (COLETA/TRANSPORTE)', 'A PAGAR AO PRODUTOR', 'VALOR TOTAL',
+      'ENTRADAS', 'PESO RECEBIDO', 'ÍNDICE DE PERDAS', 'A PAGAR AO PRODUTOR', 'VALOR TOTAL',
     ]
     for (const rotulo of rotulos) {
       expect(within(cartao(rotulo)).getAllByText('—').length).toBeGreaterThan(0)
     }
     expect(cartoes().queryByText('R$ 0,00')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Sensibilidade da unificação: se o cartão voltasse a somar só a perda de
+ * coleta (o defeito que esta tarefa fecha), o teste "coleta + depósito
+ * somando" acima teria que continuar passando por acidente — o que não
+ * acontece, porque ele afirma 7,0% (unificado) e não 5,0% (só coleta). Este
+ * teste isola exatamente essa afirmação, espiando `derivarResumoEntradas`
+ * para confirmar que a tela REPASSA as perdas de depósito recebidas — se
+ * alguém remover o argumento na chamada (regressão para "só coleta"), o
+ * spy pega a chamada com um array vazio/ausente em vez do array com dado.
+ */
+describe('EntradasLista — sensibilidade da unificação', () => {
+  it('derivarResumoEntradas é chamada com as perdas de depósito do período, não uma lista vazia', async () => {
+    mockRotasPadrao(
+      [entrada({ peso_total: 1000, perda_kg: 50 })],
+      [perda({ qtd_kg: 20 })],
+    )
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    await waitFor(() => expect(espiaoResumo).toHaveBeenCalled())
+    const [, perdasRecebidas] = espiaoResumo.mock.calls[espiaoResumo.mock.calls.length - 1]
+    expect(perdasRecebidas).not.toBeNull()
+    expect((perdasRecebidas as unknown[]).length).toBe(1)
   })
 })
 

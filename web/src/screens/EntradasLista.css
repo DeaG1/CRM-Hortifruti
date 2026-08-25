@@ -111,6 +111,20 @@
   color: #8a6a1f;
 }
 
+/* Perdas de depósito indisponíveis: só o cartão ÍNDICE DE PERDAS cai para
+   travessão (isolação de falha mais fina que .entradas-aviso-resumo acima —
+   os outros quatro cartões e a lista continuam normais). Mesmo visual do
+   aviso irmão, para os dois se lerem como a mesma categoria de mensagem. */
+.entradas-aviso-perdas {
+  background: #f6efd8;
+  border: 1px solid #e8dcae;
+  border-radius: 9px;
+  padding: 8px 13px;
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  color: #8a6a1f;
+}
+
 /* ---------- confirmação de exclusão ---------- */
 
 .entradas-confirma {

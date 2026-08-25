@@ -14,19 +14,28 @@
  * discorde do "A receber" do relatório é pior que não ter nenhum dos dois,
  * porque o dono deixa de saber em qual acreditar.
  *
- * Por isso aqui NÃO há aritmética de dinheiro nem de perda: as duas funções
- * abaixo chamam `derivarRelatorioPedidos`/`derivarRelatorioCompras`
+ * Por isso aqui quase não há aritmética própria: as duas funções abaixo
+ * chamam `derivarRelatorioPedidos`/`derivarRelatorioCompras`
  * (derive/relatorios.ts) com o período aberto ('' / '', que em `noPeriodo`
  * significa "sem recorte" — ver o comentário de lá) e só ADAPTAM o
  * resultado: escolhem os campos que viram cartão e aplicam a regra de
- * travessão descrita logo abaixo. Toda mudança de fórmula continua tendo um
- * lugar só.
+ * travessão descrita logo abaixo. Toda mudança de fórmula de dinheiro
+ * continua tendo um lugar só.
  *
- * PERÍODO: estas telas ainda não têm seletor de período (achado S-3 da
- * auditoria, transversal a sete telas, fora do escopo deste módulo). Até
- * elas terem, "no período" aqui é a base inteira que a tela carregou, e é
- * isso que os rótulos dizem — nunca um recorte implícito que o usuário não
- * escolheu.
+ * A ÚNICA EXCEÇÃO é o cartão "Índice de perdas" de Entradas, e de propósito:
+ * `derivarResumoEntradas` chama `indiceDePerdas` (derive/dashboard.ts) — a
+ * MESMA função que alimenta o KPI "Índice de perdas" do painel — em vez de
+ * recalcular a fração aqui. Antes desta versão o cartão somava só a perda de
+ * coleta (o dado que esta tela já carregava) e o painel somava coleta +
+ * depósito: dois números com o mesmo nome em telas vizinhas. Ver o
+ * comentário grande de `indiceDePerdas` para o raciocínio completo (kg por
+ * unidade, `perdaColetaEfetiva`, itens sem conversão) — não repetido aqui.
+ *
+ * PERÍODO: as duas telas têm o seletor global (achado S-3 da auditoria) desde
+ * eae52e0, mas o recorte é aplicado pela TELA, antes de chamar as funções
+ * deste módulo — `derivarResumoSaidas`/`derivarResumoEntradas` recebem a
+ * lista JÁ FILTRADA e continuam sem saber o que é "período"; "no período"
+ * nos comentários abaixo é sempre a lista que a tela decidiu passar.
  *
  * TRAVESSÃO NUNCA VIRA ZERO: as duas funções devolvem `null` quando não há
  * lançamento nenhum, e a tela mostra travessão. Isso é diferente de um zero
@@ -39,10 +48,11 @@
  * Sem React, sem fetch, sem formatação — o molde de derive/clientes.ts.
  */
 
-import type { Health } from './clientes'
+import { indiceDePerdas, type Perda } from './dashboard'
 import {
   derivarRelatorioCompras,
   derivarRelatorioPedidos,
+  perdaColetaEfetiva,
   type EntradaResumo,
   type SaidaResumo,
 } from './relatorios'
@@ -134,51 +144,19 @@ export function entradaEmAberto(en: { pago: string }): boolean {
   return en.pago !== 'Pago'
 }
 
-/**
- * Alvo de perda na coleta/transporte, em %. É o mesmo 10% que o protótipo
- * usa no sub do cartão ("meta ≤ 10%", linha 2507) e que
- * `METAS_DASHBOARD.perdaMetaPct` (derive/dashboard.ts) usa no KPI de perdas.
- * Fica aqui, e não importado de lá, porque as FAIXAS são diferentes — ver
- * `statusPerdaMedia`.
- */
-export const META_PERDA_MEDIA_PCT = 10
-
-/** Fim da faixa âmbar. Acima disto o cartão fica vermelho. */
-export const PERDA_MEDIA_AMBAR_ATE_PCT = 15
-
-/**
- * Semáforo do cartão de perda média: verde até 10%, âmbar até 15%, vermelho
- * acima — as faixas do próprio `entradaStats` do protótipo (linha 2507) e as
- * mesmas de `corPerda` em RelatoriosTela.tsx, que colore a coluna PERDA de
- * Relatórios ▸ Compras a partir do mesmo número.
- *
- * DIVERGÊNCIA CONHECIDA, do protótipo consigo mesmo: o KPI "Índice de
- * perdas" do Dashboard usa 10/13 (`statusIndiceDePerdas`, derive/dashboard.ts,
- * portado da linha 2356) em vez de 10/15. As duas faixas convivem no
- * protótipo original; esta função fica com a do cartão que ela colore, para
- * a tela de Entradas concordar com Relatórios ▸ Compras, que é a tela que
- * mostra exatamente esta mesma conta.
- *
- * Os limites são inclusivos nos dois lados (10,0% é verde; 15,0% é âmbar) —
- * "meta ≤ 10%" quer dizer que bater 10 em cheio é bater a meta.
- */
-export function statusPerdaMedia(pct: number): Health {
-  if (pct <= META_PERDA_MEDIA_PCT) return 'green'
-  if (pct <= PERDA_MEDIA_AMBAR_ATE_PCT) return 'amber'
-  return 'red'
-}
-
-/** Os cartões de Entradas — `entradaStats` do protótipo (2506-2507). */
+/** Os cartões de Entradas — `entradaStats` do protótipo (2506-2507), com o
+ * cartão de perda unificado ao KPI do painel (ver o cabeçalho do módulo). */
 export interface ResumoEntradas {
   /** Quantas coletas há na base. */
   coletas: number
   /** Quilos recebidos. Incompleto quando `itensSemConversao > 0`. */
   pesoRecebidoKg: number
   /**
-   * Itens que ficaram fora de `pesoRecebidoKg` por não serem convertíveis em
-   * quilos. Afeta TAMBÉM `perdaMediaPct`, que divide por esse peso: com o
-   * denominador incompleto o índice sai PARA CIMA. A tela marca os dois
-   * números com `*` e explica na nota de rodapé.
+   * Itens de ENTRADA (só o lado do denominador) que ficaram fora de
+   * `pesoRecebidoKg` por não serem convertíveis em quilos. Marca só o
+   * cartão PESO RECEBIDO (e a célula por linha) — o cartão ÍNDICE DE PERDAS
+   * tem o contador dele próprio, `itensSemConversaoIndice`, que soma TAMBÉM
+   * o lado das perdas de depósito e por isso pode ser maior que este.
    */
   itensSemConversao: number
   /** Soma do valor de todas as coletas. */
@@ -193,38 +171,88 @@ export interface ResumoEntradas {
   /** Sub-linha do cartão acima: quantas coletas compõem esse valor. */
   coletasEmAberto: number
   /**
-   * Perda na coleta/transporte em kg — o número que a tela já mostrava
-   * sozinho. Continua visível na sub-linha do cartão de perda, agora ao lado
-   * do índice que lhe dá sentido.
+   * Perda de coleta + perda de depósito, em kg — o numerador de
+   * `perdaMediaPct`, para a sub-linha do cartão continuar mostrando o
+   * quilo absoluto ao lado do índice. `null` só quando as perdas de
+   * depósito não puderam ser carregadas (ver o parâmetro `perdas` abaixo):
+   * nesse caso não dá para afirmar o total sem elas, e mostrar só a perda
+   * de coleta como se fosse o total reintroduziria em silêncio a
+   * divergência que esta unificação existe para fechar — por isso a tela
+   * mostra travessão em vez de um número parcial.
    */
-  perdaKg: number
+  perdaKg: number | null
   /**
-   * `perdaKg` sobre `pesoRecebidoKg`, em %. `null` quando não há peso
-   * recebido para dividir — travessão, não 0%: sem quilo comprado não existe
-   * índice de perda, e "0,0%" fingiria uma coleta impecável. Zero MEDIDO
-   * (houve peso e não houve perda) sai `0` normalmente.
+   * `perdaKg` sobre `pesoRecebidoKg`, em % — o MESMO valor que
+   * `indiceDePerdas` (derive/dashboard.ts) calcula para o KPI do painel,
+   * neste mesmo recorte. `null` quando não há peso recebido para dividir OU
+   * quando as perdas de depósito não carregaram — os dois são "não dá para
+   * medir", nunca 0%. Zero MEDIDO (houve peso, perdas carregaram, e não
+   * houve perda nenhuma) sai `0` normalmente.
    */
   perdaMediaPct: number | null
+  /**
+   * Itens de ENTRADA + itens de PERDA DE DEPÓSITO que ficaram fora da conta
+   * de `perdaMediaPct` por não serem convertíveis em quilos — o mesmo
+   * `itensSemConversao` que `indiceDePerdas` devolve. Pode ser MAIOR que
+   * `itensSemConversao` (que só conta o lado das entradas): um item de
+   * perda de depósito sem peso médio cadastrado marca este cartão sem
+   * marcar o de peso recebido. `0` quando as perdas não carregaram — não há
+   * nada para marcar quando o cartão inteiro já é travessão por outro
+   * motivo mais grave.
+   */
+  itensSemConversaoIndice: number
 }
 
 /**
  * Resumo da tela de Entradas. `null` quando não há entrada nenhuma —
  * travessão, não `R$ 0,00`.
  *
- * `perdaKg`/`perdaMediaPct` usam `perdaColetaEfetiva` (dentro de
- * `derivarRelatorioCompras`): o MAIOR entre a perda do cabeçalho da entrada
- * e a soma da perda dos itens dela, nunca a soma dos dois — os dois campos
- * descrevem o mesmo evento de perda em granularidades diferentes, e somar
- * contaria em dobro. É por isso que o cartão pode divergir da soma visual da
- * coluna PERDA da tabela, que mostra só o cabeçalho (`perda_kg`).
+ * `perdas`: a lista de perdas de depósito do MESMO recorte (a tela filtra
+ * pelo período global antes de chamar, igual às entradas — ver o cabeçalho
+ * do módulo) — ou `null` quando `GET /api/perdas` falhou. `null` é
+ * DIFERENTE de `[]` (perdas carregaram e não há nenhuma no período, um
+ * resultado válido: `perdaMediaPct` sai só da perda de coleta, que é
+ * exatamente o índice do painel nesse mesmo caso). Com `null`, `perdaKg` e
+ * `perdaMediaPct` saem os dois `null` (travessão) — nunca a perda de coleta
+ * sozinha se fazendo passar pelo total. A falha é isolada a este UM cartão;
+ * os outros quatro (que não dependem de perdas de depósito) continuam
+ * normais. Ver o aviso `role="status"` em EntradasLista.tsx.
  */
-export function derivarResumoEntradas(entradas: EntradaResumo[]): ResumoEntradas | null {
+export function derivarResumoEntradas(entradas: EntradaResumo[], perdas: Perda[] | null): ResumoEntradas | null {
   if (entradas.length === 0) return null
 
   // `[]` de fornecedores: esta tela não precisa da quebra por fornecedor
   // (só dos totais), e o único uso de `fornecedores` lá dentro é resolver
   // id -> nome nas linhas, que aqui são descartadas.
   const { totais } = derivarRelatorioCompras([], entradas, SEM_RECORTE, SEM_RECORTE)
+
+  let perdaKg: number | null = null
+  let perdaMediaPct: number | null = null
+  let itensSemConversaoIndice = 0
+
+  if (perdas !== null) {
+    // `indiceDePerdas` (derive/dashboard.ts) é a MESMA função que o painel
+    // usa para o KPI "Índice de perdas" — reaproveitada, não recalculada,
+    // para as duas telas nunca poderem divergir de novo (era exatamente
+    // essa divergência que motivou esta mudança). `id: en.numero` é um
+    // valor sintético: `indiceDePerdas` nunca lê esse campo (só soma
+    // peso/perda), ele só é obrigatório no TIPO porque o mesmo módulo tem
+    // outras funções (giroDeEstoque, cicloDeCaixa) que precisam de um id
+    // de verdade — EntradaResumo (relatorios.ts) não carrega um.
+    const paraIndice = entradas.map(en => ({ ...en, id: en.numero }))
+    const indice = indiceDePerdas(paraIndice, perdas)
+    perdaMediaPct = indice.disponivel ? indice.valor : null
+    itensSemConversaoIndice = indice.disponivel ? (indice.itensSemConversao ?? 0) : 0
+    // O kg absoluto (sub-linha do cartão) não é algo que `indiceDePerdas`
+    // devolve (só a fração em %) — soma-se aqui o MESMO numerador que ela
+    // soma por dentro (perda de coleta via `perdaColetaEfetiva`, perda de
+    // depósito via `qtd_kg`), nunca uma conta nova. Independe do
+    // denominador: mesmo sem peso recebido (índice indisponível), o total
+    // perdido continua sendo uma medida real.
+    perdaKg = entradas.reduce((s, en) => s + perdaColetaEfetiva(en), 0)
+      + perdas.reduce((s, p) => s + (p.qtd_kg || 0), 0)
+  }
+
   return {
     coletas: totais.coletasNoPeriodo,
     pesoRecebidoKg: totais.compradoQtd,
@@ -232,11 +260,8 @@ export function derivarResumoEntradas(entradas: EntradaResumo[]): ResumoEntradas
     valorTotal: totais.totalComprado,
     aPagarAoProdutor: totais.aPagarAoProdutor,
     coletasEmAberto: entradas.filter(entradaEmAberto).length,
-    perdaKg: totais.perdaQtd,
-    // `perdaNaColetaPct` já devolve 0 quando não há peso; aqui esse 0 vira
-    // `null` porque a tela precisa distinguir "não deu para medir" de
-    // "mediu e deu zero" — o relatório mostra 0,0% e segue, a tela mostra
-    // travessão.
-    perdaMediaPct: totais.compradoQtd > 0 ? totais.perdaNaColetaPct : null,
+    perdaKg,
+    perdaMediaPct,
+    itensSemConversaoIndice,
   }
 }

@@ -3,14 +3,10 @@ import { api, ErroApi } from '../api/client'
 import { ModalEntrada, type EntradaComItens, type Fornecedor } from '../components/ModalEntrada'
 import { SeletorPagamento } from '../components/SeletorPagamento'
 import type { Health } from '../derive/clientes'
+import { METAS_DASHBOARD, statusIndiceDePerdas, type Perda } from '../derive/dashboard'
 import type { SituacaoPagamentoEscolhivel } from '../derive/pagamento'
 import type { EntradaResumo } from '../derive/relatorios'
-import {
-  derivarResumoEntradas,
-  statusPerdaMedia,
-  META_PERDA_MEDIA_PCT,
-  type ResumoEntradas,
-} from '../derive/resumoOperacional'
+import { derivarResumoEntradas, type ResumoEntradas } from '../derive/resumoOperacional'
 import { filtrarPorPeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import './EntradasLista.css'
 
@@ -26,7 +22,7 @@ interface Entrada {
   /**
    * Soma de `entrada_itens.perda_kg` desta entrada. Descreve o MESMO evento
    * de perda que `perda_kg` (o cabeçalho), em outra granularidade — nunca
-   * dois números a somar. O cartão de perda média usa `perdaColetaEfetiva`
+   * dois números a somar. O cartão ÍNDICE DE PERDAS usa `perdaColetaEfetiva`
    * (o maior dos dois, ver derive/relatorios.ts) para não contar em dobro,
    * que é também o número de Relatórios ▸ Compras e do saldo de Estoque; a
    * coluna PERDA da tabela continua mostrando só o cabeçalho, então os dois
@@ -54,15 +50,41 @@ const money = (n: number) =>
   'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const peso = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' kg'
 
-/** Aviso da célula/estatística de peso incompleto — mesmo texto e mesma
- * regra do relatório de compras (RelatoriosTela.tsx, avisoSemConversao). */
-function avisoSemConversao(n: number): string {
+/**
+ * Aviso de quantidade incompleta — mesma primeira metade do texto do
+ * relatório de compras (RelatoriosTela.tsx, avisoSemConversao), com uma
+ * `consequencia` própria de cada cartão afetado (mesmo padrão de lá: dois
+ * cartões podem estar incompletos por razões diferentes e com direções de
+ * desvio diferentes, então não podem compartilhar UMA frase de fechamento).
+ */
+function avisoSemConversao(n: number, consequencia: string): string {
   const itens = n === 1 ? '1 item' : `${n} itens`
   const verbo = n === 1 ? 'está' : 'estão'
   return `${itens} em unidade diferente de KG sem peso médio cadastrado no produto: `
-    + `${verbo} fora deste peso, porque sem o peso da embalagem não há como converter em quilos. `
-    + 'Cadastre o peso médio em Produtos para que entrem na conta.'
+    + `${verbo} fora da conta, porque sem o peso da embalagem não há como converter em quilos. `
+    + `${consequencia} Cadastre o peso médio em Produtos para que entrem na conta.`
 }
+
+/** Peso recebido incompleto (lado do denominador, só entradas): o desvio tem
+ * direção conhecida — falta peso, então o índice que divide por ele sai
+ * para cima. Usada pela célula PESO da tabela e pelo cartão PESO RECEBIDO. */
+const avisoPesoIncompleto = (n: number): string => avisoSemConversao(
+  n,
+  'O peso recebido está incompleto, e o índice de perdas — que divide por ele — sai para cima.',
+)
+
+/**
+ * Índice de perdas incompleto: soma o lado das entradas (denominador, igual
+ * ao de cima) com o lado das perdas de depósito (numerador — ver
+ * `itensSemConversaoIndice`, derive/resumoOperacional.ts), e por isso a
+ * direção do desvio deixa de ser conhecida — mesma razão de
+ * `CONSEQ_PERDA_INDICE` em RelatoriosTela.tsx, que marca este mesmo índice.
+ */
+const avisoIndiceIncompleto = (n: number): string => avisoSemConversao(
+  n,
+  'O índice de perdas é uma fração, e os dois lados dela podem ter perdido lançamentos — a perda de '
+    + 'depósito no numerador, o quilo comprado no denominador —, então nem a direção do desvio é conhecida.',
+)
 
 /** O que um cartão mostra quando não há base para calcular — nunca zero.
  * Zero é uma MEDIDA ("não devo nada ao produtor porque paguei tudo"), e é
@@ -106,10 +128,19 @@ function Cartao({ label, valor, sub, corValor }: {
  * - **A PAGAR AO PRODUTOR**: "quanto devo ao produtor" não aparecia em
  *   nenhuma tela de rotina, só em Relatórios ▸ Compras (tela de análise).
  *   É a outra ponta do capital de giro, junto do "A receber" de Saídas.
- * - **PERDA MÉDIA**: a perda aparecia só em quilos absolutos e sempre em
- *   vermelho — 140 kg pode ser rotina ou catástrofe, e a tela não dizia
- *   qual. O índice contra o peso recebido é o que dá sentido ao número; os
- *   quilos continuam visíveis na sub-linha, ao lado do alvo.
+ * - **ÍNDICE DE PERDAS** (antes "Perda média (coleta/transporte)"): a perda
+ *   aparecia só em quilos absolutos e sempre em vermelho — 140 kg pode ser
+ *   rotina ou catástrofe, e a tela não dizia qual. O índice contra o peso
+ *   recebido é o que dá sentido ao número; os quilos continuam visíveis na
+ *   sub-linha, ao lado do alvo. O rótulo mudou de novo, agora de "Perda
+ *   média" para "Índice de perdas": o cartão somava só a perda de coleta
+ *   (o dado que esta tela já carregava) enquanto o KPI do painel somava
+ *   coleta + depósito — dois números diferentes com nomes parecidos em
+ *   telas vizinhas. Unificados os dois (mesma fórmula, mesma faixa de
+ *   semáforo — `indiceDePerdas`/`statusIndiceDePerdas`/`METAS_DASHBOARD`,
+ *   derive/dashboard.ts), o nome também precisa ser o mesmo, para as duas
+ *   telas se reconhecerem como o mesmo número em vez de dois valores
+ *   parecidos brigando pela atenção do leitor.
  *
  * São CINCO cartões, não os quatro do protótipo: PESO RECEBIDO é uma adição
  * da implementação (com o aviso de peso incompleto que o protótipo não
@@ -118,16 +149,23 @@ function Cartao({ label, valor, sub, corValor }: {
  * auditoria existe para combater.
  */
 function CartoesResumo({ resumo, periodo }: { resumo: ResumoEntradas | null; periodo: Periodo }) {
-  // O índice divide pelo peso recebido, então herda o mesmo contador de
-  // itens não convertíveis do cartão de peso — e com denominador incompleto
-  // ele sai PARA CIMA. Marcar só o peso e deixar a % limpa esconderia
-  // exatamente o número mais fácil de ler errado.
-  const incompleto = resumo ? resumo.itensSemConversao : 0
-  const marcar = (texto: string) => (incompleto > 0
-    ? <span className="entradas-incompleto" title={avisoSemConversao(incompleto)}>{texto}*</span>
+  // Dois contadores, não um: PESO RECEBIDO só pode estar incompleto pelo
+  // lado das entradas (denominador); ÍNDICE DE PERDAS soma também o lado
+  // das perdas de depósito (numerador) e pode estar incompleto mesmo quando
+  // o peso recebido está limpo — ver os dois campos em ResumoEntradas
+  // (derive/resumoOperacional.ts).
+  const incompletoPeso = resumo ? resumo.itensSemConversao : 0
+  const marcarPeso = (texto: string) => (incompletoPeso > 0
+    ? <span className="entradas-incompleto" title={avisoPesoIncompleto(incompletoPeso)}>{texto}*</span>
+    : <>{texto}</>)
+
+  const incompletoIndice = resumo ? resumo.itensSemConversaoIndice : 0
+  const marcarIndice = (texto: string) => (incompletoIndice > 0
+    ? <span className="entradas-incompleto" title={avisoIndiceIncompleto(incompletoIndice)}>{texto}*</span>
     : <>{texto}</>)
 
   const perdaPct = resumo?.perdaMediaPct ?? null
+  const perdaKg = resumo?.perdaKg ?? null
   const emAberto = resumo
     ? `${resumo.coletasEmAberto} ${resumo.coletasEmAberto === 1 ? 'coleta pendente' : 'coletas pendentes'}`
     : TRACO
@@ -139,19 +177,25 @@ function CartoesResumo({ resumo, periodo }: { resumo: ResumoEntradas | null; per
       <Cartao label="ENTRADAS" valor={resumo ? String(resumo.coletas) : TRACO} sub={rotuloPeriodo(periodo)} />
       <Cartao
         label="PESO RECEBIDO"
-        valor={resumo ? marcar(peso(resumo.pesoRecebidoKg)) : TRACO}
+        valor={resumo ? marcarPeso(peso(resumo.pesoRecebidoKg)) : TRACO}
         sub="soma das coletas"
       />
       <Cartao
-        label="PERDA MÉDIA (COLETA/TRANSPORTE)"
-        // Travessão, não "0,0%": sem quilo recebido não há índice a medir.
-        valor={perdaPct === null ? TRACO : marcar(pct1(perdaPct))}
-        // Vermelho fixo era o defeito: o número não dizia se era rotina ou
-        // catástrofe. Agora a cor vem do alvo.
-        corValor={perdaPct === null ? undefined : CORES_SEMAFORO[statusPerdaMedia(perdaPct)]}
-        sub={resumo
-          ? `meta ≤ ${META_PERDA_MEDIA_PCT}% · ${peso(resumo.perdaKg)} perdidos`
-          : TRACO}
+        label="ÍNDICE DE PERDAS"
+        // Travessão, não "0,0%": sem quilo recebido não há índice a medir, e
+        // travessão também quando as perdas de depósito não carregaram (ver
+        // `perdaKg`/`perdaMediaPct` em ResumoEntradas) — nos dois casos
+        // mostrar um número seria inventar uma medida que não existe.
+        valor={perdaPct === null ? TRACO : marcarIndice(pct1(perdaPct))}
+        // Vermelho fixo era o defeito original: o número não dizia se era
+        // rotina ou catástrofe. Agora a cor vem do alvo — a MESMA régua do
+        // KPI do painel (statusIndiceDePerdas), não uma faixa própria desta
+        // tela: a régua duplicada (10/15 aqui, 10/13 no painel) pintava o
+        // mesmo valor de cores diferentes em telas vizinhas.
+        corValor={perdaPct === null ? undefined : CORES_SEMAFORO[statusIndiceDePerdas(perdaPct)]}
+        sub={perdaKg === null
+          ? TRACO
+          : `meta ≤ ${METAS_DASHBOARD.perdaMetaPct}% · ${peso(perdaKg)} perdidos`}
       />
       <Cartao
         label="A PAGAR AO PRODUTOR"
@@ -192,6 +236,17 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
   const [erro, setErro] = useState('')
   const [versao, setVersao] = useState(0)
 
+  // Perdas de depósito — a metade nova do cartão ÍNDICE DE PERDAS (ver
+  // CartoesResumo). `perdas` começa vazio e só passa a ter conteúdo quando
+  // /api/perdas responde; `erroPerdas` é o que distingue essa fase de
+  // carregamento (comportamento normal, cartão sai correto assim que chega)
+  // de uma falha de fato — no efeito abaixo, `derivarResumoEntradas` recebe
+  // `null` no lugar da lista quando `erroPerdas` está setado, para o índice
+  // virar travessão em vez de recalcular só com a perda de coleta (que
+  // reintroduziria a divergência com o painel, agora silenciosa).
+  const [perdas, setPerdas] = useState<Perda[]>([])
+  const [erroPerdas, setErroPerdas] = useState('')
+
   const [modal, setModal] = useState<Modal>(null)
   const [abrindoId, setAbrindoId] = useState<string | null>(null)
   const [erroAbrir, setErroAbrir] = useState('')
@@ -224,6 +279,28 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
     api.get<Fornecedor[]>('/api/fornecedores')
       .then(fs => { if (!cancelado) setFornecedores(fs) })
       .catch(() => {})
+
+    // Perdas de depósito: busca separada, falha SOZINHA — ao contrário de
+    // fornecedores (dado cosmético, falha em silêncio), a falha aqui precisa
+    // de um aviso visível: sem esta lista, o cartão ÍNDICE DE PERDAS não tem
+    // como saber se está mostrando o total ou só a metade da coleta, e a
+    // regra desta unificação é nunca deixar a segunda passar pela primeira.
+    // As demais informações da tela (lista, outros quatro cartões) não
+    // dependem de perdas de depósito e continuam normais.
+    setErroPerdas('')
+    api.get<Perda[]>('/api/perdas')
+      .then(ps => { if (!cancelado) setPerdas(ps) })
+      .catch((err: unknown) => {
+        if (cancelado) return
+        if (err instanceof ErroApi && err.status === 401) {
+          onSessaoExpirada?.()
+          return
+        }
+        setErroPerdas(
+          'Não foi possível carregar as perdas de depósito — o índice de perdas fica indisponível. '
+          + 'As demais informações desta tela continuam corretas.',
+        )
+      })
 
     return () => { cancelado = true }
   }, [onSessaoExpirada, versao])
@@ -316,6 +393,10 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
   // estado vazio) enxerga só as coletas do período escolhido. A busca continua
   // trazendo a base inteira — trocar o período no cabeçalho não vai ao servidor.
   const entradasPeriodo = filtrarPorPeriodo(entradas, periodo, e => e.data)
+  // Mesmo recorte para as perdas de depósito: perda de coleta filtrada por
+  // um período e perda de depósito por outro seria pior que a divergência
+  // original que esta unificação existe para fechar.
+  const perdasPeriodo = filtrarPorPeriodo(perdas, periodo, p => p.data)
 
   const paraResumo: EntradaResumo[] = entradasPeriodo.map(e => ({
     numero: e.numero,
@@ -331,6 +412,14 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
     itens_sem_conversao: e.itens_sem_conversao,
   }))
 
+  // `erroPerdas` vira `null` explícito (nunca `[]`): `derivarResumoEntradas`
+  // trata os dois de forma diferente de propósito — `[]` é "perdas
+  // carregaram e não há nenhuma neste período" (um resultado válido, o
+  // índice sai só da perda de coleta); `null` é "não sabemos", e força o
+  // cartão inteiro (índice E quilos) a travessão em vez de silenciosamente
+  // recalcular com o que sobrou.
+  const perdasParaResumo = erroPerdas ? null : perdasPeriodo
+
   // Isolação de falha (padrão de ClientesLista.tsx): se a derivação não
   // puder ser feita, os cartões viram travessão e o aviso explica — a lista
   // de entradas continua visível e lançável, que é o trabalho de rotina
@@ -338,7 +427,7 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
   let resumo: ResumoEntradas | null = null
   let resumoFalhou = false
   try {
-    resumo = derivarResumoEntradas(paraResumo)
+    resumo = derivarResumoEntradas(paraResumo, perdasParaResumo)
   } catch {
     resumoFalhou = true
   }
@@ -362,6 +451,15 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
           Não foi possível calcular o resumo das entradas — os cartões ficam indisponíveis. A lista abaixo
           continua correta.
         </p>
+      )}
+
+      {/* Falha isolada ao cartão ÍNDICE DE PERDAS (padrão de ClientesLista.tsx,
+          aviso `erroVendas`): sem as perdas de depósito o índice não pode ser
+          calculado, mas os outros quatro cartões e a lista continuam vivos —
+          por isso este aviso é separado do `resumoFalhou` acima, que derruba
+          o bloco inteiro. */}
+      {!resumoFalhou && erroPerdas && (
+        <p className="entradas-aviso-perdas" role="status">{erroPerdas}</p>
       )}
 
       {entradasPeriodo.length > 0 && <CartoesResumo resumo={resumo} periodo={periodo} />}
@@ -446,7 +544,7 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
                 <div className="entradas-col-num entradas-mono">
                   {e.itens_sem_conversao
                     ? (
-                      <span className="entradas-incompleto" title={avisoSemConversao(e.itens_sem_conversao)}>
+                      <span className="entradas-incompleto" title={avisoPesoIncompleto(e.itens_sem_conversao)}>
                         {peso(e.peso_total)}*
                       </span>
                     )
@@ -493,14 +591,23 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
         A soma das entradas do período vira a <strong>Compra de mercadoria</strong> no Financeiro automaticamente.
       </div>
 
-      {/* Nota de rodapé do `*`, no mesmo padrão das abas Compras, Produtos e
-          Perdas de Relatórios: o asterisco marca o número, esta nota diz o
-          que ficou de fora, a consequência e a saída do problema. Só aparece
-          quando há de fato item sem conversão. */}
+      {/* Duas notas de rodapé, não uma — mesmo padrão da aba Perdas de
+          RelatoriosTela.tsx (duas `NotaSemConversao` para dois contadores
+          independentes): PESO RECEBIDO só pode estar incompleto pelo lado
+          das entradas, ÍNDICE DE PERDAS soma também o lado das perdas de
+          depósito e pode estar incompleto sozinho (um item de perda sem
+          peso médio, com todas as entradas 100% convertíveis). Uma nota só
+          apontaria "sai para cima" para um número cuja direção de desvio,
+          quando as perdas de depósito contribuem, deixou de ser conhecida —
+          o mesmo erro que ter duas réguas de semáforo tentava evitar. */}
       {resumo && resumo.itensSemConversao > 0 && (
         <div className="entradas-rodape-nota entradas-rodape-nota--incompleto" role="note">
-          <strong>*</strong> {avisoSemConversao(resumo.itensSemConversao)} A perda média divide por esse peso,
-          então o índice está calculado sobre uma quantidade incompleta e sai para cima.
+          <strong>*</strong> {avisoPesoIncompleto(resumo.itensSemConversao)}
+        </div>
+      )}
+      {resumo && resumo.itensSemConversaoIndice > 0 && (
+        <div className="entradas-rodape-nota entradas-rodape-nota--incompleto" role="note">
+          <strong>*</strong> {avisoIndiceIncompleto(resumo.itensSemConversaoIndice)}
         </div>
       )}
 

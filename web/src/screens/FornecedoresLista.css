@@ -156,9 +156,12 @@
   color: #9a9784;
 }
 
+/* Quatro colunas: preço médio, variação, última coleta e aproveitamento
+   (protótipo linha 541, `repeat(4,1fr)`). Eram três enquanto o
+   aproveitamento não era renderizado. */
 .fornecedores-metricas {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
   padding-top: 13px;
   border-top: 1px solid #f1eee2;
@@ -174,4 +177,50 @@
   font-weight: 600;
   font-size: 14px;
   color: #5a584a;
+}
+
+/* ---------- métricas indisponíveis / incompletas ---------- */
+
+/* GET /api/entradas falhou: o cadastro continua na tela, as quatro métricas
+   caem no travessão e este aviso diz por quê. Mesmo âmbar discreto de
+   .clientes-aviso-vendas e .produtos-aviso-metricas — é `role="status"`, não
+   `role="alert"`: a tela não quebrou, só perdeu os números. */
+.fornecedores-aviso-metricas {
+  background: #f6efd8;
+  border: 1px solid #e8dcae;
+  border-radius: 9px;
+  padding: 8px 13px;
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  color: #8a6a1f;
+}
+
+/* Métrica incompleta: a coleta tem item em unidade não-KG sem peso médio
+   cadastrado, então o peso ignora esse item — a API nunca inventa o fator,
+   ver itens_sem_conversao em api/src/routes/entradas.ts. O asterisco
+   sinaliza e o `title` explica. Mesmo âmbar e mesmo pontilhado de
+   EntradasLista/ProdutosLista/RelatoriosTela. */
+.fornecedores-incompleto {
+  border-bottom: 1px dotted #c79320;
+  cursor: help;
+}
+
+.fornecedores-nota {
+  font-size: 12px;
+  color: #8a8775;
+  margin-top: 12px;
+}
+
+/* Nota de rodapé do mesmo aviso: visível o bastante para ninguém ler o preço
+   médio como número fechado, discreta o bastante para não competir com os
+   cartões. */
+.fornecedores-nota--incompleto {
+  color: #8a6a12;
+  background: #f6efd8;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.fornecedores-nota--incompleto strong {
+  color: #8a6a12;
 }

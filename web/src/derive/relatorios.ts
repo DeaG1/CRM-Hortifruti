@@ -599,6 +599,27 @@ export function derivarRelatorioPedidos(
 
 // ------------------------------------------------------------- 4. relatório de compras
 
+/**
+ * A ÚNICA fórmula de preço médio de compra do sistema: reais ÷ quilos.
+ *
+ * Existe como função exportada (e não inline em `derivarRelatorioCompras`)
+ * porque a tela de Fornecedores precisa do mesmo preço médio num recorte
+ * diferente — por COLETA, para calcular a variação da última compra contra a
+ * anterior (`derivarFornecedores` em derive/fornecedores.ts), enquanto o
+ * relatório de compras precisa dele por FORNECEDOR no período. Recorte
+ * diferente, fórmula igual: duas divisões escritas à mão em arquivos
+ * distintos seriam duas fórmulas homônimas livres para divergir, e "preço
+ * médio" passaria a significar coisas diferentes em duas telas do mesmo
+ * sistema.
+ *
+ * `null` quando não há quilo nenhum na base (nunca 0): sem quantidade não
+ * existe preço por quilo, e "R$ 0,00" fingiria um preço medido. Ver a regra
+ * geral do projeto — travessão nunca vira zero.
+ */
+export function precoMedioPorKg(valor: number, qtdKg: number): number | null {
+  return qtdKg > 0 ? valor / qtdKg : null
+}
+
 export interface LinhaCompraFornecedor {
   fornecedorId: string | null
   fornecedor: string
@@ -695,7 +716,7 @@ export function derivarRelatorioCompras(
       coletas: o.coletas,
       qtd: o.qtd,
       valor: o.valor,
-      precoMedio: o.qtd > 0 ? o.valor / o.qtd : null,
+      precoMedio: precoMedioPorKg(o.valor, o.qtd),
       itensSemConversao: o.semConversao,
       perdaPct: pp,
       aproveitPct: 100 - pp,

@@ -23,7 +23,13 @@ const TITULOS: Record<Tela, [string, string]> = {
   entradas: ['Entradas (Compras)', 'Coletas e compras dos fornecedores'],
   pedidos: ['Saídas (Vendas)', 'Entregas aos minimercados'],
   estoque: ['Estoque', 'Quantidade por produto'],
-  fornecedores: ['Fornecedores', 'Produtores rurais'],
+  // O subtítulo do protótipo é 'Norte do PR · preços de compra e variação'
+  // (linha 2141). A metade que diz o que a tela CALCULA volta agora que as
+  // métricas existem — estava encurtada para caber no que havia (cadastro
+  // puro), o mesmo apagamento que a auditoria apontou em Funcionários. "Norte
+  // do PR" fica de fora de propósito: é a região do cliente do protótipo, não
+  // um fato de todo tenant.
+  fornecedores: ['Fornecedores', 'Produtores rurais · preço de compra, variação e aproveitamento'],
   produtos: ['Produtos', 'Preço, margem e perda'],
   funcionarios: ['Funcionários', 'Salários, adiantamentos e valores a pagar'],
   veiculos: ['Veículos', 'Quem pegou qual carro'],

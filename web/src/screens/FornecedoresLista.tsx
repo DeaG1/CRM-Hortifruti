@@ -1,9 +1,125 @@
 import { useEffect, useState } from 'react'
 import { api, ErroApi } from '../api/client'
-import { type Fornecedor } from '../derive/fornecedores'
+import {
+  derivarFornecedores, VARIACAO_ALERTA_PCT, VARIACAO_ATENCAO_PCT,
+  type Fornecedor, type MetricasFornecedor,
+} from '../derive/fornecedores'
 import { type Produto } from '../derive/produtos'
+import { type EntradaResumo } from '../derive/relatorios'
 import { ModalFornecedor } from '../components/ModalFornecedor'
 import './FornecedoresLista.css'
+
+const GREEN = '#3f8f5b'
+const AMBER = '#c79320'
+const RED = '#c2502f'
+const NEUTRO = '#9a9784'
+
+// ---------------------------------------------------------- formatação
+
+/** Preço médio com 2 casas — mesma convenção de `moneyDetalhado` em
+ * RelatoriosTela.tsx e ProdutosLista.tsx (só "preço médio" usa 2 casas).
+ * Formatação é responsabilidade da tela, não de derive/. */
+const moneyDetalhado = (n: number) => 'R$ ' + n.toFixed(2).replace('.', ',')
+const pctInt = (n: number) => Math.round(n) + '%'
+/** Variação sempre com sinal: "+3,2%" / "-1,8%" — o sinal É a informação
+ * (subiu ou caiu), igual ao protótipo (`(v>0?'+':'')+v.toFixed(1)`). */
+const pctVariacao = (n: number) => (n > 0 ? '+' : '') + n.toFixed(1).replace('.', ',') + '%'
+
+/** 'AAAA-MM-DD' -> 'DD/MM'. Mesmo `_fmtDM` do protótipo e mesmo `dataBr` de
+ * SaidasLista.tsx/RelatoriosTela.tsx. */
+function dataBr(iso: string | null): string {
+  if (!iso || iso.length < 10) return '—'
+  const [, mes, dia] = iso.split('-')
+  return `${dia}/${mes}`
+}
+
+/** 'AAAA-MM-DD' -> 'DD/MM/AAAA', só para o `title` da última coleta: esta
+ * tela não tem seletor de período e soma a base inteira, então "12/03" sozinho
+ * não diz de qual ano é a última coleta de um fornecedor parado há um ano. */
+function dataBrCompleta(iso: string | null): string {
+  if (!iso || iso.length < 10) return '—'
+  const [ano, mes, dia] = iso.split('-')
+  return `${dia}/${mes}/${ano}`
+}
+
+/**
+ * Semáforo da variação de preço de compra — ±7% é a referência CEASA
+ * (protótipo 2440): até 4% é ruído de mercado, de 4% a 7% pede atenção, a
+ * partir de 7% o produtor mudou de patamar. Vale para os dois lados: cair
+ * 9% também é uma mudança de patamar que o comprador precisa notar (safra,
+ * qualidade caindo), não uma boa notícia silenciosa.
+ *
+ * O MESMO semáforo serve a célula do fornecedor e o cartão de resumo. O
+ * protótipo usa dois: no cartão (2457) ele só alterna RED/AMBER e nunca
+ * chega ao verde, o que pinta de âmbar até uma média de 0,0% — um alarme
+ * onde não há nada acontecendo. Divergir aqui é deliberado: duas escalas de
+ * cor para o mesmo número na mesma tela ensinariam duas convenções ao leitor
+ * (mesmo raciocínio do `NumIncompleto` compartilhado entre abas em
+ * RelatoriosTela.tsx).
+ */
+function corVariacao(pct: number | null): string {
+  if (pct == null) return NEUTRO
+  const v = Math.abs(pct)
+  if (v >= VARIACAO_ALERTA_PCT) return RED
+  if (v >= VARIACAO_ATENCAO_PCT) return AMBER
+  return GREEN
+}
+
+// ------------------------------------------- métrica incompleta (sem peso médio)
+
+/**
+ * Texto do aviso de quantidade incompleta — mesma regra e mesmo sinal (`*` +
+ * `title` + nota de rodapé) das abas Compras/Produtos/Perdas de Relatórios e
+ * de ProdutosLista, porque o problema é o mesmo: `GET /api/entradas` entrega
+ * `peso_total` em quilos convertendo cada item pela unidade dele, e item em
+ * unidade diferente de KG cujo produto não tem peso médio cadastrado NÃO é
+ * convertível — a API deixa o item de fora do peso e conta quantos foram em
+ * `itens_sem_conversao`, em vez de inventar um fator (uma caixa não pesa um
+ * quilo).
+ *
+ * Quando isso acontece as métricas ainda saem, mas o preço médio (e a
+ * variação, que é feita de preços médios) sai PARA CIMA — o valor em reais do
+ * item continua no numerador e o peso dele não entra no denominador — e o
+ * aproveitamento fica medido sobre uma carga menor do que a que chegou. É
+ * exatamente a tela onde o dono escolhe de quem comprar: exibir isso como
+ * número limpo seria a pior das opções.
+ */
+function avisoSemConversao(n: number): string {
+  const itens = n === 1 ? '1 item' : `${n} itens`
+  const verbo = n === 1 ? 'ficou' : 'ficaram'
+  return `${itens} das coletas deste fornecedor em unidade diferente de KG, sem peso médio `
+    + `cadastrado no produto, ${verbo} fora do peso — sem o peso da embalagem não há como somar `
+    + 'em quilos. Preço médio e variação saem para cima, e o aproveitamento está medido sobre '
+    + 'uma carga menor que a real.'
+}
+
+/** Um número que pode estar incompleto: com `n` = 0 sai limpo (o caso
+ * normal); com `n` > 0 ganha o `*` e a explicação no `title`. Mesmo sinal das
+ * outras telas afetadas (EntradasLista, ProdutosLista, RelatoriosTela). */
+function NumIncompleto({ texto, n }: { texto: string; n: number }) {
+  if (!n) return <>{texto}</>
+  return <span className="fornecedores-incompleto" title={avisoSemConversao(n)}>{texto}*</span>
+}
+
+/**
+ * Por que a variação está em travessão. Um fornecedor com UMA coleta é o caso
+ * comum e o mais importante de explicar: variação é a comparação entre a
+ * última compra e a anterior, e com uma compra só não existe anterior. Zerar
+ * ("0,0%") diria que o preço não mudou — uma medição que ninguém fez.
+ */
+function motivoSemVariacao(m: MetricasFornecedor): string {
+  if (m.coletas === 0) return 'Nenhuma coleta registrada para este fornecedor.'
+  if (m.coletas === 1) {
+    return 'Variação compara o preço da última coleta com o da anterior — este fornecedor tem '
+      + 'só 1 coleta registrada. Aparece a partir da segunda.'
+  }
+  return 'A coleta anterior não tem preço por quilo para comparar (peso não convertível em kg).'
+}
+
+const METRICAS_SEM_ENTRADAS: MetricasFornecedor = {
+  coletas: 0, ultimaColeta: null, precoMedio: null, variacaoPct: null,
+  aproveitPct: null, itensSemConversao: 0,
+}
 
 interface FornecedoresListaProps {
   onSessaoExpirada: () => void
@@ -24,6 +140,23 @@ export function FornecedoresLista({ onSessaoExpirada }: FornecedoresListaProps) 
   const [versao, setVersao] = useState(0)
   // undefined = modal fechado; null = criando; Fornecedor = editando (prefill)
   const [modal, setModal] = useState<Partial<Fornecedor> | null | undefined>(undefined)
+
+  // Coletas (entradas): busca separada da lista de fornecedores, e falha
+  // SOZINHA — se GET /api/entradas cair, o cadastro (nome, região, contato,
+  // produtos que entrega) continua visível, só com as quatro métricas em
+  // travessão e o aviso `role="status"` abaixo. Mesmo padrão de ClientesLista
+  // sobre /api/saidas e de ProdutosLista sobre /api/relatorios/produtos.
+  //
+  // Permissão: GET /api/entradas exige só sessão (entradas é tela de
+  // colaborador, ver ADMIN_ONLY_SCREENS em web/src/telas.ts e o comentário em
+  // api/src/routes/entradas.ts), enquanto Fornecedores é tela admin-only —
+  // quem enxerga esta tela já pode ler as entradas, nada foi afrouxado.
+  //
+  // Sem filtro de período na chamada porque esta tela não tem seletor de
+  // período (soma a base inteira, igual a ClientesLista) — `derivarFornecedores`
+  // recebe o período por parâmetro e aceita vazio.
+  const [entradas, setEntradas] = useState<EntradaResumo[]>([])
+  const [erroEntradas, setErroEntradas] = useState('')
 
   useEffect(() => {
     let cancelado = false
@@ -50,6 +183,24 @@ export function FornecedoresLista({ onSessaoExpirada }: FornecedoresListaProps) 
         setErro('Não foi possível carregar os fornecedores.')
       })
       .finally(() => { if (!cancelado) setCarregando(false) })
+    return () => { cancelado = true }
+  }, [onSessaoExpirada, versao])
+
+  useEffect(() => {
+    let cancelado = false
+    api.get<EntradaResumo[]>('/api/entradas')
+      .then(es => { if (!cancelado) setEntradas(es) })
+      .catch((err: unknown) => {
+        if (cancelado) return
+        if (err instanceof ErroApi && err.status === 401) {
+          onSessaoExpirada?.()
+          return
+        }
+        setErroEntradas(
+          'Não foi possível carregar as coletas (entradas) — preço médio, variação, '
+          + 'última coleta e aproveitamento ficam indisponíveis.',
+        )
+      })
     return () => { cancelado = true }
   }, [onSessaoExpirada, versao])
 
@@ -99,58 +250,150 @@ export function FornecedoresLista({ onSessaoExpirada }: FornecedoresListaProps) 
     )
   }
 
+  // Reusa derivarRelatorioCompras por dentro (ver derive/fornecedores.ts): o
+  // preço médio e o aproveitamento aqui são os MESMOS números da aba Compras
+  // de Relatórios, não uma segunda conta com o mesmo nome.
+  const { porFornecedor, resumo } = derivarFornecedores(fornecedores, entradas)
+
+  // Sub do cartão de resumo: o texto do protótipo ('última compra vs.
+  // anterior · ±7% CEASA') só é verdade quando existe alguma variação
+  // calculada. O que estava aqui antes ("Sem entradas registradas ainda")
+  // mentia sempre que HAVIA entradas — cada caso agora diz o que de fato
+  // impede o número de existir.
+  const subResumo = erroEntradas
+    ? 'Coletas indisponíveis'
+    : resumo.coletasNoPeriodo === 0
+      ? 'Nenhuma coleta registrada ainda'
+      : resumo.variacaoMediaPct == null
+        ? 'Nenhum fornecedor com duas coletas para comparar'
+        : `última compra vs. anterior · ±${VARIACAO_ALERTA_PCT}% CEASA · `
+          + `${resumo.fornecedoresComVariacao} fornecedor(es)`
+
   return (
     <div className="fornecedores-lista">
       <div className="fornecedores-topo">
-        <div className="fornecedores-dica">Clique num fornecedor para editar</div>
+        <div className="fornecedores-dica">
+          Clique num fornecedor para editar · preço, variação e aproveitamento vêm das{' '}
+          <strong>coletas lançadas em Entradas</strong>
+        </div>
         <button type="button" className="fornecedores-botao-novo" onClick={() => setModal(null)}>
           ＋ Novo fornecedor
         </button>
       </div>
 
+      {erroEntradas && (
+        <p className="fornecedores-aviso-metricas" role="status">{erroEntradas}</p>
+      )}
+
       <div className="fornecedores-resumo">
         <div className="fornecedores-resumo-card">
           <div className="fornecedores-resumo-label">Variação de preço de compra</div>
-          {/* Depende das entradas (compras), ainda sem tela nesta fase —
-              travessão em vez de dado inventado. */}
-          <div className="fornecedores-resumo-valor">—</div>
-          <div className="fornecedores-resumo-sub">Sem entradas registradas ainda</div>
+          <div
+            className="fornecedores-resumo-valor"
+            style={{ color: corVariacao(resumo.variacaoMediaPct) }}
+          >
+            {resumo.variacaoMediaPct == null
+              ? '—'
+              : (
+                <NumIncompleto
+                  texto={pctVariacao(resumo.variacaoMediaPct)}
+                  n={resumo.itensSemConversao}
+                />
+              )}
+          </div>
+          <div className="fornecedores-resumo-sub">{subResumo}</div>
         </div>
       </div>
 
       <div className="fornecedores-grade">
-        {fornecedores.map(f => (
-          <div key={f.id} className="fornecedores-card" onClick={() => setModal(f)}>
-            <div className="fornecedores-card-topo">
-              <div className="fornecedores-nome">{f.nome}</div>
-              <div className="fornecedores-sub">{f.regiao || '—'} · {f.contato || '—'}</div>
-            </div>
+        {fornecedores.map(f => {
+          const m = porFornecedor.get(f.id) ?? METRICAS_SEM_ENTRADAS
+          // Com as entradas indisponíveis não há o que explicar por métrica —
+          // o aviso `role="status"` no topo já diz o que houve, e um `title`
+          // dizendo "nenhuma coleta registrada" seria falso.
+          const tituloVariacao = erroEntradas ? undefined : motivoSemVariacao(m)
+          return (
+            <div key={f.id} className="fornecedores-card" onClick={() => setModal(f)}>
+              <div className="fornecedores-card-topo">
+                <div className="fornecedores-nome">{f.nome}</div>
+                <div className="fornecedores-sub">{f.regiao || '—'} · {f.contato || '—'}</div>
+              </div>
 
-            <div className="fornecedores-produtos">
-              {(f.produtos ?? []).length > 0
-                ? f.produtos!.map(p => (
-                  <span key={p.id} className="fornecedores-produto-chip">{p.nome}</span>
-                ))
-                : <span className="fornecedores-produto-vazio">Nenhum produto vinculado</span>}
-            </div>
+              <div className="fornecedores-produtos">
+                {(f.produtos ?? []).length > 0
+                  ? f.produtos!.map(p => (
+                    <span key={p.id} className="fornecedores-produto-chip">{p.nome}</span>
+                  ))
+                  : <span className="fornecedores-produto-vazio">Nenhum produto vinculado</span>}
+              </div>
 
-            <div className="fornecedores-metricas">
-              <div>
-                <div className="fornecedores-metrica-label">Preço médio</div>
-                <div className="fornecedores-metrica-valor">—</div>
-              </div>
-              <div>
-                <div className="fornecedores-metrica-label">Variação</div>
-                <div className="fornecedores-metrica-valor">—</div>
-              </div>
-              <div>
-                <div className="fornecedores-metrica-label">Última coleta</div>
-                <div className="fornecedores-metrica-valor">—</div>
+              <div className="fornecedores-metricas">
+                <div>
+                  <div className="fornecedores-metrica-label">Preço médio</div>
+                  {/* Fornecedor sem coleta no período não tem preço médio:
+                      travessão, nunca "R$ 0,00" — que fingiria um preço
+                      medido e mais barato que o de todo mundo. */}
+                  <div className="fornecedores-metrica-valor">
+                    {m.precoMedio == null
+                      ? '—'
+                      : <NumIncompleto texto={moneyDetalhado(m.precoMedio)} n={m.itensSemConversao} />}
+                  </div>
+                </div>
+                <div>
+                  <div className="fornecedores-metrica-label">Variação</div>
+                  <div
+                    className="fornecedores-metrica-valor"
+                    style={{ color: corVariacao(m.variacaoPct) }}
+                  >
+                    {m.variacaoPct == null
+                      ? <span title={tituloVariacao}>—</span>
+                      : <NumIncompleto texto={pctVariacao(m.variacaoPct)} n={m.itensSemConversao} />}
+                  </div>
+                </div>
+                <div>
+                  <div className="fornecedores-metrica-label">Última coleta</div>
+                  <div className="fornecedores-metrica-valor">
+                    {m.ultimaColeta == null
+                      ? '—'
+                      : (
+                        <span title={dataBrCompleta(m.ultimaColeta)}>
+                          {dataBr(m.ultimaColeta)}
+                        </span>
+                      )}
+                  </div>
+                </div>
+                <div>
+                  <div className="fornecedores-metrica-label">Aproveit.</div>
+                  {/* Aproveitamento é a métrica de QUALIDADE: quanto da carga
+                      chega vendável. Sem ela o preço médio sozinho leva à
+                      decisão errada — comprar a R$ 2,00 com 20% de perda sai
+                      mais caro que a R$ 2,30 com 3%. 100% aqui é medido (quem
+                      comprou e não perdeu nada); quem não comprou fica em
+                      travessão, não em 100%. */}
+                  <div className="fornecedores-metrica-valor">
+                    {m.aproveitPct == null
+                      ? '—'
+                      : <NumIncompleto texto={pctInt(m.aproveitPct)} n={m.itensSemConversao} />}
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
+
+      {resumo.itensSemConversao > 0 && (
+        // Redação própria (não o `title` da célula, que fala "deste
+        // fornecedor"): a nota fala do total da tela.
+        <div className="fornecedores-nota fornecedores-nota--incompleto" role="note">
+          <strong>*</strong> {resumo.itensSemConversao === 1 ? '1 item' : `${resumo.itensSemConversao} itens`}
+          {' '}de coleta em unidade diferente de KG, sem peso médio cadastrado no produto,
+          {resumo.itensSemConversao === 1 ? ' ficou' : ' ficaram'} fora do peso — sem o peso da
+          embalagem não há como somar em quilos. As métricas marcadas com <strong>*</strong> estão
+          calculadas sobre carga incompleta. Cadastre o peso médio da embalagem (campo{' '}
+          <strong>Peso médio</strong> do produto) para que entrem na conta.
+        </div>
+      )}
 
       {modal !== undefined && (
         <ModalFornecedor

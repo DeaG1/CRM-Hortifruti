@@ -139,6 +139,30 @@ describe('autorizacao', () => {
     const res = await pedir('/api/lancamentos', comoAdmin())
     expect(res.status).toBe(200)
   })
+
+  /**
+   * A restricao do badge "SALDO EM CAIXA" do cabecalho (achado S-4 da
+   * auditoria) e REAL, nao so o badge escondido no front: a terceira parcela
+   * do saldo (lancamentos pagos) e servida so pra admin. Um colaborador que
+   * chamasse a rota na mao — ou uma versao futura do front que esquecesse o
+   * `isAdmin` no Shell — recebe 403 aqui, e o saldo vira travessao em vez de
+   * vazar o caixa da empresa. Ver web/src/derive/caixa.ts e
+   * web/src/components/SaldoCaixa.tsx.
+   *
+   * Este teste duplica de proposito o "colaborador -> 403" acima: aquele
+   * protege a TELA de lancamentos, este protege o caixa. Se algum dia
+   * lancamentos deixar de ser admin-only, os dois tem de ser revisados
+   * separadamente, com decisoes separadas.
+   */
+  it('colaborador nao consegue somar o caixa por fora: GET /api/lancamentos -> 403', async () => {
+    const res = await pedir('/api/lancamentos', comoColab())
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ erro: 'sem permissao' })
+
+    // E o corpo nunca traz valor nenhum — nem parcial.
+    const texto = JSON.stringify(await pedir('/api/lancamentos', comoColab()).then(r => r.json()))
+    expect(texto).not.toContain('valor')
+  })
 })
 
 describe('GET /categorias', () => {

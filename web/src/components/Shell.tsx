@@ -1,5 +1,7 @@
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { ADMIN_ONLY_SCREENS, type Papel, type Tela } from '../telas'
+import { opcoesDePeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
+import { SaldoCaixa } from './SaldoCaixa'
 import './Shell.css'
 
 const NAV_DEFS: { key: Tela; label: string }[] = [
@@ -37,18 +39,40 @@ const TITULOS: Record<Tela, [string, string]> = {
   relatorios: ['Relatórios', 'Clientes, pedidos e lançamentos do período'],
 }
 
+/** Data de hoje em 'AAAA-MM-DD', componentes LOCAIS (nao UTC) — mesmo
+ * `hojeIsoLocal()` de ClientesLista/SaidasLista/RelatoriosTela. Fica aqui
+ * porque toca `new Date()`; `opcoesDePeriodo` continua pura recebendo a
+ * data por parametro. */
+function hojeIsoLocal(): string {
+  const n = new Date()
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
+}
+
 interface ShellProps {
   papel: Papel
   telaAtual: Tela
+  /** Periodo global (achado S-3). O estado mora em App.tsx, que nao remonta
+   * ao trocar de tela — e por isso que o recorte SOBREVIVE a navegacao. */
+  periodo: Periodo
+  onPeriodo: (periodo: Periodo) => void
   onNavegar: (tela: Tela) => void
   onSair: () => void
+  /** Sessao expirou (401) — repassado ao badge de saldo, a unica parte do
+   * Shell que fala com a API. */
+  onSessaoExpirada?: () => void
   children: ReactNode
 }
 
-export function Shell({ papel, telaAtual, onNavegar, onSair, children }: ShellProps) {
+export function Shell({
+  papel, telaAtual, periodo, onPeriodo, onNavegar, onSair, onSessaoExpirada, children,
+}: ShellProps) {
   const isAdmin = papel === 'admin'
   const itens = NAV_DEFS.filter(n => isAdmin || !ADMIN_ONLY_SCREENS.includes(n.key))
   const [titulo, subtitulo] = TITULOS[telaAtual]
+  // Uma vez por montagem: a lista de meses nao pode mudar sozinha enquanto o
+  // usuario navega (o `<select>` trocaria de opcoes debaixo dele), e a
+  // virada de meia-noite com o app aberto e um caso que uma recarga resolve.
+  const opcoes = useMemo(() => opcoesDePeriodo(hojeIsoLocal()), [])
 
   return (
     <div className="shell">
@@ -96,8 +120,35 @@ export function Shell({ papel, telaAtual, onNavegar, onSair, children }: ShellPr
 
       <main className="shell-main">
         <header className="shell-header">
-          <div className="shell-header-titulo">{titulo}</div>
-          <div className="shell-header-sub">{subtitulo}</div>
+          <div className="shell-header-texto">
+            <div className="shell-header-titulo">{titulo}</div>
+            <div className="shell-header-sub">{subtitulo}</div>
+          </div>
+          <div className="shell-header-controles">
+            {/* Seletor de periodo GLOBAL — protótipo markup 95-101. Vale para
+                todas as telas cujo conteudo e temporal; o cadastro puro
+                (Produtos, Fornecedores, Funcionarios) continua inteiro, so as
+                metricas derivadas respeitam o recorte. Estoque e o saldo em
+                caixa sao posicoes ACUMULADAS e nao seguem o filtro — cada um
+                diz isso no proprio rotulo. */}
+            <div className="shell-periodo">
+              <label className="shell-periodo-rotulo" htmlFor="shell-periodo-select">Período</label>
+              <select
+                id="shell-periodo-select"
+                className="shell-periodo-select"
+                value={periodo}
+                onChange={e => onPeriodo(e.target.value)}
+              >
+                <option value={PERIODO_TODOS}>{rotuloPeriodo(PERIODO_TODOS)}</option>
+                {opcoes.map(p => <option key={p} value={p}>{rotuloPeriodo(p)}</option>)}
+              </select>
+            </div>
+            {/* So admin ve o caixa da empresa (protótipo `sc-if isAdmin`,
+                linha 103). Nao e so o badge escondido: GET /api/lancamentos
+                exige admin na API, entao o colaborador nem tem como somar o
+                numero por fora. */}
+            {isAdmin && <SaldoCaixa onSessaoExpirada={onSessaoExpirada} />}
+          </div>
         </header>
         <div className="shell-conteudo">{children}</div>
       </main>

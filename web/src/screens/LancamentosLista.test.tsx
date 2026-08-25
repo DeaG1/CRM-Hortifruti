@@ -219,3 +219,55 @@ describe('LancamentosLista — excluir', () => {
     expect(screen.getByText('Entregas urbanas')).toBeInTheDocument()
   })
 })
+
+// ================================= periodo global (achado S-3 da auditoria)
+
+describe('LancamentosLista — periodo global alimenta o De/Ate', () => {
+  it('abre com o De/Ate posicionado no mes do cabecalho e filtra a lista', async () => {
+    mockCarga([
+      lancamento({ id: 'l-1', data: '2026-06-08', descricao: 'Coleta Norte' }),
+      lancamento({ id: 'l-2', data: '2026-05-08', descricao: 'Coleta Sul' }),
+    ])
+    render(<LancamentosLista periodo="2026-06" />)
+    expect(await screen.findByText('Coleta Norte')).toBeInTheDocument()
+    expect(screen.queryByText('Coleta Sul')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('De')).toHaveValue('2026-06')
+    expect(screen.getByLabelText('Até')).toHaveValue('2026-06')
+  })
+
+  it('em "all" abre sem limite e mostra os dois', async () => {
+    mockCarga([
+      lancamento({ id: 'l-1', data: '2026-06-08', descricao: 'Coleta Norte' }),
+      lancamento({ id: 'l-2', data: '2026-05-08', descricao: 'Coleta Sul' }),
+    ])
+    render(<LancamentosLista />)
+    expect(await screen.findByText('Coleta Norte')).toBeInTheDocument()
+    expect(screen.getByText('Coleta Sul')).toBeInTheDocument()
+    expect(screen.getByLabelText('De')).toHaveValue('')
+  })
+
+  it('TROCAR o periodo no cabecalho reposiciona o De/Ate ja aberto', async () => {
+    mockCarga([
+      lancamento({ id: 'l-1', data: '2026-06-08', descricao: 'Coleta Norte' }),
+      lancamento({ id: 'l-2', data: '2026-05-08', descricao: 'Coleta Sul' }),
+    ])
+    const tela = render(<LancamentosLista periodo="2026-06" />)
+    await screen.findByText('Coleta Norte')
+
+    tela.rerender(<LancamentosLista periodo="2026-05" />)
+    expect(screen.getByLabelText('De')).toHaveValue('2026-05')
+    expect(screen.getByText('Coleta Sul')).toBeInTheDocument()
+    expect(screen.queryByText('Coleta Norte')).not.toBeInTheDocument()
+  })
+
+  it('o De/Ate continua livre para alargar depois', async () => {
+    mockCarga([
+      lancamento({ id: 'l-1', data: '2026-06-08', descricao: 'Coleta Norte' }),
+      lancamento({ id: 'l-2', data: '2026-05-08', descricao: 'Coleta Sul' }),
+    ])
+    render(<LancamentosLista periodo="2026-06" />)
+    await screen.findByText('Coleta Norte')
+    fireEvent.change(screen.getByLabelText('De'), { target: { value: '2026-05' } })
+    expect(screen.getByText('Coleta Sul')).toBeInTheDocument()
+  })
+})

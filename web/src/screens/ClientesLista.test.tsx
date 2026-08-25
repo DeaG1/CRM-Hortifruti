@@ -200,3 +200,47 @@ describe('ClientesLista — vendas reais (GET /api/saidas)', () => {
     expect(onAbrir).toHaveBeenCalledWith('abc-123')
   })
 })
+
+// ================================= periodo global (achado S-3 da auditoria)
+
+describe('ClientesLista — periodo global', () => {
+  it('as metricas so contam as vendas do periodo escolhido', async () => {
+    mockRotas([cliente()], [
+      saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+      saida({ id: 's2', entrega: '2026-05-10', valor: 9000 }),
+    ])
+    render(<ClientesLista onAbrir={() => {}} periodo="2026-06" />)
+    const linha = await screen.findByText('Mercado A')
+    const dados = linha.closest('.clientes-linha') as HTMLElement
+    expect(dados).toHaveTextContent('R$ 1.000')
+    expect(dados).not.toHaveTextContent('R$ 9.000')
+  })
+
+  it('sem periodo (padrao "all") soma a base inteira', async () => {
+    mockRotas([cliente()], [
+      saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+      saida({ id: 's2', entrega: '2026-05-10', valor: 9000 }),
+    ])
+    render(<ClientesLista onAbrir={() => {}} />)
+    const linha = await screen.findByText('Mercado A')
+    expect(linha.closest('.clientes-linha')).toHaveTextContent('R$ 10.000')
+  })
+
+  it('o CADASTRO nao some num periodo sem venda nenhuma', async () => {
+    mockRotas([cliente({ id: '1', nome: 'Mercado A' }), cliente({ id: '2', nome: 'Mercado B' })], [
+      saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+    ])
+    render(<ClientesLista onAbrir={() => {}} periodo="2026-01" />)
+    // Os dois clientes continuam na lista; so os numeros viram travessao.
+    expect(await screen.findByText('Mercado A')).toBeInTheDocument()
+    expect(screen.getByText('Mercado B')).toBeInTheDocument()
+    expect(botaoFiltro('Todos')).toHaveTextContent('2')
+  })
+
+  it('a tela diz qual recorte esta valendo para os numeros', async () => {
+    mockRotas([cliente()], [])
+    render(<ClientesLista onAbrir={() => {}} periodo="2026-06" />)
+    await screen.findByText('Mercado A')
+    expect(screen.getByText(/números da carteira/i)).toHaveTextContent('Junho/2026')
+  })
+})

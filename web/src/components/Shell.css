@@ -197,6 +197,48 @@
   padding: 18px 30px;
   background: #fbfaf4;
   border-bottom: 1px solid #e6e2d4;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.shell-header-texto {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Periodo global + saldo em caixa, na ordem do prototipo (95-108). */
+.shell-header-controles {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.shell-periodo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 9px;
+  padding: 5px 10px 5px 13px;
+}
+
+.shell-periodo-rotulo {
+  font-size: 12px;
+  color: #8a8775;
+}
+
+.shell-periodo-select {
+  border: none;
+  background: transparent;
+  font-weight: 700;
+  font-size: 13px;
+  color: #2a2a24;
+  font-family: 'Public Sans', sans-serif;
+  cursor: pointer;
+  outline: none;
 }
 
 .shell-header-titulo {

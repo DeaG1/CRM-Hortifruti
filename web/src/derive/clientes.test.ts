@@ -131,7 +131,19 @@ describe('derivarClientes', () => {
       pedido({ cliente: 'A', entrega: '2026-06-10', valor: 1000 }),
       pedido({ cliente: 'A', entrega: '2026-05-10', valor: 9999 }),
     ]
-    expect(derivarClientes(clientes, pedidos, '06', '2026-06-15')[0].faturado).toBe(1000)
+    expect(derivarClientes(clientes, pedidos, '2026-06', '2026-06-15')[0].faturado).toBe(1000)
+  })
+
+  it('o periodo inclui o ANO: junho/2025 nao entra em junho/2026', () => {
+    // O recorte era 'MM' (so o mes) ate o seletor de periodo virar global
+    // (achado S-3). Com dois anos de historico, o 9999 de junho/2025 seria
+    // somado ao faturamento de junho/2026 sem nenhum aviso.
+    const clientes = [cliente({ nome: 'A' })]
+    const pedidos = [
+      pedido({ cliente: 'A', entrega: '2026-06-10', valor: 1000 }),
+      pedido({ cliente: 'A', entrega: '2025-06-10', valor: 9999 }),
+    ]
+    expect(derivarClientes(clientes, pedidos, '2026-06', '2026-06-15')[0].faturado).toBe(1000)
   })
 })
 

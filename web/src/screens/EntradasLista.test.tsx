@@ -476,3 +476,60 @@ describe('EntradasLista — isolacao de falha dos cartoes', () => {
     expect(cartoes().queryByText('R$ 0,00')).not.toBeInTheDocument()
   })
 })
+
+// ================================= periodo global (achado S-3 da auditoria)
+
+describe('EntradasLista — periodo global', () => {
+  it('a tabela mostra so as coletas do periodo escolhido', async () => {
+    mockRotasPadrao([
+      entrada({ id: 'e-1', numero: 'C-1040', data: '2026-08-10' }),
+      entrada({ id: 'e-2', numero: 'C-0930', data: '2026-07-05' }),
+    ])
+    render(<EntradasLista periodo="2026-08" />)
+    expect(await screen.findByText('C-1040')).toBeInTheDocument()
+    expect(screen.queryByText('C-0930')).not.toBeInTheDocument()
+  })
+
+  it('sem periodo (padrao "all") mostra as duas', async () => {
+    mockRotasPadrao([
+      entrada({ id: 'e-1', numero: 'C-1040', data: '2026-08-10' }),
+      entrada({ id: 'e-2', numero: 'C-0930', data: '2026-07-05' }),
+    ])
+    render(<EntradasLista />)
+    expect(await screen.findByText('C-1040')).toBeInTheDocument()
+    expect(screen.getByText('C-0930')).toBeInTheDocument()
+  })
+
+  it('os cartoes somam so o periodo, nao a base inteira', async () => {
+    mockRotasPadrao([
+      entrada({ id: 'e-1', data: '2026-08-10', valor_total: 120, peso_total: 30, perda_kg: 0 }),
+      entrada({ id: 'e-2', numero: 'C-0930', data: '2026-07-05', valor_total: 5000, peso_total: 900, perda_kg: 0 }),
+    ])
+    render(<EntradasLista periodo="2026-08" />)
+    await screen.findByText('C-1040')
+    expect(cartao('ENTRADAS')).toHaveTextContent('1')
+    expect(cartao('VALOR TOTAL')).toHaveTextContent('R$ 120,00')
+  })
+
+  it('periodo sem coleta nenhuma NAO diz "nenhuma entrada lancada"', async () => {
+    mockRotasPadrao([entrada({ id: 'e-1', data: '2026-08-10' })])
+    render(<EntradasLista periodo="2026-01" />)
+    expect(await screen.findByText(/nenhuma entrada em janeiro\/2026/i)).toBeInTheDocument()
+    expect(screen.queryByText(/nenhuma entrada lançada/i)).not.toBeInTheDocument()
+    // E nao oferece "lancar a primeira": ja existe uma, noutro mes.
+    expect(screen.queryByRole('button', { name: /lançar primeira entrada/i })).not.toBeInTheDocument()
+  })
+
+  it('base realmente vazia continua com o estado vazio de sempre', async () => {
+    mockRotasPadrao([])
+    render(<EntradasLista periodo="2026-08" />)
+    expect(await screen.findByText(/nenhuma entrada lançada/i)).toBeInTheDocument()
+  })
+
+  it('a legenda diz qual recorte esta valendo', async () => {
+    mockRotasPadrao()
+    render(<EntradasLista periodo="2026-08" />)
+    await screen.findByText('C-1040')
+    expect(screen.getByText(/clique numa entrada para editar/i)).toHaveTextContent('Agosto/2026')
+  })
+})

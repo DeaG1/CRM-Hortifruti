@@ -10,6 +10,7 @@ import type { Cliente, StatusCliente, Health } from '../derive/clientes'
 import type { Fornecedor } from '../derive/fornecedores'
 import type { Lancamento } from '../derive/lancamentos'
 import type { Produto } from '../derive/produtos'
+import { intervaloDoPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import './RelatoriosTela.css'
 
 // Molde: ClientesLista.tsx (os quatro estados, `cancelado` no useEffect,
@@ -251,10 +252,19 @@ function Cartoes({ itens }: { itens: { label: string; valor: ReactNode; sub: str
 }
 
 interface RelatoriosTelaProps {
+  /**
+   * Periodo global do cabecalho (App.tsx, achado S-3). Aqui ele ALIMENTA o
+   * De/Ate desta tela em vez de substitui-lo: o De/Ate e um controle mais
+   * FINO (intervalo de meses, e nao um mes so) e esta e a tela de ANALISE,
+   * onde comparar trimestre ou semestre e o trabalho. Substitui-lo por um
+   * seletor de mes unico tiraria funcionalidade; deixar os dois
+   * independentes deixaria o cabecalho dizendo um mes e o relatorio outro.
+   */
+  periodo?: Periodo
   onSessaoExpirada: () => void
 }
 
-export function RelatoriosTela({ onSessaoExpirada }: RelatoriosTelaProps) {
+export function RelatoriosTela({ periodo = PERIODO_TODOS, onSessaoExpirada }: RelatoriosTelaProps) {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [saidas, setSaidas] = useState<SaidaResumo[]>([])
   const [entradas, setEntradas] = useState<EntradaResumo[]>([])
@@ -270,8 +280,25 @@ export function RelatoriosTela({ onSessaoExpirada }: RelatoriosTelaProps) {
   const [erroProdutos, setErroProdutos] = useState('')
 
   const [aba, setAba] = useState<Aba>('clientes')
-  const [de, setDe] = useState('') // AAAA-MM, vazio = sem limite inferior
-  const [ate, setAte] = useState('') // AAAA-MM, vazio = sem limite superior
+  const [de, setDe] = useState(() => intervaloDoPeriodo(periodo).de) // AAAA-MM, vazio = sem limite inferior
+  const [ate, setAte] = useState(() => intervaloDoPeriodo(periodo).ate) // AAAA-MM, vazio = sem limite superior
+
+  // O período global ALIMENTA o De/Até local (ver a prop `periodo`):
+  // trocar o período no cabeçalho reposiciona o intervalo no mês escolhido, e
+  // o De/Até continua livre para alargar ou estreitar a partir dali.
+  //
+  // Ajuste DURANTE a renderização, e não num `useEffect`: é o padrão do React
+  // para estado que precisa acompanhar uma prop (guardar o valor anterior e
+  // comparar). Um efeito renderizaria uma vez com o intervalo velho antes de
+  // corrigir — e nesta tela o intervalo velho dispara uma busca ao servidor
+  // (`?de=&ate=`) que seria imediatamente descartada.
+  const [periodoAplicado, setPeriodoAplicado] = useState(periodo)
+  if (periodo !== periodoAplicado) {
+    const { de: novoDe, ate: novoAte } = intervaloDoPeriodo(periodo)
+    setPeriodoAplicado(periodo)
+    setDe(novoDe)
+    setAte(novoAte)
+  }
 
   // Carga principal: os seis relatórios que usam só cabeçalho (clientes,
   // saídas, entradas, perdas, lançamentos, fornecedores) + a lista de

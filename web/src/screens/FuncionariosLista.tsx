@@ -3,12 +3,11 @@ import { api, ErroApi } from '../api/client'
 import {
   derivarFuncionarios,
   estatisticasFuncionarios,
-  periodosComFolha,
   descricaoSalario,
   type Funcionario,
   type FuncionarioDerivado,
 } from '../derive/funcionarios'
-import { rotuloPeriodo } from '../derive/financeiro'
+import { rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import { CATEGORIA_ADIANTAMENTO, CATEGORIA_SALARIO, type Lancamento } from '../derive/lancamentos'
 import { ModalFuncionario } from '../components/ModalFuncionario'
 import { ModalLancamento } from '../components/ModalLancamento'
@@ -58,11 +57,23 @@ const COR_CATEGORIA: Record<string, { cor: string; bg: string }> = {
 const COR_CATEGORIA_PADRAO = { cor: '#4a4838', bg: '#f3f0e6' }
 
 interface FuncionariosListaProps {
+  /**
+   * Período global do cabeçalho (App.tsx, achado S-3). ESTA TELA PERDEU O
+   * SELETOR PRÓPRIO, pelo mesmo motivo de FinanceiroTela: era o mesmo
+   * recorte na mesma convenção, e dois seletores de período visíveis ao
+   * mesmo tempo podendo discordar é pior que um só. O rótulo do período
+   * continua no cartão "Adiantado no período".
+   *
+   * O CADASTRO não some com o filtro: todo funcionário continua listado com
+   * nome, cargo, salário e próximo pagamento — quem respeita o recorte são
+   * as colunas de folha (adiantado, pago, a pagar) e o histórico expansível.
+   */
+  periodo?: Periodo
   /** Sessão expirou (401 da API) — a tela volta ao login em vez de mostrar erro. */
   onSessaoExpirada?: () => void
 }
 
-export function FuncionariosLista({ onSessaoExpirada }: FuncionariosListaProps) {
+export function FuncionariosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: FuncionariosListaProps) {
   const [funcionarios, setFuncionarios] = useState<Funcionario[]>([])
   // `null` = nao disponivel (ainda carregando, ou GET /api/lancamentos
   // falhou). `[]` = carregou e nao ha nenhum. Sao coisas diferentes e a
@@ -72,7 +83,6 @@ export function FuncionariosLista({ onSessaoExpirada }: FuncionariosListaProps) 
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
   const [erroLancamentos, setErroLancamentos] = useState('')
-  const [periodo, setPeriodo] = useState('all')
   const [expandido, setExpandido] = useState<string | null>(null)
   // undefined = modal fechado; null = criando; Funcionario = editando (prefill)
   const [modal, setModal] = useState<Partial<Funcionario> | null | undefined>(undefined)
@@ -164,7 +174,6 @@ export function FuncionariosLista({ onSessaoExpirada }: FuncionariosListaProps) 
 
   const derivados = derivarFuncionarios(funcionarios, lancamentos, new Date(), periodo)
   const stats = estatisticasFuncionarios(funcionarios, lancamentos, periodo)
-  const periodos = periodosComFolha(lancamentos ?? [])
   const podeLancar = lancamentos !== null && categorias.length > 0
 
   const cartoes: { chave: string; label: string; valor: string; sub: string }[] = [
@@ -195,19 +204,8 @@ export function FuncionariosLista({ onSessaoExpirada }: FuncionariosListaProps) 
 
       <div className="funcionarios-topo">
         <div className="funcionarios-dica">
-          Clique num funcionário para ver os adiantamentos · lançados automaticamente no Financeiro
-        </div>
-        <div className="funcionarios-periodo">
-          <label className="funcionarios-periodo-rotulo" htmlFor="funcionarios-periodo-select">Período</label>
-          <select
-            id="funcionarios-periodo-select"
-            className="funcionarios-periodo-select"
-            value={periodo}
-            onChange={e => setPeriodo(e.target.value)}
-          >
-            <option value="all">{rotuloPeriodo('all')}</option>
-            {periodos.map(p => <option key={p} value={p}>{rotuloPeriodo(p)}</option>)}
-          </select>
+          Clique num funcionário para ver os adiantamentos · lançados automaticamente no Financeiro ·{' '}
+          folha de <strong>{rotuloPeriodo(periodo)}</strong> (o cadastro aparece inteiro)
         </div>
         <button type="button" className="funcionarios-botao-novo" onClick={() => setModal(null)}>
           <span className="funcionarios-botao-novo-icone">＋</span> Novo funcionário

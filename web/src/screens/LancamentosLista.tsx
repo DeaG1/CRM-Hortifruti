@@ -3,6 +3,7 @@ import { api, ErroApi } from '../api/client'
 import type { Lancamento } from '../derive/lancamentos'
 import type { Funcionario } from '../derive/funcionarios'
 import { ModalLancamento } from '../components/ModalLancamento'
+import { intervaloDoPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import './LancamentosLista.css'
 
 // Molde: ClientesLista.tsx (os quatro estados, cancelado no useEffect,
@@ -24,18 +25,41 @@ function mesDe(iso: string): string {
 }
 
 interface LancamentosListaProps {
+  /**
+   * Período global do cabeçalho (App.tsx, achado S-3). Aqui ele ALIMENTA o
+   * De/Até local em vez de substituí-lo: o De/Até é um controle mais FINO
+   * (intervalo de meses, não um mês só), e quem está conferindo lançamentos
+   * costuma querer comparar dois ou três meses seguidos sem perder o
+   * contexto. Trocar o período no cabeçalho reposiciona o intervalo no mês
+   * escolhido; a partir daí o usuário pode alargá-lo à vontade, e a próxima
+   * troca no cabeçalho reposiciona de novo.
+   */
+  periodo?: Periodo
   /** Sessão expirou (401 da API) — a tela volta ao login em vez de mostrar erro. */
   onSessaoExpirada?: () => void
 }
 
-export function LancamentosLista({ onSessaoExpirada }: LancamentosListaProps) {
+export function LancamentosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: LancamentosListaProps) {
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [funcionarios, setFuncionarios] = useState<Funcionario[]>([])
   const [categorias, setCategorias] = useState<string[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
-  const [de, setDe] = useState('') // AAAA-MM, vazio = sem limite inferior
-  const [ate, setAte] = useState('') // AAAA-MM, vazio = sem limite superior
+  const [de, setDe] = useState(() => intervaloDoPeriodo(periodo).de) // AAAA-MM, vazio = sem limite inferior
+  const [ate, setAte] = useState(() => intervaloDoPeriodo(periodo).ate) // AAAA-MM, vazio = sem limite superior
+
+  // O período global reposiciona o intervalo local (ver a prop `periodo`).
+  // Ajuste DURANTE a renderização, não num `useEffect`: é o padrão do React
+  // para estado que acompanha uma prop, e evita um primeiro render com o
+  // intervalo velho. Um ajuste manual de De/Até sobrevive até a próxima
+  // troca no cabeçalho.
+  const [periodoAplicado, setPeriodoAplicado] = useState(periodo)
+  if (periodo !== periodoAplicado) {
+    const { de: novoDe, ate: novoAte } = intervaloDoPeriodo(periodo)
+    setPeriodoAplicado(periodo)
+    setDe(novoDe)
+    setAte(novoAte)
+  }
   // undefined = modal fechado; null = criando; Lancamento = editando (prefill)
   const [modal, setModal] = useState<Partial<Lancamento> | null | undefined>(undefined)
 

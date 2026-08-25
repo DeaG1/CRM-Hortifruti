@@ -45,7 +45,8 @@ function comoPromise(v: unknown): Promise<unknown> {
 function mockRotas(produtosResp: unknown, metricasResp: unknown = []) {
   mockGet.mockImplementation((url: string) => {
     if (url === '/api/produtos') return comoPromise(produtosResp)
-    if (url === '/api/relatorios/produtos') return comoPromise(metricasResp)
+    // Casado por PREFIXO: a rota leva `?de=&ate=` quando ha periodo escolhido.
+    if (url.startsWith('/api/relatorios/produtos')) return comoPromise(metricasResp)
     return Promise.reject(new Error('rota nao mockada: ' + url))
   })
 }
@@ -325,5 +326,41 @@ describe('ProdutosLista — metricas incompletas (lancamento sem peso medio)', (
     // Depois da conversao na API, compra media e venda media sao R$/kg para
     // qualquer produto — inclusive os comprados em caixa.
     expect(screen.getByText(/por quilo/i)).toBeInTheDocument()
+  })
+})
+
+// ================================= periodo global (achado S-3 da auditoria)
+
+describe('ProdutosLista — periodo global', () => {
+  it('busca o agregado ja filtrado no servidor', async () => {
+    mockRotas([produto()], [agregado()])
+    render(<ProdutosLista periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    expect(mockGet).toHaveBeenCalledWith('/api/relatorios/produtos?de=2026-06&ate=2026-06')
+  })
+
+  it('em "all" vai sem query nenhuma', async () => {
+    mockRotas([produto()], [agregado()])
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    expect(mockGet).toHaveBeenCalledWith('/api/relatorios/produtos')
+  })
+
+  it('o CADASTRO nao some num periodo sem movimento: as metricas e que ficam em travessao', async () => {
+    // O servidor devolve o agregado VAZIO para um mes sem compra nem venda —
+    // e o produto continua listado, com travessao nas colunas derivadas.
+    mockRotas([produto({ id: '1', nome: 'Batata' }), produto({ id: '2', nome: 'Cebola' })], [])
+    render(<ProdutosLista periodo="2026-01" onSessaoExpirada={() => {}} />)
+    expect(await screen.findByText('Batata')).toBeInTheDocument()
+    expect(screen.getByText('Cebola')).toBeInTheDocument()
+  })
+
+  it('a dica diz qual recorte vale para as metricas, e que o cadastro nao segue', async () => {
+    mockRotas([produto()], [agregado()])
+    render(<ProdutosLista periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    const dica = screen.getByText(/calculados das compras e vendas/i)
+    expect(dica).toHaveTextContent('Junho/2026')
+    expect(dica).toHaveTextContent(/cadastro aparece inteiro/i)
   })
 })

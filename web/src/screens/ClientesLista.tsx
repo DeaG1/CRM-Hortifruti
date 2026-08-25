@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, ErroApi } from '../api/client'
 import { derivarClientes, type Cliente, type Pedido, type ClienteDerivado, type StatusCliente, type Health } from '../derive/clientes'
+import { PERIODO_TODOS, rotuloPeriodo, type Periodo } from '../derive/periodo'
 import './ClientesLista.css'
 
 const STATUS_LABEL: Record<StatusCliente, string> = {
@@ -106,14 +107,18 @@ function paraPedidos(saidasBrutas: SaidaBruta[], clientes: Cliente[]): Pedido[] 
 
 interface ClientesListaProps {
   onAbrir: (id: string) => void
+  /** Período global do cabeçalho (App.tsx). O CADASTRO nunca some com ele —
+   * um minimercado não deixa de ser cliente porque não comprou em julho; o
+   * que respeita o recorte são as colunas derivadas (faturado, ticket,
+   * participação, inadimplência) e, por consequência, a saúde do cliente. */
+  periodo?: Periodo
   /** Sessão expirou (401 da API) — a tela volta ao login em vez de mostrar erro. */
   onSessaoExpirada?: () => void
 }
 
-export function ClientesLista({ onAbrir, onSessaoExpirada }: ClientesListaProps) {
+export function ClientesLista({ onAbrir, periodo = PERIODO_TODOS, onSessaoExpirada }: ClientesListaProps) {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [saidasBrutas, setSaidasBrutas] = useState<SaidaBruta[]>([])
-  const [periodo] = useState('all')
   const [filtro, setFiltro] = useState<Filtro>('Todos')
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
@@ -139,9 +144,10 @@ export function ClientesLista({ onAbrir, onSessaoExpirada }: ClientesListaProps)
   // SOZINHA — se /api/saidas cair, a carteira de clientes (o que esta tela
   // existe pra mostrar) continua visível, so com as metricas que dependem
   // de venda indisponiveis (ver `erroVendas` e o aviso discreto abaixo, e
-  // o travessao no lugar de zero nas celulas). Sem filtro de periodo na
-  // API porque esta tela nunca oferece um seletor de periodo (so 'all') —
-  // RelatoriosTela/DashboardTela ja buscam a lista inteira do mesmo jeito;
+  // o travessao no lugar de zero nas celulas). A busca continua trazendo a
+  // lista inteira e o recorte de periodo e aplicado em memoria (por
+  // `derivarClientes`), pra trocar o periodo no cabecalho nao disparar uma
+  // ida ao servidor a cada mudanca —
   // se o volume de saidas crescer a ponto de isso pesar (aproximando de
   // dezenas de milhares de linhas), a resposta e um endpoint agregado por
   // periodo, igual ao que ja existe para /api/relatorios/produtos.
@@ -187,6 +193,12 @@ export function ClientesLista({ onAbrir, onSessaoExpirada }: ClientesListaProps)
       {erroVendas && (
         <p className="clientes-aviso-vendas" role="status">{erroVendas}</p>
       )}
+
+      {/* Sem esta linha, um cliente inteiro em travessão pareceria cliente
+          sem venda nenhuma, quando é só o recorte escolhido no cabeçalho. */}
+      <p className="clientes-periodo-nota">
+        Cadastro completo · números da carteira: <strong>{rotuloPeriodo(periodo)}</strong>
+      </p>
 
       <div className="clientes-filtros">
         {FILTROS.map(f => (

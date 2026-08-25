@@ -1,4 +1,5 @@
 import { situacaoExibidaSaida } from './pagamento'
+import { filtrarPorPeriodo } from './periodo'
 
 export type StatusCliente = 'ativo' | 'negociacao' | 'inadimplente' | 'inativo'
 export type Tendencia = '↑' | '→' | '↓'
@@ -110,10 +111,6 @@ export interface ClienteDerivado extends Cliente {
   health: Health
 }
 
-/** Mes de uma data ISO, como '06'. Vazio se a data for invalida. */
-export function mesDe(iso: string): string {
-  return typeof iso === 'string' && iso.length >= 7 ? iso.slice(5, 7) : ''
-}
 
 function doCliente(pedidos: Pedido[], nome: string) {
   return pedidos.filter(p => p.cliente === nome)
@@ -239,9 +236,12 @@ export function derivarClientes(
   periodo: string,
   hojeIso: string,
 ): ClienteDerivado[] {
-  const doPeriodo = periodo === 'all'
-    ? pedidos
-    : pedidos.filter(p => mesDe(p.entrega) === periodo)
+  // `filtrarPorPeriodo` (derive/periodo.ts), e não o antigo `mesDe` local
+  // que devolvia só 'MM': o seletor de período agora é GLOBAL (achado S-3),
+  // e um recorte que ignora o ano juntaria junho/2025 com junho/2026 no
+  // mesmo "junho" — o ticket e a inadimplência da carteira sairiam errados
+  // sem nenhum aviso assim que a base passasse de doze meses.
+  const doPeriodo = filtrarPorPeriodo(pedidos, periodo, p => p.entrega)
 
   const entregues = doPeriodo.filter(p => p.status === 'Entregue')
   const faturamentoTotal = entregues.reduce((s, p) => s + (p.valor || 0), 0)

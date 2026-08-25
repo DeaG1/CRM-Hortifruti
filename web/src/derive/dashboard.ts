@@ -92,6 +92,11 @@ export interface Entrada {
  * acima: só os campos que a Saúde do Negócio consome.)
  */
 export interface Perda {
+  /** Data da perda de deposito, ISO 'aaaa-mm-dd' — `pd.*` no select de
+   * GET /api/perdas ja traz a coluna. Declarada agora porque o filtro de
+   * periodo global (achado S-3) recorta esta lista pela data do evento;
+   * opcional so para as fixtures de teste, que montam perdas parciais. */
+  data?: string | null
   /**
    * A mesma perda em quilos, convertida pela API pela unidade dela.
    * `null`/ausente = não convertível (produto sem peso médio cadastrado):
@@ -388,13 +393,19 @@ export function markupMedio(agregados: ProdutoAgregado[]): Indicador {
  * reimplementada aqui: é a mesma fórmula, e outro agente mexe em
  * financeiro.ts (inclusive no ciclo de caixa, que usa este mesmo giro) ao
  * mesmo tempo — duas cópias da mesma conta divergiriam cedo ou tarde. Ver
- * cicloDeCaixa() abaixo para a mesma decisão. Este painel nunca teve
- * seletor de período (opera sobre a base inteira), então chama
- * diasEstoque() com periodo='all' — o mesmo "all" que as outras telas usam
- * quando não há filtro ativo (ver noPeriodo em financeiro.ts).
+ * cicloDeCaixa() abaixo para a mesma decisão.
+ *
+ * PERÍODO (achado S-3 da auditoria): recebe o período do cabeçalho global e
+ * repassa a `diasEstoque`, que é quem sabe transformá-lo em número de dias
+ * (mês civil quando um mês está escolhido; intervalo real das datas quando é
+ * 'all'). As listas chegam INTEIRAS de propósito — filtrar antes e passar
+ * 'all' faria a janela de dias ser medida pelo intervalo entre a primeira e a
+ * última data sobreviventes, e um mês com uma venda só valeria "1 dia".
+ * `'all'` continua sendo o padrão, então quem já chamava sem período não
+ * muda de comportamento.
  */
-export function giroDeEstoque(entradas: Entrada[], saidas: Saida[]): Indicador {
-  const dias = diasEstoque(entradas, saidas, 'all')
+export function giroDeEstoque(entradas: Entrada[], saidas: Saida[], periodo = 'all'): Indicador {
+  const dias = diasEstoque(entradas, saidas, periodo)
   if (dias === null) return indisponivel('sem saídas com peso registrado para estimar o giro de estoque')
   return disponivel(dias)
 }
@@ -417,11 +428,13 @@ export function giroDeEstoque(entradas: Entrada[], saidas: Saida[]): Indicador {
  * a tela Financeiro mostrarem dois números diferentes de "ciclo de caixa"
  * ao mesmo tempo — exatamente o problema que este endpoint (e a instrução
  * desta tarefa) pediu para evitar. Por isso este painel usa a MESMA função
- * que a tela Financeiro. Mesmo raciocínio do giro acima quanto a
- * `periodo='all'` (esta tela não tem seletor de período).
+ * que a tela Financeiro — inclusive no recorte: o `periodo` do cabeçalho
+ * global desce inteiro para lá, pelas mesmas razões descritas em
+ * `giroDeEstoque` acima (as listas chegam completas, quem mede a janela de
+ * dias é derive/financeiro.ts).
  */
-export function cicloDeCaixa(entradas: Entrada[], saidas: Saida[]): Indicador {
-  const { total } = calcularCicloCaixa(entradas, saidas, 'all')
+export function cicloDeCaixa(entradas: Entrada[], saidas: Saida[], periodo = 'all'): Indicador {
+  const { total } = calcularCicloCaixa(entradas, saidas, periodo)
   if (total === null) {
     return indisponivel(
       'requer giro de estoque, recebimento e pagamento ao produtor calculáveis ao mesmo tempo (falta ao menos um)',

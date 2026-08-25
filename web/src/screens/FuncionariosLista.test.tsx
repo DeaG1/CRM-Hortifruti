@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { FuncionariosLista } from './FuncionariosLista'
 import { api, ErroApi } from '../api/client'
 import type { Funcionario } from '../derive/funcionarios'
@@ -262,35 +262,53 @@ describe('FuncionariosLista — os quatro cartoes', () => {
   })
 })
 
-describe('FuncionariosLista — filtro de periodo', () => {
-  it('so conta os lancamentos do periodo escolhido', async () => {
-    mockCarga(
+// O seletor de periodo desta tela deixou de existir: o recorte agora vem do
+// cabecalho global (achado S-3), por prop. Ver o comentario da prop `periodo`
+// em FuncionariosLista.tsx para o porque de nao conviverem dois seletores.
+describe('FuncionariosLista — periodo global', () => {
+  it('so conta os lancamentos do periodo recebido', async () => {
+    const dados: Parameters<typeof mockCarga> = [
       [funcionario({ id: '1', salario: 2200 })],
       [
         lanc({ id: 'a', categoria: 'Adiantamento de salário', valor: 500, data: '2026-06-10' }),
         lanc({ id: 'b', categoria: 'Adiantamento de salário', valor: 900, data: '2026-05-10' }),
       ],
-    )
-    render(<FuncionariosLista />)
-    await screen.findByText('João Pereira')
-    // 'Todo o período' (default): soma os dois
-    expect(valorDaColuna('ADIANTADO')).toBe('R$ 1.400,00')
+    ]
 
-    fireEvent.change(screen.getByLabelText('Período'), { target: { value: '2026-05' } })
+    mockCarga(...dados)
+    const semRecorte = render(<FuncionariosLista periodo="all" />)
+    await screen.findByText('João Pereira')
+    expect(valorDaColuna('ADIANTADO')).toBe('R$ 1.400,00')
+    // O cartao de resumo sai da MESMA base que a coluna — os dois tem de
+    // concordar com o recorte, nao so a tabela.
+    expect(cartao('Adiantado no período')).toHaveTextContent('R$ 1.400,00')
+    semRecorte.unmount()
+
+    mockCarga(...dados)
+    render(<FuncionariosLista periodo="2026-05" />)
+    await screen.findByText('João Pereira')
     expect(valorDaColuna('ADIANTADO')).toBe('R$ 900,00')
     expect(valorDaColuna('A PAGAR')).toBe('R$ 1.300,00')
+    expect(cartao('Adiantado no período')).toHaveTextContent('R$ 900,00')
     expect(cartao('Adiantado no período')).toHaveTextContent('Maio/2026')
   })
 
-  it('so oferece meses que tem lancamento de folha', async () => {
+  it('nao tem mais seletor proprio de periodo', async () => {
+    mockCarga([funcionario({ id: '1' })], [lanc({ id: 'a', data: '2026-06-10', valor: 100 })])
+    render(<FuncionariosLista periodo="all" />)
+    await screen.findByText('João Pereira')
+    expect(screen.queryByLabelText('Período')).not.toBeInTheDocument()
+  })
+
+  it('o CADASTRO nao some num periodo sem folha nenhuma', async () => {
     mockCarga(
       [funcionario({ id: '1' })],
-      [lanc({ id: 'a', data: '2026-06-10', valor: 100 })],
+      [lanc({ id: 'a', categoria: 'Adiantamento de salário', valor: 500, data: '2026-06-10' })],
     )
-    render(<FuncionariosLista />)
-    await screen.findByText('João Pereira')
-    const opcoes = within(screen.getByLabelText('Período')).getAllByRole('option')
-    expect(opcoes.map(o => o.textContent)).toEqual(['Todo o período', 'Junho/2026'])
+    render(<FuncionariosLista periodo="2026-01" />)
+    // O funcionario continua listado, so sem adiantamento no periodo.
+    expect(await screen.findByText('João Pereira')).toBeInTheDocument()
+    expect(valorDaColuna('ADIANTADO')).toBe('R$ 0,00')
   })
 })
 

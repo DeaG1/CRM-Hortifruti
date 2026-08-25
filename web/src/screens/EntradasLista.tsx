@@ -11,6 +11,7 @@ import {
   META_PERDA_MEDIA_PCT,
   type ResumoEntradas,
 } from '../derive/resumoOperacional'
+import { filtrarPorPeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import './EntradasLista.css'
 
 /** Forma de um item de GET /api/entradas (api/src/routes/entradas.ts,
@@ -116,7 +117,7 @@ function Cartao({ label, valor, sub, corValor }: {
  * remover informação honesta para caber no desenho seria o padrão que a
  * auditoria existe para combater.
  */
-function CartoesResumo({ resumo }: { resumo: ResumoEntradas | null }) {
+function CartoesResumo({ resumo, periodo }: { resumo: ResumoEntradas | null; periodo: Periodo }) {
   // O índice divide pelo peso recebido, então herda o mesmo contador de
   // itens não convertíveis do cartão de peso — e com denominador incompleto
   // ele sai PARA CIMA. Marcar só o peso e deixar a % limpa esconderia
@@ -133,7 +134,9 @@ function CartoesResumo({ resumo }: { resumo: ResumoEntradas | null }) {
 
   return (
     <div className="entradas-stats" role="group" aria-label="Resumo das entradas">
-      <Cartao label="ENTRADAS" valor={resumo ? String(resumo.coletas) : TRACO} sub="todas as lançadas" />
+      {/* O sub diz o RECORTE, não "todas as lançadas": com o filtro de
+          período ativo a contagem é das coletas daquele mês. */}
+      <Cartao label="ENTRADAS" valor={resumo ? String(resumo.coletas) : TRACO} sub={rotuloPeriodo(periodo)} />
       <Cartao
         label="PESO RECEBIDO"
         valor={resumo ? marcar(peso(resumo.pesoRecebidoKg)) : TRACO}
@@ -170,11 +173,19 @@ function CartoesResumo({ resumo }: { resumo: ResumoEntradas | null }) {
 type Modal = { modo: 'novo' } | { modo: 'editar'; entrada: EntradaComItens } | null
 
 interface EntradasListaProps {
+  /**
+   * Período global do cabeçalho (App.tsx, achado S-3). Aqui o recorte vale
+   * para a tabela E para os cartões: uma coleta é um evento datado, e "as
+   * entradas de junho" é uma lista, não um subconjunto de um total maior —
+   * é assim no protótipo (`entradasPeriodo`, linha 2158) e é o que o rótulo
+   * dos cartões passa a dizer.
+   */
+  periodo?: Periodo
   /** Sessão expirou (401 da API) — a tela volta ao login em vez de mostrar erro. */
   onSessaoExpirada?: () => void
 }
 
-export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
+export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: EntradasListaProps) {
   const [entradas, setEntradas] = useState<Entrada[]>([])
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([])
   const [carregando, setCarregando] = useState(true)
@@ -301,7 +312,12 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
   // opcional em `EntradaResumo` porque fixtures de teste montam entradas
   // parciais — o `?? 0` torna esse contrato explícito aqui em vez de
   // depender do `|| 0` lá dentro.
-  const paraResumo: EntradaResumo[] = entradas.map(e => ({
+  // Recorte de período aplicado uma vez, aqui: tudo abaixo (cartões, tabela,
+  // estado vazio) enxerga só as coletas do período escolhido. A busca continua
+  // trazendo a base inteira — trocar o período no cabeçalho não vai ao servidor.
+  const entradasPeriodo = filtrarPorPeriodo(entradas, periodo, e => e.data)
+
+  const paraResumo: EntradaResumo[] = entradasPeriodo.map(e => ({
     numero: e.numero,
     fornecedor_id: e.fornecedor_id,
     data: e.data,
@@ -331,7 +347,8 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
     <div className="entradas-lista">
       <div className="entradas-topo">
         <div className="entradas-topo-legenda">
-          Coletas e compras dos fornecedores · clique numa entrada para editar
+          Coletas e compras dos fornecedores · clique numa entrada para editar ·{' '}
+          <strong>{rotuloPeriodo(periodo)}</strong>
         </div>
         <button type="button" className="entradas-botao-novo" onClick={abrirNovo}>
           <span className="entradas-botao-novo-icone">＋</span> Nova entrada
@@ -347,7 +364,7 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
         </p>
       )}
 
-      {entradas.length > 0 && <CartoesResumo resumo={resumo} />}
+      {entradasPeriodo.length > 0 && <CartoesResumo resumo={resumo} periodo={periodo} />}
 
       {confirmando && (
         <div className="entradas-confirma" role="region" aria-label="Confirmar exclusão">
@@ -384,6 +401,21 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
             </button>
           </div>
         )
+        /* Há entradas cadastradas, só nenhuma NESTE período — dizer "nenhuma
+           entrada lançada" aqui seria mentira, e mandar lançar a primeira
+           entrada mandaria o usuário duplicar coletas que já existem. */
+        : entradasPeriodo.length === 0
+        ? (
+          <div className="estado-vazio entradas-vazio">
+            <div className="entradas-vazio-titulo">
+              Nenhuma entrada em {rotuloPeriodo(periodo)}
+            </div>
+            <div className="entradas-vazio-sub">
+              Há {entradas.length} entrada(s) lançada(s) em outros períodos. Troque o período no cabeçalho
+              para vê-las.
+            </div>
+          </div>
+        )
         : (
           <div className="entradas-tabela">
             <div className="entradas-linha entradas-linha--cabecalho">
@@ -397,7 +429,7 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
               <div className="entradas-col-num">AÇÃO</div>
             </div>
 
-            {entradas.map(e => (
+            {entradasPeriodo.map(e => (
               <div
                 key={e.id}
                 className="entradas-linha entradas-linha--dados"

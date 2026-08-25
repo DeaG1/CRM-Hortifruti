@@ -5,6 +5,7 @@ import { diasRecebimentoSaida } from '../derive/financeiro'
 import { situacaoExibidaSaida, type SituacaoPagamentoEscolhivel } from '../derive/pagamento'
 import type { SaidaResumo } from '../derive/relatorios'
 import { derivarResumoSaidas, type ResumoSaidas } from '../derive/resumoOperacional'
+import { filtrarPorPeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import { ModalSaida, type Saida, type StatusSaida, type PagSaida } from '../components/ModalSaida'
 import { SeletorPagamento } from '../components/SeletorPagamento'
 import './SaidasLista.css'
@@ -115,7 +116,7 @@ function Cartao({ label, valor, sub, corSub }: {
  * minimercados me devem" não aparecia em nenhuma tela de rotina, só em
  * Relatórios ▸ Inadimplentes, que é tela de análise.
  */
-function CartoesResumo({ resumo }: { resumo: ResumoSaidas | null }) {
+function CartoesResumo({ resumo, periodo }: { resumo: ResumoSaidas | null; periodo: Periodo }) {
   const entregues = resumo
     ? `${resumo.pedidosEntregues} ${resumo.pedidosEntregues === 1 ? 'pedido entregue' : 'pedidos entregues'}`
     : TRACO
@@ -135,7 +136,10 @@ function CartoesResumo({ resumo }: { resumo: ResumoSaidas | null }) {
 
   return (
     <div className="saidas-stats" role="group" aria-label="Resumo das saídas">
-      <Cartao label="PEDIDOS" valor={resumo ? String(resumo.pedidos) : TRACO} sub="todos os lançados" />
+      {/* O sub diz o RECORTE, não "todos os lançados": com o filtro de
+          período ativo a contagem é dos pedidos daquele mês, e o texto
+          antigo prometeria a base inteira. */}
+      <Cartao label="PEDIDOS" valor={resumo ? String(resumo.pedidos) : TRACO} sub={rotuloPeriodo(periodo)} />
       <Cartao
         label="FATURADO (ENTREGUE)"
         valor={resumo ? money(resumo.faturadoEntregue) : TRACO}
@@ -182,10 +186,18 @@ function hojeIsoLocal(): string {
 }
 
 interface SaidasListaProps {
+  /**
+   * Período global do cabeçalho (App.tsx, achado S-3), recortado pela data de
+   * ENTREGA — a mesma data que a receita usa em Financeiro e no Dashboard, e
+   * a mesma do protótipo (`pedidosPeriodo`, linha 2158). Vale para a tabela e
+   * para os cartões: "quanto os minimercados me devem" continua sendo a
+   * pergunta, agora dentro do recorte escolhido.
+   */
+  periodo?: Periodo
   onSessaoExpirada: () => void
 }
 
-export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
+export function SaidasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: SaidasListaProps) {
   const [saidas, setSaidas] = useState<Saida[]>([])
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [carregando, setCarregando] = useState(true)
@@ -313,17 +325,24 @@ export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
   // atrasadas (Pendente + vencimento vencido), e filtrar por "Pendente"
   // incluiria saidas que a tabela mostra como Atrasado — os dois
   // discordando na mesma tela.
-  const visiveis = saidas.filter(s =>
+  // O período do cabeçalho é o PRIMEIRO recorte: ele define a base sobre a
+  // qual tudo o mais desta tela fala (cartões, contadores dos chips, tabela).
+  // Os filtros de status/pagamento vêm depois e valem só para a tabela.
+  const saidasPeriodo = filtrarPorPeriodo(saidas, periodo, s => s.entrega)
+
+  const visiveis = saidasPeriodo.filter(s =>
     (filtroStatus === 'Todos' || s.status === filtroStatus)
     && (filtroPag === 'Todos' || situacaoExibidaSaida(s.pag, s.venc, hojeIso) === filtroPag),
   )
 
   const contagemStatus = (f: FiltroStatus) =>
-    f === 'Todos' ? saidas.length : saidas.filter(s => s.status === f).length
+    f === 'Todos' ? saidasPeriodo.length : saidasPeriodo.filter(s => s.status === f).length
   const contagemPag = (f: FiltroPag) =>
-    f === 'Todos' ? saidas.length : saidas.filter(s => situacaoExibidaSaida(s.pag, s.venc, hojeIso) === f).length
+    f === 'Todos'
+      ? saidasPeriodo.length
+      : saidasPeriodo.filter(s => situacaoExibidaSaida(s.pag, s.venc, hojeIso) === f).length
 
-  // Os cartões somam a BASE INTEIRA, nunca `visiveis`: "quanto os
+  // Os cartões somam TODAS as saídas do período, nunca `visiveis`: "quanto os
   // minimercados me devem" tem que responder pela carteira toda. Se
   // seguissem os filtros, filtrar por "Pago" zeraria o cartão de "A receber"
   // e a tela responderia outra pergunta com o mesmo rótulo. A nota logo
@@ -333,7 +352,7 @@ export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
   // `valor`/`peso` são opcionais em `Saida` (GET /:id não traz agregado) e
   // obrigatórios em `SaidaResumo`; a listagem sempre os manda, mas o `?? 0`
   // deixa o contrato explícito em vez de confiar num campo opcional.
-  const paraResumo: SaidaResumo[] = saidas.map(s => ({
+  const paraResumo: SaidaResumo[] = saidasPeriodo.map(s => ({
     numero: s.numero,
     cliente_id: s.cliente_id,
     rota: s.rota,
@@ -377,10 +396,11 @@ export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
         </p>
       )}
 
-      <CartoesResumo resumo={resumo} />
+      <CartoesResumo resumo={resumo} periodo={periodo} />
 
       <div className="saidas-resumo-nota">
-        Os cartões somam <strong>todas as saídas lançadas</strong>; os filtros abaixo valem só para a tabela.
+        Os cartões somam <strong>todas as saídas de {rotuloPeriodo(periodo)}</strong>; os filtros abaixo
+        valem só para a tabela.
       </div>
 
       <div className="saidas-filtros" role="group" aria-label="Filtrar por status">
@@ -476,7 +496,16 @@ export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
           )
         })}
 
-        {visiveis.length === 0 && (
+        {/* Duas ausências diferentes, duas frases diferentes: "nenhuma no
+            período" manda trocar o período no cabeçalho; "nenhuma com estes
+            filtros" manda mexer nos chips daqui. Uma frase só para os dois
+            casos faria o usuário procurar no lugar errado. */}
+        {visiveis.length === 0 && saidasPeriodo.length === 0 && (
+          <div className="saidas-sem-filtro">
+            Nenhuma saída em {rotuloPeriodo(periodo)} — há {saidas.length} lançada(s) em outros períodos.
+          </div>
+        )}
+        {visiveis.length === 0 && saidasPeriodo.length > 0 && (
           <div className="saidas-sem-filtro">Nenhuma saída com estes filtros.</div>
         )}
       </div>

@@ -3,6 +3,7 @@ import { api, ErroApi } from '../api/client'
 import { type Produto } from '../derive/produtos'
 import { derivarRelatorioProdutos, type ProdutoAgregado } from '../derive/relatorios'
 import { ModalProduto } from '../components/ModalProduto'
+import { queryDePeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import './ProdutosLista.css'
 
 const NEUTRO = '#9a9784'
@@ -54,6 +55,15 @@ function NumIncompleto({ texto, n }: { texto: string; n: number }) {
 }
 
 interface ProdutosListaProps {
+  /**
+   * Período global do cabeçalho (App.tsx, achado S-3). O CADASTRO não some
+   * com ele: um produto não deixa de existir porque não foi comprado nem
+   * vendido em julho. O que respeita o recorte são as cinco métricas
+   * derivadas (compra média, venda média, markup, margem, perda), que vêm do
+   * agregado em SQL — produto sem movimento no período aparece na lista com
+   * travessão em todas elas, que é a resposta certa.
+   */
+  periodo?: Periodo
   onSessaoExpirada: () => void
 }
 
@@ -63,7 +73,7 @@ interface ProdutosListaProps {
  * ficha — a tela cuida do próprio modal (criar/editar/excluir) e refaz o
  * fetch depois de salvar, incrementando `versao`.
  */
-export function ProdutosLista({ onSessaoExpirada }: ProdutosListaProps) {
+export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: ProdutosListaProps) {
   const [produtos, setProdutos] = useState<Produto[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
@@ -104,9 +114,13 @@ export function ProdutosLista({ onSessaoExpirada }: ProdutosListaProps) {
     return () => { cancelado = true }
   }, [onSessaoExpirada, versao])
 
+  // Refeito a cada troca de período: o agregado já sai filtrado do servidor
+  // (?de=&ate=), mesma rota e mesmo recorte que RelatoriosTela e o Dashboard
+  // usam — as três telas mostram o mesmo número para o mesmo mês.
   useEffect(() => {
     let cancelado = false
-    api.get<ProdutoAgregado[]>('/api/relatorios/produtos')
+    setErroMetricas('')
+    api.get<ProdutoAgregado[]>(`/api/relatorios/produtos${queryDePeriodo(periodo)}`)
       .then(rs => { if (!cancelado) setAgregados(rs) })
       .catch((err: unknown) => {
         if (cancelado) return
@@ -117,7 +131,7 @@ export function ProdutosLista({ onSessaoExpirada }: ProdutosListaProps) {
         setErroMetricas('Não foi possível carregar as métricas de compra e venda — as colunas ficam indisponíveis.')
       })
     return () => { cancelado = true }
-  }, [onSessaoExpirada])
+  }, [periodo, onSessaoExpirada])
 
   function aoSalvar() {
     setModal(undefined)
@@ -180,7 +194,8 @@ export function ProdutosLista({ onSessaoExpirada }: ProdutosListaProps) {
               médio da embalagem e as cinco métricas são por QUILO, para
               qualquer produto — o que também as torna comparáveis entre si. */}
           Clique num produto para editar · preços são <strong>por quilo</strong> (caixas convertidas pelo
-          peso médio do produto), calculados das compras e vendas
+          peso médio do produto), calculados das compras e vendas de{' '}
+          <strong>{rotuloPeriodo(periodo)}</strong> · o cadastro aparece inteiro, independente do período
         </div>
         <button type="button" className="produtos-botao-novo" onClick={() => setModal(null)}>
           ＋ Novo produto

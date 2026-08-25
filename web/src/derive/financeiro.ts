@@ -1,4 +1,5 @@
 import type { Lancamento } from './lancamentos'
+import { filtrarPorPeriodo as noPeriodo } from './periodo'
 
 // Molde: derive/clientes.ts — funções puras, testadas isoladamente, sem
 // React/fetch/formatação. Financeiro não guarda dado próprio (comentário em
@@ -89,43 +90,19 @@ export interface CicloCaixa {
 
 /* ============================== período ============================== */
 
+/**
+ * A convenção de período agora mora em derive/periodo.ts — ela deixou de ser
+ * "a do financeiro" e passou a ser a do sistema inteiro quando o seletor
+ * subiu para o cabeçalho global (achado S-3 da auditoria). Reexportadas aqui
+ * porque estas duas funções nasceram neste módulo e vários pontos já as
+ * importam daqui; a definição, e o porquê de cada regra, estão lá.
+ */
+export { periodoDe, rotuloPeriodo } from './periodo'
+
+/** Data ISO completa ('AAAA-MM-DD…'). Usada só pelas contas de DIAS deste
+ * módulo (`diasEntreDatas`, `diasDoPeriodo`), que precisam do dia — não do
+ * mês, que é o que a convenção de período usa. */
 const DATA_RE = /^\d{4}-\d{2}-\d{2}/
-
-/**
- * 'AAAA-MM' de uma data ISO. Diferente de `mesDe()` em derive/clientes.ts
- * (que devolve só 'MM', 2 dígitos, e por isso confunde o mesmo mês em anos
- * diferentes): o financeiro soma dinheiro real, e juntar junho/2025 com
- * junho/2026 num mesmo "período" produziria um resultado errado sem nenhum
- * aviso — o tipo de erro silencioso que este módulo existe para evitar.
- * Vazio ou inválido devolve ''.
- */
-export function periodoDe(iso: string | null | undefined): string {
-  return typeof iso === 'string' && DATA_RE.test(iso) ? iso.slice(0, 7) : ''
-}
-
-const MESES = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
-]
-
-/**
- * 'AAAA-MM' -> 'Junho/2026'. 'all' -> 'Todo o período'. Mora aqui, junto de
- * `periodoDe`, porque é o rótulo DAQUELA convenção de período: quem escreve
- * um seletor de período novo (FinanceiroTela, FuncionariosLista) usa os
- * dois juntos, e duas cópias do rótulo dariam duas grafias do mesmo mês em
- * telas vizinhas.
- */
-export function rotuloPeriodo(periodo: string): string {
-  if (periodo === 'all') return 'Todo o período'
-  const [ano, mes] = periodo.split('-')
-  const nome = MESES[Number(mes) - 1] ?? mes
-  return `${nome}/${ano}`
-}
-
-function noPeriodo<T>(itens: T[], periodo: string, dataDe: (item: T) => string | null): T[] {
-  if (periodo === 'all') return itens
-  return itens.filter(item => periodoDe(dataDe(item)) === periodo)
-}
 
 /* ============================ resultado ============================ */
 

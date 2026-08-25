@@ -604,3 +604,71 @@ describe('SaidasLista — coluna RECEB.', () => {
     expect(screen.queryByText(/^\d+ d$/)).not.toBeInTheDocument()
   })
 })
+
+// ================================= periodo global (achado S-3 da auditoria)
+
+describe('SaidasLista — periodo global', () => {
+  it('a tabela mostra so os pedidos entregues no periodo escolhido', async () => {
+    mockGetPadrao([
+      saida({ id: '1', numero: 'S-0001', entrega: '2026-08-05' }),
+      saida({ id: '2', numero: 'S-0002', entrega: '2026-07-05' }),
+    ], [clienteA])
+    render(<SaidasLista periodo="2026-08" onSessaoExpirada={() => {}} />)
+    expect(await screen.findByText('S-0001')).toBeInTheDocument()
+    expect(screen.queryByText('S-0002')).not.toBeInTheDocument()
+  })
+
+  it('sem periodo (padrao "all") mostra os dois', async () => {
+    mockGetPadrao([
+      saida({ id: '1', numero: 'S-0001', entrega: '2026-08-05' }),
+      saida({ id: '2', numero: 'S-0002', entrega: '2026-07-05' }),
+    ], [clienteA])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    expect(await screen.findByText('S-0001')).toBeInTheDocument()
+    expect(screen.getByText('S-0002')).toBeInTheDocument()
+  })
+
+  it('os cartoes somam so o periodo', async () => {
+    mockGetPadrao([
+      saida({ id: '1', numero: 'S-0001', entrega: '2026-08-05', status: 'Entregue', pag: 'Pago', valor: 100 }),
+      saida({ id: '2', numero: 'S-0002', entrega: '2026-07-05', status: 'Entregue', pag: 'Pago', valor: 9000 }),
+    ], [clienteA])
+    render(<SaidasLista periodo="2026-08" onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+    expect(cartao('PEDIDOS')).toHaveTextContent('1')
+    expect(cartao('PEDIDOS')).toHaveTextContent('Agosto/2026')
+    expect(cartao('FATURADO (ENTREGUE)')).toHaveTextContent('R$ 100')
+  })
+
+  it('os contadores dos chips tambem contam so o periodo', async () => {
+    mockGetPadrao([
+      saida({ id: '1', numero: 'S-0001', entrega: '2026-08-05', status: 'Entregue' }),
+      saida({ id: '2', numero: 'S-0002', entrega: '2026-07-05', status: 'Entregue' }),
+    ], [clienteA])
+    render(<SaidasLista periodo="2026-08" onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+    expect(botaoFiltro('Filtrar por status', 'Todos')).toHaveTextContent('1')
+  })
+
+  it('periodo sem venda nenhuma manda trocar o PERIODO, nao os filtros', async () => {
+    mockGetPadrao([saida({ id: '1', numero: 'S-0001', entrega: '2026-08-05' })], [clienteA])
+    render(<SaidasLista periodo="2026-01" onSessaoExpirada={() => {}} />)
+    expect(await screen.findByText(/nenhuma saída em janeiro\/2026/i)).toBeInTheDocument()
+    expect(screen.queryByText('Nenhuma saída com estes filtros.')).not.toBeInTheDocument()
+    // Base nao vazia: o estado vazio de "lance a primeira" nao aparece.
+    expect(screen.queryByRole('button', { name: /lançar primeira saída/i })).not.toBeInTheDocument()
+  })
+
+  it('base realmente vazia continua com o estado vazio de sempre', async () => {
+    mockGetPadrao([], [clienteA])
+    render(<SaidasLista periodo="2026-08" onSessaoExpirada={() => {}} />)
+    expect(await screen.findByText(/nenhuma saída lançada ainda/i)).toBeInTheDocument()
+  })
+
+  it('a nota dos cartoes diz qual recorte esta valendo', async () => {
+    mockGetPadrao([saida({ entrega: '2026-08-05' })], [clienteA])
+    render(<SaidasLista periodo="2026-08" onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+    expect(screen.getByText(/os filtros abaixo/i)).toHaveTextContent('Agosto/2026')
+  })
+})

@@ -3,13 +3,12 @@ import { api, ErroApi } from '../api/client'
 import {
   calcularResultado,
   calcularCicloCaixa,
-  periodoDe,
-  rotuloPeriodo,
   type SaidaFin,
   type EntradaFin,
   type Resultado,
   type CicloCaixa,
 } from '../derive/financeiro'
+import { rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import { METAS_DASHBOARD, statusCicloDeCaixa } from '../derive/dashboard'
 import type { Health } from '../derive/clientes'
 import type { Lancamento } from '../derive/lancamentos'
@@ -37,31 +36,31 @@ const CORES_SEMAFORO: Record<Health, string> = { green: GREEN, amber: AMBER, red
 
 const money = (n: number) => 'R$ ' + Math.round(n).toLocaleString('pt-BR')
 
-/** Meses (AAAA-MM) com pelo menos um dado (venda, compra ou lançamento),
- * mais recente primeiro — só oferece no seletor um período que existe. */
-function periodosDisponiveis(saidas: SaidaFin[], entradas: EntradaFin[], lancamentos: Lancamento[]): string[] {
-  const vistos = new Set<string>()
-  for (const s of saidas) { const p = periodoDe(s.entrega); if (p) vistos.add(p) }
-  for (const e of entradas) { const p = periodoDe(e.data); if (p) vistos.add(p) }
-  for (const l of lancamentos) { const p = periodoDe(l.data); if (p) vistos.add(p) }
-  return [...vistos].sort().reverse()
-}
-
 /** dias ou travessão — nunca "0" fabricado para um componente não calculável. */
 function diasTxt(n: number | null): string {
   return n === null ? '—' : `${n}${n === 1 ? ' dia' : ' dias'}`
 }
 
 interface FinanceiroTelaProps {
+  /**
+   * Período global do cabeçalho (App.tsx, achado S-3). ESTA TELA PERDEU O
+   * SELETOR PRÓPRIO: ele fazia exatamente o mesmo recorte, na mesma
+   * convenção ('all' | 'AAAA-MM'), e conviver com o global significaria dois
+   * controles de período visíveis ao mesmo tempo podendo discordar — o
+   * resultado do mês no cartão e o do cabeçalho apontando meses diferentes é
+   * pior do que não ter filtro nenhum. O rótulo do período continua impresso
+   * em "Resultado — Junho/2026" e no destaque de lucro, então o recorte
+   * segue visível na tela, só não é mais escolhido aqui.
+   */
+  periodo?: Periodo
   /** Sessão expirou (401 da API) — a tela volta ao login em vez de mostrar erro. */
   onSessaoExpirada: () => void
 }
 
-export function FinanceiroTela({ onSessaoExpirada }: FinanceiroTelaProps) {
+export function FinanceiroTela({ periodo = PERIODO_TODOS, onSessaoExpirada }: FinanceiroTelaProps) {
   const [saidas, setSaidas] = useState<SaidaFin[]>([])
   const [entradas, setEntradas] = useState<EntradaFin[]>([])
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
-  const [periodo, setPeriodo] = useState('all')
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
 
@@ -105,25 +104,12 @@ export function FinanceiroTela({ onSessaoExpirada }: FinanceiroTelaProps) {
     )
   }
 
-  const periodos = periodosDisponiveis(saidas, entradas, lancamentos)
   const resultado = calcularResultado(saidas, entradas, lancamentos, periodo)
   const ciclo = calcularCicloCaixa(entradas, saidas, periodo)
   const label = rotuloPeriodo(periodo)
 
   return (
     <div className="financeiro-tela">
-      <div className="financeiro-periodo">
-        <label className="financeiro-periodo-rotulo" htmlFor="financeiro-periodo-select">Período</label>
-        <select
-          id="financeiro-periodo-select"
-          className="financeiro-periodo-select"
-          value={periodo}
-          onChange={e => setPeriodo(e.target.value)}
-        >
-          <option value="all">Todo o período</option>
-          {periodos.map(p => <option key={p} value={p}>{rotuloPeriodo(p)}</option>)}
-        </select>
-      </div>
 
       <div className="financeiro-grid">
         <ResultadoCard resultado={resultado} label={label} />
@@ -135,7 +121,11 @@ export function FinanceiroTela({ onSessaoExpirada }: FinanceiroTelaProps) {
 
       <div className="financeiro-lancamentos">
         <h3 className="financeiro-secao-titulo">Lançamentos</h3>
-        <LancamentosLista onSessaoExpirada={onSessaoExpirada} />
+        {/* O período global ALIMENTA o De/Até da lista embutida: ela abre no
+            mesmo mês do resultado acima, e o De/Até continua lá para quem
+            quiser um intervalo mais largo ou mais estreito (ver
+            LancamentosLista.tsx). */}
+        <LancamentosLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
       </div>
     </div>
   )

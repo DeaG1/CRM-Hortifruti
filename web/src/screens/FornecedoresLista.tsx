@@ -7,6 +7,7 @@ import {
 import { type Produto } from '../derive/produtos'
 import { type EntradaResumo } from '../derive/relatorios'
 import { ModalFornecedor } from '../components/ModalFornecedor'
+import { intervaloDoPeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import './FornecedoresLista.css'
 
 const GREEN = '#3f8f5b'
@@ -33,8 +34,8 @@ function dataBr(iso: string | null): string {
   return `${dia}/${mes}`
 }
 
-/** 'AAAA-MM-DD' -> 'DD/MM/AAAA', só para o `title` da última coleta: esta
- * tela não tem seletor de período e soma a base inteira, então "12/03" sozinho
+/** 'AAAA-MM-DD' -> 'DD/MM/AAAA', só para o `title` da última coleta: com o
+ * período em "Todo o período" a tela soma a base inteira, e "12/03" sozinho
  * não diz de qual ano é a última coleta de um fornecedor parado há um ano. */
 function dataBrCompleta(iso: string | null): string {
   if (!iso || iso.length < 10) return '—'
@@ -108,7 +109,7 @@ function NumIncompleto({ texto, n }: { texto: string; n: number }) {
  * ("0,0%") diria que o preço não mudou — uma medição que ninguém fez.
  */
 function motivoSemVariacao(m: MetricasFornecedor): string {
-  if (m.coletas === 0) return 'Nenhuma coleta registrada para este fornecedor.'
+  if (m.coletas === 0) return 'Nenhuma coleta deste fornecedor no período escolhido.'
   if (m.coletas === 1) {
     return 'Variação compara o preço da última coleta com o da anterior — este fornecedor tem '
       + 'só 1 coleta registrada. Aparece a partir da segunda.'
@@ -122,6 +123,15 @@ const METRICAS_SEM_ENTRADAS: MetricasFornecedor = {
 }
 
 interface FornecedoresListaProps {
+  /**
+   * Período global do cabeçalho (App.tsx, achado S-3). O CADASTRO não some
+   * com ele — um fornecedor não deixa de existir porque não houve coleta em
+   * julho. O que respeita o recorte são as quatro métricas derivadas (última
+   * coleta, preço médio, variação, aproveitamento) e o cartão de resumo:
+   * fornecedor sem coleta no período fica na lista com travessão nas quatro,
+   * e `motivoSemVariacao` já explica cada caso.
+   */
+  periodo?: Periodo
   onSessaoExpirada: () => void
 }
 
@@ -132,7 +142,7 @@ interface FornecedoresListaProps {
  * detalhe de cada fornecedor em paralelo para poder mostrar "produtos que
  * entrega" na tabela sem uma segunda tela.
  */
-export function FornecedoresLista({ onSessaoExpirada }: FornecedoresListaProps) {
+export function FornecedoresLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: FornecedoresListaProps) {
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([])
   const [produtosDisponiveis, setProdutosDisponiveis] = useState<Produto[]>([])
   const [carregando, setCarregando] = useState(true)
@@ -152,9 +162,9 @@ export function FornecedoresLista({ onSessaoExpirada }: FornecedoresListaProps) 
   // api/src/routes/entradas.ts), enquanto Fornecedores é tela admin-only —
   // quem enxerga esta tela já pode ler as entradas, nada foi afrouxado.
   //
-  // Sem filtro de período na chamada porque esta tela não tem seletor de
-  // período (soma a base inteira, igual a ClientesLista) — `derivarFornecedores`
-  // recebe o período por parâmetro e aceita vazio.
+  // A busca traz a base inteira e o recorte é aplicado em memória por
+  // `derivarFornecedores` (que já recebia de/ate por parâmetro): trocar o
+  // período no cabeçalho não dispara uma ida ao servidor.
   const [entradas, setEntradas] = useState<EntradaResumo[]>([])
   const [erroEntradas, setErroEntradas] = useState('')
 
@@ -253,7 +263,12 @@ export function FornecedoresLista({ onSessaoExpirada }: FornecedoresListaProps) 
   // Reusa derivarRelatorioCompras por dentro (ver derive/fornecedores.ts): o
   // preço médio e o aproveitamento aqui são os MESMOS números da aba Compras
   // de Relatórios, não uma segunda conta com o mesmo nome.
-  const { porFornecedor, resumo } = derivarFornecedores(fornecedores, entradas)
+  // O período global vira o intervalo De/Até que `derivarFornecedores` (e
+  // `derivarRelatorioCompras` por dentro dela) já entendia — um mês civil é o
+  // intervalo fechado [mês, mês]. Os fornecedores entram INTEIROS: quem não
+  // teve coleta no período continua na lista, só sem métricas.
+  const { de, ate } = intervaloDoPeriodo(periodo)
+  const { porFornecedor, resumo } = derivarFornecedores(fornecedores, entradas, de, ate)
 
   // Sub do cartão de resumo: o texto do protótipo ('última compra vs.
   // anterior · ±7% CEASA') só é verdade quando existe alguma variação
@@ -263,7 +278,7 @@ export function FornecedoresLista({ onSessaoExpirada }: FornecedoresListaProps) 
   const subResumo = erroEntradas
     ? 'Coletas indisponíveis'
     : resumo.coletasNoPeriodo === 0
-      ? 'Nenhuma coleta registrada ainda'
+      ? `Nenhuma coleta registrada em ${rotuloPeriodo(periodo).toLowerCase()}`
       : resumo.variacaoMediaPct == null
         ? 'Nenhum fornecedor com duas coletas para comparar'
         : `última compra vs. anterior · ±${VARIACAO_ALERTA_PCT}% CEASA · `
@@ -274,7 +289,8 @@ export function FornecedoresLista({ onSessaoExpirada }: FornecedoresListaProps) 
       <div className="fornecedores-topo">
         <div className="fornecedores-dica">
           Clique num fornecedor para editar · preço, variação e aproveitamento vêm das{' '}
-          <strong>coletas lançadas em Entradas</strong>
+          <strong>coletas lançadas em Entradas</strong> em{' '}
+          <strong>{rotuloPeriodo(periodo)}</strong> · o cadastro aparece inteiro, independente do período
         </div>
         <button type="button" className="fornecedores-botao-novo" onClick={() => setModal(null)}>
           ＋ Novo fornecedor

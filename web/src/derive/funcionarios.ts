@@ -1,4 +1,4 @@
-import { periodoDe } from './financeiro'
+import { periodoDe } from './periodo'
 import { CATEGORIA_ADIANTAMENTO, CATEGORIA_SALARIO, type Lancamento } from './lancamentos'
 
 /** Funcionario como a API devolve (api/src/routes/funcionarios.ts). */
@@ -237,7 +237,8 @@ export function saldoFuncionario(
  * Lançamentos de um funcionário dentro do período, do mais recente pro mais
  * antigo — a mesma lista que alimenta o saldo e o histórico da linha
  * expandida (protótipo: `meus`, linha 2559). `periodo` é 'AAAA-MM' ou 'all',
- * mesma convenção de `periodoDe`/`noPeriodo` em derive/financeiro.ts.
+ * mesma convenção de `periodoDe`/`filtrarPorPeriodo` em derive/periodo.ts,
+ * que agora vale para o sistema inteiro (o período é global).
  */
 export function lancamentosDoFuncionario(
   lancamentos: LancamentoParaFuncionario[],
@@ -251,22 +252,15 @@ export function lancamentosDoFuncionario(
     .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
 }
 
-/**
- * Meses (AAAA-MM) que têm pelo menos um lançamento vinculado a algum
- * funcionário, mais recente primeiro — as opções do seletor de período desta
- * tela. Mesmo critério de `periodosDisponiveis` em FinanceiroTela.tsx (só
- * oferece período que existe); aqui a fonte é só a folha, porque é só ela
- * que muda alguma coisa nesta tela.
- */
-export function periodosComFolha(lancamentos: LancamentoParaFuncionario[]): string[] {
-  const vistos = new Set<string>()
-  for (const l of lancamentos) {
-    if (!String(l.funcionario_id ?? '')) continue
-    const p = periodoDe(l.data)
-    if (p) vistos.add(p)
-  }
-  return [...vistos].sort().reverse()
-}
+// REMOVIDA: `periodosComFolha`, que montava as opções do seletor de período
+// PRÓPRIO desta tela. O seletor deixou de existir quando o período subiu para
+// o cabeçalho global (achado S-3), e a função ficou sem chamador. Ela não fica
+// aqui "por precaução": a decisão de NÃO derivar as opções dos dados está
+// tomada e documentada em derive/periodo.ts (`opcoesDePeriodo`) — manter o
+// código da alternativa descartada, com um comentário descrevendo uma tela que
+// já não existe, é exatamente o tipo de justificativa que envelhece sozinha e
+// que a auditoria apontou. O irmão dela em FinanceiroTela.tsx
+// (`periodosDisponiveis`) saiu pelo mesmo motivo, na mesma mudança.
 
 const MESES_PT = [
   'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',

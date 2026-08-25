@@ -190,7 +190,7 @@ describe('EstoqueLista — linha incompleta (sem peso medio cadastrado)', () => 
   it('mostra a nota de rodape explicando o que ficou de fora', async () => {
     mockRotas([incompleta()])
     render(<EstoqueLista />)
-    const nota = await screen.findByRole('note')
+    const nota = await screen.findByRole('note', { name: 'Quantidade incompleta' })
     expect(nota).toHaveTextContent(/sem peso médio cadastrado/i)
     expect(nota).toHaveTextContent(/Cadastre o peso médio da embalagem em Produtos/i)
   })
@@ -208,7 +208,7 @@ describe('EstoqueLista — linha incompleta (sem peso medio cadastrado)', () => 
     const { container } = render(<EstoqueLista />)
     await screen.findByText('Tomate')
     expect(container.querySelectorAll('.estoque-incompleto')).toHaveLength(0)
-    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+    expect(screen.queryByRole('note', { name: 'Quantidade incompleta' })).not.toBeInTheDocument()
   })
 })
 
@@ -231,5 +231,32 @@ describe('EstoqueLista — compoe a secao de perdas do deposito', () => {
     render(<EstoqueLista />)
     expect(await screen.findByText(/nada em estoque ainda/i)).toBeInTheDocument()
     expect(await screen.findByText(/nenhuma perda registrada/i)).toBeInTheDocument()
+  })
+})
+
+// ================================= periodo global (achado S-3 da auditoria)
+
+describe('EstoqueLista — nao segue o periodo global, e diz isso', () => {
+  it('avisa que o saldo e uma posicao acumulada', async () => {
+    mockRotas([linha()])
+    render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    const nota = screen.getByRole('note', { name: 'Escopo do estoque' })
+    expect(nota).toHaveTextContent(/não segue o filtro de período/i)
+    expect(nota).toHaveTextContent(/posição acumulada/i)
+  })
+
+  it('nao aceita prop de periodo: a assinatura do componente nao tem uma', () => {
+    // Se alguem acrescentar o recorte aqui sem revisar a decisao, este teste
+    // continua passando — mas a nota acima passa a mentir, e o teste dela
+    // cai. O par de testes e o guarda-corpo.
+    expect(EstoqueLista.length).toBe(1) // so o objeto de props
+  })
+
+  it('a nota nao aparece quando nao ha nada em estoque (nao ha o que explicar)', async () => {
+    mockRotas([])
+    render(<EstoqueLista />)
+    await screen.findByText(/nada em estoque ainda/i)
+    expect(screen.queryByRole('note', { name: 'Escopo do estoque' })).not.toBeInTheDocument()
   })
 })

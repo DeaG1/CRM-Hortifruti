@@ -7,7 +7,6 @@ import {
   parseDataIso,
   saldoFuncionario,
   lancamentosDoFuncionario,
-  periodosComFolha,
   descricaoSalario,
   estatisticasFuncionarios,
   type Funcionario,
@@ -271,23 +270,6 @@ describe('lancamentosDoFuncionario', () => {
 
   it('funcionário sem nenhum lançamento devolve lista vazia (não quebra)', () => {
     expect(lancamentosDoFuncionario(todos, '99')).toEqual([])
-  })
-})
-
-describe('periodosComFolha', () => {
-  it('lista os meses com lançamento de funcionário, mais recente primeiro, sem repetir', () => {
-    // De proposito fora de ordem na entrada (abril primeiro): o resultado
-    // esperado nao pode ser so a ordem de chegada.
-    const ls = [
-      lanc({ id: 'c', data: '2026-04-10', funcionario_id: '1' }),
-      lanc({ id: 'a', data: '2026-06-03', funcionario_id: '1' }),
-      lanc({ id: 'b', data: '2026-06-20', funcionario_id: '2' }),
-    ]
-    expect(periodosComFolha(ls)).toEqual(['2026-06', '2026-04'])
-  })
-
-  it('ignora lançamento sem funcionário vinculado', () => {
-    expect(periodosComFolha([lanc({ data: '2026-06-03', funcionario_id: null })])).toEqual([])
   })
 })
 

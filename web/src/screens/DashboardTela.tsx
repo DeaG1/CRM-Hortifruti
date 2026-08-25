@@ -34,6 +34,9 @@ import {
   type Perda,
 } from '../derive/dashboard'
 import type { ProdutoAgregado } from '../derive/relatorios'
+import {
+  filtrarPorPeriodo, queryDePeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo,
+} from '../derive/periodo'
 import './DashboardTela.css'
 
 const CORES: Record<Health, string> = { green: '#3f8f5b', amber: '#c79320', red: '#c2502f' }
@@ -139,11 +142,25 @@ function cartaoDeIndicador(
 }
 
 interface DashboardTelaProps {
+  /**
+   * Período global do cabeçalho (App.tsx, achado S-3). Esta tela é a razão
+   * principal do filtro existir: sem recorte, o ticket médio vira média
+   * histórica, a meta é comparada contra o acumulado de todas as épocas e
+   * todo indicador "amolece" conforme a base cresce. O comentário que dizia
+   * "esta tela nunca teve seletor de período" estava errado — o protótipo
+   * (markup 95-101) sempre teve, e o Dashboard sempre respeitou.
+   *
+   * A CARTEIRA DE CLIENTES não é filtrada: "minimercados ativos" é uma
+   * contagem de CADASTRO (quantos clientes estão com status ativo agora),
+   * não um fluxo do mês. Filtrá-la faria o número cair para zero num mês sem
+   * vendas, dizendo que a base de clientes evaporou.
+   */
+  periodo?: Periodo
   /** Sessão expirou (401 da API) — a tela volta ao login em vez de mostrar erro. */
   onSessaoExpirada: () => void
 }
 
-export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
+export function DashboardTela({ periodo = PERIODO_TODOS, onSessaoExpirada }: DashboardTelaProps) {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [saidas, setSaidas] = useState<Saida[]>([])
   const [entradas, setEntradas] = useState<Entrada[]>([])
@@ -161,16 +178,10 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
       api.get<Entrada[]>('/api/entradas'),
       api.get<Lancamento[]>('/api/lancamentos'),
       api.get<Perda[]>('/api/perdas'),
-      // Consolidado por produto (compra/venda/perda) — alimenta markupMedio().
-      // Sem de/ate: esta tela nunca teve seletor de período, sempre opera
-      // sobre a base inteira (mesmo escopo "todas as épocas" dos outros
-      // fetches acima).
-      api.get<ProdutoAgregado[]>('/api/relatorios/produtos'),
     ])
-      .then(([cs, ss, es, ls, ps, pas]) => {
+      .then(([cs, ss, es, ls, ps]) => {
         if (cancelado) return
         setClientes(cs); setSaidas(ss); setEntradas(es); setLancamentos(ls); setPerdas(ps)
-        setProdutosAgregados(pas)
       })
       .catch((err: unknown) => {
         if (cancelado) return
@@ -183,6 +194,28 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
       .finally(() => { if (!cancelado) setCarregando(false) })
     return () => { cancelado = true }
   }, [onSessaoExpirada])
+
+  // Consolidado por produto (compra/venda/perda) — alimenta markupMedio().
+  // Diferente da carga acima, este REFAZ a busca a cada troca de período: o
+  // agregado é somado em SQL e já sai filtrado do servidor (?de=&ate=), do
+  // mesmo jeito que RelatoriosTela e ProdutosLista fazem com o mesmo
+  // endpoint. As outras cinco listas vêm inteiras e são recortadas em
+  // memória logo abaixo — trocar o período no cabeçalho não precisa de cinco
+  // idas ao servidor.
+  useEffect(() => {
+    let cancelado = false
+    api.get<ProdutoAgregado[]>(`/api/relatorios/produtos${queryDePeriodo(periodo)}`)
+      .then(pas => { if (!cancelado) setProdutosAgregados(pas) })
+      .catch((err: unknown) => {
+        if (cancelado) return
+        if (err instanceof ErroApi && err.status === 401) {
+          onSessaoExpirada()
+          return
+        }
+        setErro('Não foi possível carregar os dados do painel.')
+      })
+    return () => { cancelado = true }
+  }, [periodo, onSessaoExpirada])
 
   if (carregando) return <p className="dashboard-estado">Carregando…</p>
   if (erro) return <p className="dashboard-estado dashboard-estado--erro" role="alert">{erro}</p>
@@ -198,26 +231,43 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
     )
   }
 
+  // ---- recorte de período ----
+  // Cada lista é filtrada pela SUA data de referência: a saída pela entrega
+  // (é quando a receita acontece), a entrada e a perda pela data do evento,
+  // o lançamento pela data do custo. `clientes` fica FORA: é cadastro (ver o
+  // comentário da prop `periodo`).
+  const saidasPeriodo = filtrarPorPeriodo(saidas, periodo, s => s.entrega)
+  const entradasPeriodo = filtrarPorPeriodo(entradas, periodo, e => e.data)
+  const lancamentosPeriodo = filtrarPorPeriodo(lancamentos, periodo, l => l.data)
+  const perdasPeriodo = filtrarPorPeriodo(perdas, periodo, p => p.data)
+
   // ---- financeiro base ----
-  const receita = receitaBruta(saidas)
-  const custo = custoTotal(entradas, lancamentos)
+  const receita = receitaBruta(saidasPeriodo)
+  const custo = custoTotal(entradasPeriodo, lancamentosPeriodo)
   const lucro = lucroLiquido(receita, custo)
   const pctLucro = percentualLucro(receita, lucro)
   const nAtivos = clientesAtivos(clientes)
-  const giro = giroDeEstoque(entradas, saidas)
-  const ciclo = cicloDeCaixa(entradas, saidas)
+  // Giro e ciclo recebem as listas INTEIRAS mais o período: os dois medem
+  // DIAS, e o denominador deles é o número de dias do período escolhido
+  // (`diasDoPeriodo` em derive/financeiro.ts). Passar a lista já filtrada com
+  // periodo='all' faria a janela ser medida pelo intervalo entre a primeira e
+  // a última data presentes — um mês com uma venda só teria "1 dia" de
+  // período e o giro sairia absurdo.
+  const giro = giroDeEstoque(entradas, saidas, periodo)
+  const ciclo = cicloDeCaixa(entradas, saidas, periodo)
 
-  const entreguesCount = saidas.filter(s => s.status === 'Entregue').length
+  const entreguesCount = saidasPeriodo.filter(s => s.status === 'Entregue').length
 
   // ---- cartoes do topo ----
   const equilibrioDiff = nAtivos - METAS_DASHBOARD.clientesAtivosEquilibrio
 
   // ---- KPIs (painel de indicadores) ----
-  const perdas1 = indiceDePerdas(entradas, perdas)
+  const perdas1 = indiceDePerdas(entradasPeriodo, perdasPeriodo)
+  // `produtosAgregados` já vem filtrado do servidor (ver o efeito acima).
   const markup = markupMedio(produtosAgregados)
-  const ticketMes = ticketMedioPorMinimercado(saidas)
-  const ticketEntrega = ticketMedioPorEntrega(saidas)
-  const inad = inadimplenciaGeral(saidas, hojeIsoLocal())
+  const ticketMes = ticketMedioPorMinimercado(saidasPeriodo)
+  const ticketEntrega = ticketMedioPorEntrega(saidasPeriodo)
+  const inad = inadimplenciaGeral(saidasPeriodo, hojeIsoLocal())
 
   const kpis: CartaoKpi[] = [
     cartaoDeIndicador('Índice de perdas (%)', perdas1, pct1, '≤ 10%', statusIndiceDePerdas, METAS_DASHBOARD.perdaMetaPct),
@@ -245,7 +295,11 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
   // na nota sem que ninguém precise lembrar de somá-lo aqui.
   const totalSemConversaoKpis = kpis.reduce((s, k) => s + k.semConversao, 0)
 
-  const carteira = concentracaoDeCarteira(clientes, saidas)
+  // Clientes inteiros (cadastro) x saidas do periodo: a concentracao e
+  // quanto do faturamento DO PERIODO veio de cada cliente, e todo cliente
+  // cadastrado e candidato — quem nao vendeu no mes aparece com 0%, nao
+  // desaparece da carteira.
+  const carteira = concentracaoDeCarteira(clientes, saidasPeriodo)
   const cenarios = cenariosDeResultado(receita, custo)
 
   return (
@@ -292,7 +346,9 @@ export function DashboardTela({ onSessaoExpirada }: DashboardTelaProps) {
       <div className="dashboard-kpis">
         <div className="dashboard-kpis-cabecalho">
           <h2 className="dashboard-kpis-titulo">Painel de indicadores</h2>
-          <span className="dashboard-kpis-contagem">{kpis.length} KPIs do estudo · meta vs. realizado</span>
+          <span className="dashboard-kpis-contagem">
+            {kpis.length} KPIs do estudo · meta vs. realizado · {rotuloPeriodo(periodo)}
+          </span>
           <div className="dashboard-kpis-legenda">
             <span className="dashboard-legenda-item"><span className="dashboard-legenda-dot" style={{ background: CORES.green }} />Na meta</span>
             <span className="dashboard-legenda-item"><span className="dashboard-legenda-dot" style={{ background: CORES.amber }} />Atenção</span>

@@ -1,0 +1,35 @@
+/* Badge "SALDO EM CAIXA" do cabeçalho — protótipo linhas 103-108. */
+
+.shell-caixa {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  background: #eef3e6;
+  border: 1px solid #d7e3c6;
+  border-radius: 9px;
+  padding: 6px 14px;
+  flex: 0 0 auto;
+}
+
+.shell-caixa-rotulo {
+  font-size: 10px;
+  color: #6f8560;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.shell-caixa-valor {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+/* Qual fonte caiu, junto do travessão: sem isto o usuário vê um travessão
+   sem causa e não tem o que fazer a respeito. */
+.shell-caixa-aviso {
+  font-size: 10px;
+  color: #a06a4a;
+  white-space: nowrap;
+}

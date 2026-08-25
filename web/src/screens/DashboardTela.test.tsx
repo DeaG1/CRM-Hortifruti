@@ -64,18 +64,21 @@ interface Dados {
   produtosAgregados?: ProdutoAgregado[]
 }
 
-/** api.get e chamado 6x em paralelo (Promise.all) dentro do componente — o
- * mock precisa responder de acordo com a rota pedida, nao com a ordem. */
+/** api.get e chamado 5x em paralelo (Promise.all) mais 1x pelo agregado por
+ * periodo — o mock precisa responder de acordo com a rota pedida, nao com a
+ * ordem. A rota do agregado e casada por PREFIXO porque leva `?de=&ate=`
+ * quando ha periodo escolhido. */
 function mockApiPara(dados: Dados) {
   mockGet.mockImplementation((rota: unknown) => {
-    switch (rota) {
+    const url = String(rota)
+    if (url.startsWith('/api/relatorios/produtos')) return Promise.resolve(dados.produtosAgregados ?? [])
+    switch (url) {
       case '/api/clientes': return Promise.resolve(dados.clientes ?? [])
       case '/api/saidas': return Promise.resolve(dados.saidas ?? [])
       case '/api/entradas': return Promise.resolve(dados.entradas ?? [])
       case '/api/lancamentos': return Promise.resolve(dados.lancamentos ?? [])
       case '/api/perdas': return Promise.resolve(dados.perdas ?? [])
-      case '/api/relatorios/produtos': return Promise.resolve(dados.produtosAgregados ?? [])
-      default: return Promise.reject(new Error('rota inesperada: ' + String(rota)))
+      default: return Promise.reject(new Error('rota inesperada: ' + url))
     }
   })
 }
@@ -124,7 +127,11 @@ describe('DashboardTela — sessao expirada (401)', () => {
     mockGet.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()
     render(<DashboardTela onSessaoExpirada={onSessaoExpirada} />)
-    await vi.waitFor(() => expect(onSessaoExpirada).toHaveBeenCalledOnce())
+    // Duas cargas independentes (as cinco listas + o agregado por periodo,
+    // que refaz a busca a cada troca de mes) — as duas veem o 401 e as duas
+    // reagem. O que importa e que a tela nunca mostra erro generico no lugar
+    // do login, nao quantas vezes o aviso subiu.
+    await vi.waitFor(() => expect(onSessaoExpirada).toHaveBeenCalled())
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
@@ -347,5 +354,101 @@ describe('DashboardTela — concentracao de carteira', () => {
     const titulo = await screen.findByText('Concentração de carteira')
     const secao = titulo.closest('.dashboard-secao') as HTMLElement
     expect(within(secao).getByText(/sem pedidos entregues registrados/i)).toBeInTheDocument()
+  })
+})
+
+// ================================= periodo global (achado S-3 da auditoria)
+
+describe('DashboardTela — periodo global', () => {
+  it('a receita bruta so soma as entregas do periodo escolhido', async () => {
+    mockApiPara({
+      clientes: [cliente()],
+      saidas: [
+        saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+        saida({ id: 's2', entrega: '2026-05-10', valor: 9000 }),
+      ],
+    })
+    render(<DashboardTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    const receita = screen.getByText('Receita bruta').closest('.dashboard-card-topo') as HTMLElement
+    expect(receita).toHaveTextContent('R$ 1.000')
+    expect(receita).toHaveTextContent('1 pedido(s) entregue(s)')
+  })
+
+  it('sem periodo (padrao "all") soma todas as epocas', async () => {
+    mockApiPara({
+      clientes: [cliente()],
+      saidas: [
+        saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+        saida({ id: 's2', entrega: '2026-05-10', valor: 9000 }),
+      ],
+    })
+    render(<DashboardTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    expect(screen.getByText('Receita bruta').closest('.dashboard-card-topo')).toHaveTextContent('R$ 10.000')
+  })
+
+  it('o custo (compras + lancamentos) tambem respeita o recorte', async () => {
+    mockApiPara({
+      clientes: [cliente()],
+      saidas: [saida({ entrega: '2026-06-10', valor: 1000 })],
+      entradas: [
+        entrada({ id: 'e1', data: '2026-06-01', valor_total: 300 }),
+        entrada({ id: 'e2', data: '2026-05-01', valor_total: 5000 }),
+      ],
+      lancamentos: [
+        lancamento({ id: 'l1', data: '2026-06-05', valor: 100 }),
+        lancamento({ id: 'l2', data: '2026-05-05', valor: 4000 }),
+      ],
+    })
+    render(<DashboardTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    // 1000 − (300 + 100) = 600. Com a base inteira daria 1000 − 9300.
+    expect(screen.getByText('Lucro líquido op.').closest('.dashboard-card-topo')).toHaveTextContent('R$ 600')
+  })
+
+  it('o indice de perdas usa entradas e perdas do periodo', async () => {
+    mockApiPara({
+      clientes: [cliente()],
+      entradas: [
+        entrada({ id: 'e1', data: '2026-06-01', peso_total: 1000, perda_kg: 50 }),
+        entrada({ id: 'e2', data: '2026-05-01', peso_total: 1000, perda_kg: 500 }),
+      ],
+    })
+    render(<DashboardTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    expect(cartao('Índice de perdas (%)')).toHaveTextContent('5,0%')
+  })
+
+  it('minimercados ativos NAO some com o filtro: e cadastro, nao fluxo', async () => {
+    mockApiPara({
+      clientes: [cliente({ id: '1' }), cliente({ id: '2', nome: 'Mercado B' })],
+      saidas: [saida({ entrega: '2026-06-10', valor: 1000 })],
+    })
+    render(<DashboardTela periodo="2026-01" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    const ativos = screen.getByText('Minimercados ativos').closest('.dashboard-card-topo') as HTMLElement
+    expect(within(ativos).getByText('2')).toBeInTheDocument()
+  })
+
+  it('busca o agregado de produtos ja filtrado no servidor', async () => {
+    mockApiPara({ clientes: [cliente()], produtosAgregados: [produtoAgregado()] })
+    render(<DashboardTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    expect(mockGet).toHaveBeenCalledWith('/api/relatorios/produtos?de=2026-06&ate=2026-06')
+  })
+
+  it('em "all" o agregado vai sem query nenhuma', async () => {
+    mockApiPara({ clientes: [cliente()] })
+    render(<DashboardTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    expect(mockGet).toHaveBeenCalledWith('/api/relatorios/produtos')
+  })
+
+  it('o painel imprime qual recorte esta valendo', async () => {
+    mockApiPara({ clientes: [cliente()] })
+    render(<DashboardTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    expect(screen.getByText(/KPIs do estudo/)).toHaveTextContent('Junho/2026')
   })
 })

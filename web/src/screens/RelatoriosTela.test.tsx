@@ -719,3 +719,63 @@ describe('RelatoriosTela — CSV das quantidades incompletas', () => {
     expect(texto).not.toContain('*')
   })
 })
+
+// ================================= periodo global (achado S-3 da auditoria)
+// Aqui o periodo global ALIMENTA o De/Ate local, em vez de substitui-lo —
+// ver o comentario da prop `periodo` em RelatoriosTela.tsx.
+
+describe('RelatoriosTela — periodo global alimenta o De/Ate', () => {
+  it('abre com o De/Ate posicionado no mes escolhido no cabecalho', async () => {
+    mockCarga({ '/api/clientes': [cliente()], '/api/saidas': [saida()] })
+    render(<RelatoriosTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    expect(screen.getByLabelText('De')).toHaveValue('2026-06')
+    expect(screen.getByLabelText('Até')).toHaveValue('2026-06')
+    expect(screen.getByText(/filtrado por/i)).toHaveTextContent('jun/2026')
+  })
+
+  it('em "all" o De/Ate abre vazio (sem limite dos dois lados)', async () => {
+    mockCarga({ '/api/clientes': [cliente()], '/api/saidas': [saida()] })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    expect(screen.getByLabelText('De')).toHaveValue('')
+    expect(screen.getByLabelText('Até')).toHaveValue('')
+  })
+
+  it('o De/Ate continua livre para alargar o intervalo depois', async () => {
+    mockCarga({ '/api/clientes': [cliente()], '/api/saidas': [saida()] })
+    render(<RelatoriosTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.change(screen.getByLabelText('De'), { target: { value: '2026-04' } })
+    expect(screen.getByLabelText('De')).toHaveValue('2026-04')
+    // O ajuste manual sobrevive: o periodo do cabecalho nao o desfaz sozinho.
+    expect(screen.getByLabelText('Até')).toHaveValue('2026-06')
+  })
+
+  it('TROCAR o periodo no cabecalho reposiciona o De/Ate ja aberto', async () => {
+    // O caso que o teste de montagem NAO cobre: a tela ja esta aberta com um
+    // recorte e o usuario troca o mes la em cima. Sem a sincronizacao, o
+    // De/Ate ficaria congelado no mes da montagem e o cabecalho diria uma
+    // coisa enquanto o relatorio mostraria outra.
+    mockCarga({ '/api/clientes': [cliente()], '/api/saidas': [saida()] })
+    const tela = render(<RelatoriosTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    expect(screen.getByLabelText('De')).toHaveValue('2026-06')
+
+    tela.rerender(<RelatoriosTela periodo="2026-04" onSessaoExpirada={() => {}} />)
+    expect(screen.getByLabelText('De')).toHaveValue('2026-04')
+    expect(screen.getByLabelText('Até')).toHaveValue('2026-04')
+
+    tela.rerender(<RelatoriosTela periodo="all" onSessaoExpirada={() => {}} />)
+    expect(screen.getByLabelText('De')).toHaveValue('')
+    expect(screen.getByLabelText('Até')).toHaveValue('')
+  })
+
+  it('a busca do agregado de produtos vai com o recorte do cabecalho', async () => {
+    mockCarga({ '/api/clientes': [cliente()], '/api/saidas': [saida()] })
+    render(<RelatoriosTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    await waitFor(() =>
+      expect(mockGet).toHaveBeenCalledWith('/api/relatorios/produtos?de=2026-06&ate=2026-06'))
+  })
+})

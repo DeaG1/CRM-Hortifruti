@@ -19,6 +19,7 @@ import { DashboardTela } from './screens/DashboardTela'
 import { FinanceiroTela } from './screens/FinanceiroTela'
 import { RelatoriosTela } from './screens/RelatoriosTela'
 import type { Cliente } from './derive/clientes'
+import { PERIODO_TODOS, type Periodo } from './derive/periodo'
 import { ADMIN_ONLY_SCREENS, type Papel, type Tela } from './telas'
 
 /** Espelha o corpo de GET /api/eu (api/src/index.ts). */
@@ -76,7 +77,7 @@ type VisaoClientes = 'lista' | 'ficha'
  * fora de ClientesLista/ClienteFicha — os dois ficam sem estado de
  * navegacao entre si, so preocupados com a propria tela.
  */
-function ClientesModulo({ onSessaoExpirada }: { onSessaoExpirada: () => void }) {
+function ClientesModulo({ periodo, onSessaoExpirada }: { periodo: Periodo; onSessaoExpirada: () => void }) {
   const [visao, setVisao] = useState<VisaoClientes>('lista')
   const [clienteId, setClienteId] = useState<string | null>(null)
   // undefined = modal fechado; null = criando; Cliente = editando (prefill)
@@ -119,7 +120,7 @@ function ClientesModulo({ onSessaoExpirada }: { onSessaoExpirada: () => void }) 
                 <span style={{ fontSize: 16, lineHeight: 1 }}>＋</span> Novo cliente
               </button>
             </div>
-            <ClientesLista key={versao} onAbrir={abrirFicha} onSessaoExpirada={onSessaoExpirada} />
+            <ClientesLista key={versao} periodo={periodo} onAbrir={abrirFicha} onSessaoExpirada={onSessaoExpirada} />
           </div>
         )}
 
@@ -139,6 +140,20 @@ function App() {
   const [eu, setEu] = useState<Eu | null>(null)
   const [estado, setEstado] = useState<EstadoSessao>('verificando')
   const [tela, setTela] = useState<Tela | null>(null)
+  /**
+   * PERÍODO GLOBAL (achado S-3 da auditoria). Mora aqui, ao lado de `tela` e
+   * do papel da sessão, pelo mesmo motivo: `App` não desmonta ao trocar de
+   * tela, então o recorte SOBREVIVE à navegação. Trocar de tela e ver o
+   * recorte mudar sozinho é o tipo de coisa que faz o usuário desconfiar do
+   * número.
+   *
+   * Estado de React puro, descendo por prop: é uma string, lida por uma
+   * dúzia de telas e escrita por um controle só (o `<select>` do Shell). Uma
+   * biblioteca de estado global — ou até um Context — aqui só acrescentaria
+   * indireção a um dado que já tem dono claro e caminho curto, e o projeto
+   * inteiro passa dados assim (`papel`, `onSessaoExpirada`).
+   */
+  const [periodo, setPeriodo] = useState<Periodo>(PERIODO_TODOS)
 
   // Ao carregar a pagina (inclui F5), pergunta pra API se o cookie de
   // sessao ainda e valido antes de decidir entre tela de login e app.
@@ -191,8 +206,16 @@ function App() {
     tela && !(ADMIN_ONLY_SCREENS.includes(tela) && eu.papel !== 'admin') ? tela : telaPadrao
 
   return (
-    <Shell papel={eu.papel} telaAtual={telaEfetiva} onNavegar={setTela} onSair={sair}>
-      <Conteudo tela={telaEfetiva} papel={eu.papel} onSessaoExpirada={sair} />
+    <Shell
+      papel={eu.papel}
+      telaAtual={telaEfetiva}
+      periodo={periodo}
+      onPeriodo={setPeriodo}
+      onNavegar={setTela}
+      onSair={sair}
+      onSessaoExpirada={sair}
+    >
+      <Conteudo tela={telaEfetiva} papel={eu.papel} periodo={periodo} onSessaoExpirada={sair} />
     </Shell>
   )
 }
@@ -213,23 +236,33 @@ function App() {
  * simplesmente nao aparecem pro colaborador (ADMIN_ONLY_SCREENS), entao nao
  * precisam saber o papel de quem esta olhando.
  */
-function Conteudo({ tela, papel, onSessaoExpirada }: { tela: Tela; papel: Papel; onSessaoExpirada: () => void }) {
+function Conteudo(
+  { tela, papel, periodo, onSessaoExpirada }:
+  { tela: Tela; papel: Papel; periodo: Periodo; onSessaoExpirada: () => void },
+) {
   switch (tela) {
-    case 'dashboard':     return <DashboardTela onSessaoExpirada={onSessaoExpirada} />
-    case 'relatorios':    return <RelatoriosTela onSessaoExpirada={onSessaoExpirada} />
-    case 'clientes':      return <ClientesModulo onSessaoExpirada={onSessaoExpirada} />
-    case 'produtos':      return <ProdutosLista onSessaoExpirada={onSessaoExpirada} />
-    case 'fornecedores':  return <FornecedoresLista onSessaoExpirada={onSessaoExpirada} />
-    case 'funcionarios':  return <FuncionariosLista onSessaoExpirada={onSessaoExpirada} />
+    case 'dashboard':     return <DashboardTela periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
+    case 'relatorios':    return <RelatoriosTela periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
+    case 'clientes':      return <ClientesModulo periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
+    case 'produtos':      return <ProdutosLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
+    case 'fornecedores':  return <FornecedoresLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
+    case 'funcionarios':  return <FuncionariosLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
+    // Veiculos nao recebe periodo: a tela e o cadastro da frota mais o
+    // estado ATUAL de cada carro (quem esta com ele agora). Nao ha metrica
+    // de fluxo para recortar — "quem pegou o carro em junho" seria um
+    // relatorio de uso que a tela nao tem.
     case 'veiculos':      return <VeiculosLista papel={papel} onSessaoExpirada={onSessaoExpirada} />
-    case 'entradas':      return <EntradasLista onSessaoExpirada={onSessaoExpirada} />
-    case 'pedidos':       return <SaidasLista onSessaoExpirada={onSessaoExpirada} />
+    case 'entradas':      return <EntradasLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
+    case 'pedidos':       return <SaidasLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
     // Lancamentos e a parte de Financeiro que ja existe: a tela completa
     // (resultado, ciclo de caixa) depende de vendas e compras cadastradas.
-    case 'financeiro':    return <FinanceiroTela onSessaoExpirada={onSessaoExpirada} />
+    case 'financeiro':    return <FinanceiroTela periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
     // Estoque nao guarda dado proprio: e o saldo por produto+unidade
     // (entradas - perdas - saidas, GET /api/estoque) mais o registro de
     // perdas do deposito, que vive dentro de Estoque no design.
+    // Estoque nao recebe periodo: o saldo e uma POSICAO acumulada (o que ha
+    // no deposito agora), nao um fluxo do mes — ver o comentario e a nota na
+    // propria tela (EstoqueLista.tsx).
     case 'estoque':       return <EstoqueLista onSessaoExpirada={onSessaoExpirada} />
     default:              return <TelaPlaceholder tela={tela} />
   }

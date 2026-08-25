@@ -202,3 +202,50 @@ describe('FinanceiroTela — ciclo de caixa', () => {
     expect(screen.queryByText(/sem meta definida/i)).not.toBeInTheDocument()
   })
 })
+
+// ================================= periodo global (achado S-3 da auditoria)
+// A tela PERDEU o seletor proprio: o recorte vem do cabecalho, por prop.
+// Ver o comentario da prop `periodo` em FinanceiroTela.tsx.
+
+describe('FinanceiroTela — periodo global', () => {
+  it('nao tem mais seletor proprio de periodo', async () => {
+    mockCarga({ saidas: [saida()] })
+    render(<FinanceiroTela onSessaoExpirada={() => {}} />)
+    await screen.findByText(/Resultado —/)
+    expect(screen.queryByLabelText('Período')).not.toBeInTheDocument()
+  })
+
+  it('o resultado obedece ao periodo recebido', async () => {
+    mockCarga({
+      saidas: [
+        saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+        saida({ id: 's2', entrega: '2026-05-10', valor: 9000 }),
+      ],
+    })
+    render(<FinanceiroTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    expect(await screen.findByText('Resultado — Junho/2026')).toBeInTheDocument()
+    // Receita bruta do cartao de resultado: 1.000 (junho), nunca 10.000.
+    expect(screen.getAllByText('R$ 1.000').length).toBeGreaterThan(0)
+    expect(screen.queryByText('R$ 10.000')).not.toBeInTheDocument()
+  })
+
+  it('sem periodo (padrao "all") soma todas as epocas', async () => {
+    mockCarga({
+      saidas: [
+        saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+        saida({ id: 's2', entrega: '2026-05-10', valor: 9000 }),
+      ],
+    })
+    render(<FinanceiroTela onSessaoExpirada={() => {}} />)
+    expect(await screen.findByText('Resultado — Todo o período')).toBeInTheDocument()
+    expect(screen.getAllByText('R$ 10.000').length).toBeGreaterThan(0)
+  })
+
+  it('alimenta o De/Ate da lista de lancamentos embutida', async () => {
+    mockCarga({ saidas: [saida()], lancamentos: [lancamento()] })
+    render(<FinanceiroTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Resultado — Junho/2026')
+    expect((await screen.findByLabelText('De')) as HTMLInputElement).toHaveValue('2026-06')
+    expect((screen.getByLabelText('Até')) as HTMLInputElement).toHaveValue('2026-06')
+  })
+})

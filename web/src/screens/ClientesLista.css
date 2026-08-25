@@ -198,3 +198,15 @@
   font-size: 13px;
   color: #9a9784;
 }
+
+/* Recorte de período aplicado às colunas derivadas — o cadastro em si
+   continua inteiro (ver ClientesLista.tsx). */
+.clientes-periodo-nota {
+  font-size: 12px;
+  color: #8a8775;
+  margin: 0 0 10px;
+}
+
+.clientes-periodo-nota strong {
+  color: #4a4838;
+}

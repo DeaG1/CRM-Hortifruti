@@ -281,7 +281,7 @@ describe('FornecedoresLista — cartao de resumo "Variacao de preco de compra"',
     })
     render(<FornecedoresLista onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
-    expect(screen.getByText(/Nenhuma coleta registrada ainda/i)).toBeInTheDocument()
+    expect(screen.getByText(/Nenhuma coleta registrada em todo o período/i)).toBeInTheDocument()
   })
 })
 
@@ -414,5 +414,62 @@ describe('FornecedoresLista — recarrega apos salvar/excluir no modal', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     await screen.findByText(/nenhum fornecedor cadastrado/i)
+  })
+})
+
+// ================================= periodo global (achado S-3 da auditoria)
+
+describe('FornecedoresLista — periodo global', () => {
+  const umFornecedor = (entradas: EntradaResumo[]) => configurarGet({
+    lista: [fornecedorBase()],
+    detalhes: { 'f-1': fornecedorBase({ produtos: [] }) },
+    entradas,
+  })
+
+  it('as metricas so contam as coletas do periodo escolhido', async () => {
+    umFornecedor([
+      entradaBase({ numero: 'C-1', data: '2026-06-10', valor_total: 2000, peso_total: 1000 }),
+      entradaBase({ numero: 'C-2', data: '2026-05-10', valor_total: 9000, peso_total: 1000 }),
+    ])
+    render(<FornecedoresLista periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Fazenda Boa Terra')
+    expect(screen.getByText('R$ 2,00')).toBeInTheDocument()
+    expect(screen.queryByText('R$ 9,00')).not.toBeInTheDocument()
+    expect(screen.getByText('10/06')).toBeInTheDocument()
+  })
+
+  it('sem periodo (padrao "all") soma a base inteira', async () => {
+    umFornecedor([
+      entradaBase({ numero: 'C-1', data: '2026-06-10', valor_total: 2000, peso_total: 1000 }),
+      entradaBase({ numero: 'C-2', data: '2026-05-10', valor_total: 4000, peso_total: 1000 }),
+    ])
+    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Fazenda Boa Terra')
+    expect(screen.getByText('R$ 3,00')).toBeInTheDocument()
+  })
+
+  it('o CADASTRO nao some num periodo sem coleta: fica com travessao nas quatro', async () => {
+    configurarGet({
+      lista: [fornecedorBase(), fornecedorBase({ id: 'f-2', nome: 'Sitio das Flores' })],
+      detalhes: {
+        'f-1': fornecedorBase({ produtos: [] }),
+        'f-2': fornecedorBase({ id: 'f-2', nome: 'Sitio das Flores', produtos: [] }),
+      },
+      entradas: [entradaBase({ data: '2026-06-10' })],
+    })
+    render(<FornecedoresLista periodo="2026-01" onSessaoExpirada={() => {}} />)
+    // Um fornecedor não deixa de existir porque não houve coleta em janeiro.
+    expect(await screen.findByText('Fazenda Boa Terra')).toBeInTheDocument()
+    expect(screen.getByText('Sitio das Flores')).toBeInTheDocument()
+    expect(screen.getByText(/Nenhuma coleta registrada em janeiro\/2026/i)).toBeInTheDocument()
+  })
+
+  it('a dica diz qual recorte vale, e que o cadastro nao segue', async () => {
+    umFornecedor([entradaBase({ data: '2026-06-10' })])
+    render(<FornecedoresLista periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Fazenda Boa Terra')
+    const dica = screen.getByText(/Clique num fornecedor para editar/i)
+    expect(dica).toHaveTextContent('Junho/2026')
+    expect(dica).toHaveTextContent(/cadastro aparece inteiro/i)
   })
 })

@@ -107,6 +107,22 @@ interface EstoqueListaProps {
  * já existia como paliativo nesta tela — trocado aqui pelo saldo de verdade,
  * mas o registro de perdas continua funcionando, agora como a segunda metade
  * da tela de Estoque (mesmo layout do protótipo, tela-estoque.html).
+ *
+ * ESTA É A TELA QUE NÃO SEGUE O PERÍODO GLOBAL (achado S-3), e é de
+ * propósito. Estoque é uma POSIÇÃO acumulada — o que existe no depósito
+ * agora —, não um fluxo do mês: "o estoque de junho" não é a soma das
+ * movimentações de junho (isso daria saldo negativo em todo mês que se vende
+ * mais do que se compra, e ignoraria o que sobrou de maio). Seria "o saldo
+ * ATÉ o fim de junho", uma pergunta diferente de "quanto vendi em junho" que
+ * todas as outras telas respondem, e que exigiria um recorte "até" no
+ * endpoint agregado (GET /api/estoque não tem, e nem deveria ganhar um por
+ * causa do cabeçalho). Pelo mesmo motivo o saldo em caixa também é sempre
+ * acumulado — ver derive/caixa.ts. A nota abaixo da tabela diz isso ao
+ * usuário, para o número não parecer estar ignorando o filtro por defeito.
+ *
+ * A lista de perdas do depósito, embutida abaixo, acompanha essa decisão: é
+ * ela que produz a coluna PERDAS do saldo, e filtrar uma sem a outra faria a
+ * tabela não fechar com a lista logo abaixo dela, na mesma tela.
  */
 export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
   const [linhas, setLinhas] = useState<LinhaEstoque[]>([])
@@ -209,8 +225,21 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
               movimentação foi registrada — cada uma tem sua própria linha.
             </div>
 
+            {/* Sem esta linha, um usuário que trocou o período no cabeçalho e
+                viu o estoque não mudar concluiria que o filtro está quebrado. */}
+            <div className="estoque-legenda" role="note" aria-label="Escopo do estoque">
+              Esta tela mostra a <strong style={{ color: TEXTO }}>posição acumulada</strong> do
+              depósito e <strong style={{ color: TEXTO }}>não segue o filtro de período</strong> do
+              cabeçalho: o que sobrou de um mês continua no estoque no mês seguinte. Para o movimento
+              de um período, veja Entradas, Saídas ou Relatórios ▸ Perdas.
+            </div>
+
             {totalSemConversao > 0 && (
-              <div className="estoque-legenda estoque-legenda--incompleto" role="note">
+              <div
+                className="estoque-legenda estoque-legenda--incompleto"
+                role="note"
+                aria-label="Quantidade incompleta"
+              >
                 <strong>*</strong> {avisoSemConversao(totalSemConversao)} Cadastre o peso médio da
                 embalagem em Produtos para que entrem na conta.
               </div>

@@ -6,6 +6,7 @@ import {
   custosPorCategoria,
   calcularResultado,
   diasRecebimento,
+  diasRecebimentoSaida,
   diasPagamentoProdutor,
   diasEstoque,
   calcularCicloCaixa,
@@ -207,6 +208,47 @@ describe('diasRecebimento', () => {
     // que um segundo registro SEM data nao afeta a media quando ha outros
     // valores reais somados a ele.
     expect(diasRecebimento(saidas, 'all')).toBe(0)
+  })
+})
+
+describe('diasRecebimentoSaida — o valor por linha da coluna RECEB. de Saidas', () => {
+  it('devolve os dias entre a entrega e o pagamento', () => {
+    expect(diasRecebimentoSaida(saida({ entrega: '2026-06-01', data_pag: '2026-06-04' }))).toBe(3)
+  })
+
+  it('pago no mesmo dia da entrega e 0 — resultado valido, nao ausencia', () => {
+    expect(diasRecebimentoSaida(saida({ entrega: '2026-06-01', data_pag: '2026-06-01' }))).toBe(0)
+  })
+
+  it('pedido ainda nao entregue nao tem prazo a exibir (null)', () => {
+    expect(diasRecebimentoSaida(saida({ status: 'Em rota', data_pag: '2026-06-04' }))).toBeNull()
+    expect(diasRecebimentoSaida(saida({ status: 'Cancelado', data_pag: '2026-06-04' }))).toBeNull()
+  })
+
+  it('sem data de pagamento (ainda nao pago) e null, nunca 0', () => {
+    expect(diasRecebimentoSaida(saida({ data_pag: null }))).toBeNull()
+  })
+
+  it('sem data de entrega e null', () => {
+    expect(diasRecebimentoSaida(saida({ entrega: null }))).toBeNull()
+  })
+
+  it('data invalida e null, sem NaN vazando pra tela', () => {
+    expect(diasRecebimentoSaida(saida({ entrega: 'ontem', data_pag: '2026-06-04' }))).toBeNull()
+  })
+
+  it('diferenca negativa (pagamento antes da entrega) e erro de digitacao: null', () => {
+    expect(diasRecebimentoSaida(saida({ entrega: '2026-06-10', data_pag: '2026-06-04' }))).toBeNull()
+  })
+
+  it('e o mesmo insumo que diasRecebimento promedia', () => {
+    const saidas = [
+      saida({ entrega: '2026-06-01', data_pag: '2026-06-11' }),
+      saida({ entrega: '2026-06-01', data_pag: '2026-06-06' }),
+    ]
+    const porLinha = saidas.map(diasRecebimentoSaida)
+    expect(porLinha).toEqual([10, 5])
+    expect(diasRecebimento(saidas, 'all')).toBe(8)
   })
 })
 

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { EntradasLista } from './EntradasLista'
 import { api, ErroApi } from '../api/client'
+import { derivarResumoEntradas } from '../derive/resumoOperacional'
 
 // Mock so de `api.get/del/patch` — mantem a classe ErroApi real (o
 // componente faz `err instanceof ErroApi`, precisa ser o mesmo construtor
@@ -11,9 +12,21 @@ vi.mock('../api/client', async (importOriginal) => {
   return { ...actual, api: { ...actual.api, get: vi.fn(), del: vi.fn(), patch: vi.fn() } }
 })
 
+// Espiao sobre a derivacao dos cartoes: a implementacao REAL continua
+// valendo em todos os testes (vi.fn(actual)); so o teste de isolacao de
+// falha a troca por uma que lanca. Sem isso nao ha como provar que os
+// cartoes falham sozinhos — a lista e os cartoes saem da MESMA chamada de
+// API, entao nao existe um 401/500 que atinja um e nao o outro.
+vi.mock('../derive/resumoOperacional', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../derive/resumoOperacional')>()
+  return { ...actual, derivarResumoEntradas: vi.fn(actual.derivarResumoEntradas) }
+})
+
 const mockGet = api.get as unknown as ReturnType<typeof vi.fn>
 const mockDel = api.del as unknown as ReturnType<typeof vi.fn>
 const mockPatch = api.patch as unknown as ReturnType<typeof vi.fn>
+const espiaoResumo = vi.mocked(derivarResumoEntradas)
+const resumoReal = espiaoResumo.getMockImplementation() as typeof derivarResumoEntradas
 
 const FORNECEDORES = [{ id: 'f-1', nome: 'Fazenda Boa Terra', regiao: 'Sul', contato: '' }]
 
@@ -51,10 +64,22 @@ function mockRotasPadrao(entradas: unknown[] = [entrada()]) {
   })
 }
 
+/** O bloco de cartoes de resumo — pra distinguir o valor de um cartao do
+ * mesmo texto na tabela. */
+function cartoes() {
+  return within(screen.getByRole('group', { name: 'Resumo das entradas' }))
+}
+
+/** Um cartao pelo rotulo: devolve o card inteiro (valor + sub-linha). */
+function cartao(rotulo: string): HTMLElement {
+  return cartoes().getByText(rotulo).parentElement as HTMLElement
+}
+
 beforeEach(() => {
   mockGet.mockReset()
   mockDel.mockReset()
   mockPatch.mockReset()
+  espiaoResumo.mockImplementation(resumoReal)
 })
 
 describe('EntradasLista — os quatro estados', () => {
@@ -280,5 +305,174 @@ describe('EntradasLista — peso incompleto (itens sem peso medio cadastrado)', 
     expect(marcados).toHaveLength(2)
     expect(marcados[0].getAttribute('title')).toContain('peso médio')
     expect(marcados[0].getAttribute('title')).toContain('1 item')
+  })
+})
+
+/**
+ * Cartao "A pagar ao produtor" (achado E-1 da auditoria; protótipo
+ * `entradaStats`, markup 471 e dado 2506). "Quanto devo ao produtor" nao
+ * aparecia em nenhuma tela de rotina — so em Relatorios ▸ Compras, que e
+ * tela de analise. E a outra ponta do capital de giro, junto do "A receber"
+ * de Saidas.
+ */
+describe('EntradasLista — cartao "A pagar ao produtor"', () => {
+  it('soma o valor das coletas ainda nao pagas e conta quantas sao', async () => {
+    mockRotasPadrao([
+      entrada({ id: 'e-1', numero: 'C-1', pago: 'Pago', valor_total: 500 }),
+      entrada({ id: 'e-2', numero: 'C-2', pago: 'Pendente', data_pag: null, valor_total: 300 }),
+      entrada({ id: 'e-3', numero: 'C-3', pago: 'Pendente', data_pag: null, valor_total: 200 }),
+    ])
+    render(<EntradasLista />)
+    await screen.findByText('C-1')
+    const c = cartao('A PAGAR AO PRODUTOR')
+    expect(within(c).getByText('R$ 500,00')).toBeInTheDocument()
+    expect(within(c).getByText('2 coletas pendentes')).toBeInTheDocument()
+  })
+
+  it('`pago` gravado como "Atrasado" (dado legado) continua sendo divida', async () => {
+    mockRotasPadrao([
+      entrada({ id: 'e-1', numero: 'C-1', pago: 'Atrasado', data_pag: null, valor_total: 250 }),
+    ])
+    render(<EntradasLista />)
+    await screen.findByText('C-1')
+    expect(within(cartao('A PAGAR AO PRODUTOR')).getByText('R$ 250,00')).toBeInTheDocument()
+  })
+
+  it('tudo pago: R$ 0,00 MEDIDO, nunca travessao — e a informacao boa', async () => {
+    mockRotasPadrao([
+      entrada({ id: 'e-1', numero: 'C-1', pago: 'Pago', valor_total: 500 }),
+      entrada({ id: 'e-2', numero: 'C-2', pago: 'Pago', valor_total: 300 }),
+    ])
+    render(<EntradasLista />)
+    await screen.findByText('C-1')
+    const c = cartao('A PAGAR AO PRODUTOR')
+    expect(within(c).getByText('R$ 0,00')).toBeInTheDocument()
+    expect(within(c).getByText('0 coletas pendentes')).toBeInTheDocument()
+    expect(within(c).queryByText('—')).not.toBeInTheDocument()
+  })
+
+  it('sem nenhuma entrada lancada nao existe cartao com R$ 0,00 — o estado vazio explica', async () => {
+    mockRotasPadrao([])
+    render(<EntradasLista />)
+    await screen.findByText(/nenhuma entrada lançada/i)
+    expect(screen.queryByRole('group', { name: 'Resumo das entradas' })).not.toBeInTheDocument()
+    expect(screen.queryByText('R$ 0,00')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Cartao "Perda media" (achado E-2; protótipo linha 2507). A perda aparecia
+ * so em quilos absolutos e sempre em vermelho — 140 kg pode ser rotina ou
+ * catastrofe, e a tela nao dizia qual. O indice contra o peso recebido e o
+ * que da sentido ao numero; o alvo do protótipo e 10%.
+ */
+describe('EntradasLista — cartao "Perda media"', () => {
+  const VERDE = 'rgb(63, 143, 91)'
+  const AMBAR = 'rgb(199, 147, 32)'
+  const VERMELHO = 'rgb(194, 80, 47)'
+  const valorDo = (rotulo: string) => cartao(rotulo).querySelector('.entradas-stat-valor') as HTMLElement
+
+  it('mostra a perda como % do peso recebido, com o alvo e os quilos na sub-linha', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 70, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    const c = cartao('PERDA MÉDIA (COLETA/TRANSPORTE)')
+    expect(within(c).getByText('7,0%')).toBeInTheDocument()
+    expect(within(c).getByText('meta ≤ 10% · 70 kg perdidos')).toBeInTheDocument()
+  })
+
+  it('abaixo do alvo fica verde', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 99, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(valorDo('PERDA MÉDIA (COLETA/TRANSPORTE)')).toHaveStyle({ color: VERDE })
+  })
+
+  it('exatamente no alvo (10%) ainda e verde — "meta ≤ 10%" inclui o 10', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 100, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    const c = cartao('PERDA MÉDIA (COLETA/TRANSPORTE)')
+    expect(within(c).getByText('10,0%')).toBeInTheDocument()
+    expect(valorDo('PERDA MÉDIA (COLETA/TRANSPORTE)')).toHaveStyle({ color: VERDE })
+  })
+
+  it('acima do alvo fica ambar', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 120, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(valorDo('PERDA MÉDIA (COLETA/TRANSPORTE)')).toHaveStyle({ color: AMBAR })
+  })
+
+  it('perda alta fica vermelha — a cor agora significa alguma coisa', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 300, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(valorDo('PERDA MÉDIA (COLETA/TRANSPORTE)')).toHaveStyle({ color: VERMELHO })
+  })
+
+  it('coleta sem perda: 0,0% MEDIDO, nunca travessao', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 0, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(within(cartao('PERDA MÉDIA (COLETA/TRANSPORTE)')).getByText('0,0%')).toBeInTheDocument()
+  })
+
+  it('sem peso recebido nao ha indice: travessao, nunca 0,0%', async () => {
+    mockRotasPadrao([entrada({ peso_total: 0, perda_kg: 0, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    const c = cartao('PERDA MÉDIA (COLETA/TRANSPORTE)')
+    expect(within(c).getByText('—')).toBeInTheDocument()
+    expect(within(c).queryByText('0,0%')).not.toBeInTheDocument()
+  })
+
+  it('cabecalho e itens descrevem a MESMA perda: usa o maior, nunca a soma', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 100, perda_itens_qtd: 60 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    // Somar daria 160 kg (16%); o certo e 100 kg (10%).
+    expect(within(cartao('PERDA MÉDIA (COLETA/TRANSPORTE)')).getByText('10,0%')).toBeInTheDocument()
+  })
+
+  it('com item nao convertivel o indice sai marcado com * e a nota de rodape explica', async () => {
+    mockRotasPadrao([
+      entrada({ peso_total: 1000, perda_kg: 70, perda_itens_qtd: 0, itens_sem_conversao: 2 }),
+    ])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    const marcado = within(cartao('PERDA MÉDIA (COLETA/TRANSPORTE)')).getByText('7,0%*')
+    expect(marcado.getAttribute('title')).toContain('peso médio')
+    expect(marcado.getAttribute('title')).toContain('2 itens')
+    expect(screen.getByRole('note')).toHaveTextContent(/sai para cima/i)
+  })
+
+  it('sem item fora da conversao nao ha nota de rodape nem asterisco', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 70, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+    expect(screen.queryByText('7,0%*')).not.toBeInTheDocument()
+  })
+})
+
+describe('EntradasLista — isolacao de falha dos cartoes', () => {
+  it('resumo que nao pode ser calculado vira travessao com aviso, e a lista continua visivel', async () => {
+    espiaoResumo.mockImplementation(() => { throw new Error('base inconsistente') })
+    mockRotasPadrao([entrada({ numero: 'C-1040', valor_total: 120 })])
+    render(<EntradasLista />)
+
+    // A lista — o trabalho de rotina desta tela — nao foi derrubada.
+    expect(await screen.findByText('C-1040')).toBeInTheDocument()
+
+    expect(screen.getByRole('status')).toHaveTextContent(/não foi possível calcular o resumo/i)
+
+    const rotulos = [
+      'ENTRADAS', 'PESO RECEBIDO', 'PERDA MÉDIA (COLETA/TRANSPORTE)', 'A PAGAR AO PRODUTOR', 'VALOR TOTAL',
+    ]
+    for (const rotulo of rotulos) {
+      expect(within(cartao(rotulo)).getAllByText('—').length).toBeGreaterThan(0)
+    }
+    expect(cartoes().queryByText('R$ 0,00')).not.toBeInTheDocument()
   })
 })

@@ -1,8 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { api, ErroApi } from '../api/client'
 import { ModalEntrada, type EntradaComItens, type Fornecedor } from '../components/ModalEntrada'
 import { SeletorPagamento } from '../components/SeletorPagamento'
+import type { Health } from '../derive/clientes'
 import type { SituacaoPagamentoEscolhivel } from '../derive/pagamento'
+import type { EntradaResumo } from '../derive/relatorios'
+import {
+  derivarResumoEntradas,
+  statusPerdaMedia,
+  META_PERDA_MEDIA_PCT,
+  type ResumoEntradas,
+} from '../derive/resumoOperacional'
 import './EntradasLista.css'
 
 /** Forma de um item de GET /api/entradas (api/src/routes/entradas.ts,
@@ -14,6 +22,16 @@ interface Entrada {
   fornecedor_id: string | null
   data: string
   perda_kg: number
+  /**
+   * Soma de `entrada_itens.perda_kg` desta entrada. Descreve o MESMO evento
+   * de perda que `perda_kg` (o cabeçalho), em outra granularidade — nunca
+   * dois números a somar. O cartão de perda média usa `perdaColetaEfetiva`
+   * (o maior dos dois, ver derive/relatorios.ts) para não contar em dobro,
+   * que é também o número de Relatórios ▸ Compras e do saldo de Estoque; a
+   * coluna PERDA da tabela continua mostrando só o cabeçalho, então os dois
+   * podem divergir quando o dado gravado diverge.
+   */
+  perda_itens_qtd?: number
   motivo: string
   pago: 'Pago' | 'Pendente' | 'Atrasado'
   data_pag: string | null
@@ -43,6 +61,110 @@ function avisoSemConversao(n: number): string {
   return `${itens} em unidade diferente de KG sem peso médio cadastrado no produto: `
     + `${verbo} fora deste peso, porque sem o peso da embalagem não há como converter em quilos. `
     + 'Cadastre o peso médio em Produtos para que entrem na conta.'
+}
+
+/** O que um cartão mostra quando não há base para calcular — nunca zero.
+ * Zero é uma MEDIDA ("não devo nada ao produtor porque paguei tudo"), e é
+ * justamente a informação boa; travessão é a ausência de medida. */
+const TRACO = '—'
+
+const CORES_SEMAFORO: Record<Health, string> = {
+  green: '#3f8f5b',
+  amber: '#c79320',
+  red: '#c2502f',
+}
+
+/** Percentual com uma casa, em pt-BR — mesmo `fmtPct1` do protótipo (2152) e
+ * mesmo `pct1` de RelatoriosTela.tsx, que formata este mesmo índice. */
+const pct1 = (n: number) => n.toFixed(1).replace('.', ',') + '%'
+
+/** Um cartão de resumo. `corValor` só é usada onde há semáforo. */
+function Cartao({ label, valor, sub, corValor }: {
+  label: string
+  valor: ReactNode
+  sub: ReactNode
+  corValor?: string
+}) {
+  return (
+    <div className="entradas-stat">
+      <div className="entradas-stat-label">{label}</div>
+      <div className="entradas-stat-valor" style={corValor ? { color: corValor } : undefined}>{valor}</div>
+      <div className="entradas-stat-sub">{sub}</div>
+    </div>
+  )
+}
+
+/**
+ * Os cartões de resumo (protótipo `entradaStats`, markup 471, dados
+ * 2506-2507). `resumo` nulo = não foi possível calcular: todos viram
+ * travessão e o aviso ao lado explica, mas a lista continua inteira —
+ * isolação de falha no padrão de ClientesLista.tsx.
+ *
+ * Dois cartões são novos e são o motivo deste bloco ter sido reescrito:
+ *
+ * - **A PAGAR AO PRODUTOR**: "quanto devo ao produtor" não aparecia em
+ *   nenhuma tela de rotina, só em Relatórios ▸ Compras (tela de análise).
+ *   É a outra ponta do capital de giro, junto do "A receber" de Saídas.
+ * - **PERDA MÉDIA**: a perda aparecia só em quilos absolutos e sempre em
+ *   vermelho — 140 kg pode ser rotina ou catástrofe, e a tela não dizia
+ *   qual. O índice contra o peso recebido é o que dá sentido ao número; os
+ *   quilos continuam visíveis na sub-linha, ao lado do alvo.
+ *
+ * São CINCO cartões, não os quatro do protótipo: PESO RECEBIDO é uma adição
+ * da implementação (com o aviso de peso incompleto que o protótipo não
+ * tinha) e teria sido justamente o cartão sacrificado para abrir espaço —
+ * remover informação honesta para caber no desenho seria o padrão que a
+ * auditoria existe para combater.
+ */
+function CartoesResumo({ resumo }: { resumo: ResumoEntradas | null }) {
+  // O índice divide pelo peso recebido, então herda o mesmo contador de
+  // itens não convertíveis do cartão de peso — e com denominador incompleto
+  // ele sai PARA CIMA. Marcar só o peso e deixar a % limpa esconderia
+  // exatamente o número mais fácil de ler errado.
+  const incompleto = resumo ? resumo.itensSemConversao : 0
+  const marcar = (texto: string) => (incompleto > 0
+    ? <span className="entradas-incompleto" title={avisoSemConversao(incompleto)}>{texto}*</span>
+    : <>{texto}</>)
+
+  const perdaPct = resumo?.perdaMediaPct ?? null
+  const emAberto = resumo
+    ? `${resumo.coletasEmAberto} ${resumo.coletasEmAberto === 1 ? 'coleta pendente' : 'coletas pendentes'}`
+    : TRACO
+
+  return (
+    <div className="entradas-stats" role="group" aria-label="Resumo das entradas">
+      <Cartao label="ENTRADAS" valor={resumo ? String(resumo.coletas) : TRACO} sub="todas as lançadas" />
+      <Cartao
+        label="PESO RECEBIDO"
+        valor={resumo ? marcar(peso(resumo.pesoRecebidoKg)) : TRACO}
+        sub="soma das coletas"
+      />
+      <Cartao
+        label="PERDA MÉDIA (COLETA/TRANSPORTE)"
+        // Travessão, não "0,0%": sem quilo recebido não há índice a medir.
+        valor={perdaPct === null ? TRACO : marcar(pct1(perdaPct))}
+        // Vermelho fixo era o defeito: o número não dizia se era rotina ou
+        // catástrofe. Agora a cor vem do alvo.
+        corValor={perdaPct === null ? undefined : CORES_SEMAFORO[statusPerdaMedia(perdaPct)]}
+        sub={resumo
+          ? `meta ≤ ${META_PERDA_MEDIA_PCT}% · ${peso(resumo.perdaKg)} perdidos`
+          : TRACO}
+      />
+      <Cartao
+        label="A PAGAR AO PRODUTOR"
+        valor={resumo ? money(resumo.aPagarAoProdutor) : TRACO}
+        // Vermelho só quando de fato se deve: zero em aberto é o bom
+        // resultado, e pintá-lo de vermelho ensinaria a ignorar a cor.
+        corValor={resumo && resumo.aPagarAoProdutor > 0 ? CORES_SEMAFORO.red : undefined}
+        sub={emAberto}
+      />
+      <Cartao
+        label="VALOR TOTAL"
+        valor={resumo ? money(resumo.valorTotal) : TRACO}
+        sub="comprado no total"
+      />
+    </div>
+  )
 }
 
 type Modal = { modo: 'novo' } | { modo: 'editar'; entrada: EntradaComItens } | null
@@ -175,10 +297,35 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
   if (carregando) return <p className="entradas-estado">Carregando…</p>
   if (erro) return <p className="entradas-estado entradas-estado--erro" role="alert">{erro}</p>
 
-  const totalPeso = entradas.reduce((s, e) => s + e.peso_total, 0)
-  const totalSemConversao = entradas.reduce((s, e) => s + (e.itens_sem_conversao || 0), 0)
-  const totalPerda = entradas.reduce((s, e) => s + e.perda_kg, 0)
-  const totalValor = entradas.reduce((s, e) => s + e.valor_total, 0)
+  // `perda_itens_qtd` sempre vem de GET /api/entradas (paraJsonLista), mas é
+  // opcional em `EntradaResumo` porque fixtures de teste montam entradas
+  // parciais — o `?? 0` torna esse contrato explícito aqui em vez de
+  // depender do `|| 0` lá dentro.
+  const paraResumo: EntradaResumo[] = entradas.map(e => ({
+    numero: e.numero,
+    fornecedor_id: e.fornecedor_id,
+    data: e.data,
+    perda_kg: e.perda_kg,
+    perda_itens_qtd: e.perda_itens_qtd ?? 0,
+    motivo: e.motivo,
+    pago: e.pago,
+    data_pag: e.data_pag,
+    valor_total: e.valor_total,
+    peso_total: e.peso_total,
+    itens_sem_conversao: e.itens_sem_conversao,
+  }))
+
+  // Isolação de falha (padrão de ClientesLista.tsx): se a derivação não
+  // puder ser feita, os cartões viram travessão e o aviso explica — a lista
+  // de entradas continua visível e lançável, que é o trabalho de rotina
+  // desta tela.
+  let resumo: ResumoEntradas | null = null
+  let resumoFalhou = false
+  try {
+    resumo = derivarResumoEntradas(paraResumo)
+  } catch {
+    resumoFalhou = true
+  }
 
   return (
     <div className="entradas-lista">
@@ -193,34 +340,14 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
 
       {erroAbrir && <p className="entradas-erro-abrir" role="alert">{erroAbrir}</p>}
 
-      {entradas.length > 0 && (
-        <div className="entradas-stats">
-          <div className="entradas-stat">
-            <div className="entradas-stat-label">ENTRADAS</div>
-            <div className="entradas-stat-valor">{entradas.length}</div>
-          </div>
-          <div className="entradas-stat">
-            <div className="entradas-stat-label">PESO RECEBIDO</div>
-            <div className="entradas-stat-valor">
-              {totalSemConversao > 0
-                ? (
-                  <span className="entradas-incompleto" title={avisoSemConversao(totalSemConversao)}>
-                    {peso(totalPeso)}*
-                  </span>
-                )
-                : peso(totalPeso)}
-            </div>
-          </div>
-          <div className="entradas-stat">
-            <div className="entradas-stat-label">PERDA (COLETA/TRANSPORTE)</div>
-            <div className="entradas-stat-valor" style={{ color: '#c2502f' }}>{peso(totalPerda)}</div>
-          </div>
-          <div className="entradas-stat">
-            <div className="entradas-stat-label">VALOR TOTAL</div>
-            <div className="entradas-stat-valor">{money(totalValor)}</div>
-          </div>
-        </div>
+      {resumoFalhou && (
+        <p className="entradas-aviso-resumo" role="status">
+          Não foi possível calcular o resumo das entradas — os cartões ficam indisponíveis. A lista abaixo
+          continua correta.
+        </p>
       )}
+
+      {entradas.length > 0 && <CartoesResumo resumo={resumo} />}
 
       {confirmando && (
         <div className="entradas-confirma" role="region" aria-label="Confirmar exclusão">
@@ -333,6 +460,17 @@ export function EntradasLista({ onSessaoExpirada }: EntradasListaProps) {
       <div className="entradas-rodape-nota">
         A soma das entradas do período vira a <strong>Compra de mercadoria</strong> no Financeiro automaticamente.
       </div>
+
+      {/* Nota de rodapé do `*`, no mesmo padrão das abas Compras, Produtos e
+          Perdas de Relatórios: o asterisco marca o número, esta nota diz o
+          que ficou de fora, a consequência e a saída do problema. Só aparece
+          quando há de fato item sem conversão. */}
+      {resumo && resumo.itensSemConversao > 0 && (
+        <div className="entradas-rodape-nota entradas-rodape-nota--incompleto" role="note">
+          <strong>*</strong> {avisoSemConversao(resumo.itensSemConversao)} A perda média divide por esse peso,
+          então o índice está calculado sobre uma quantidade incompleta e sai para cima.
+        </div>
+      )}
 
       {modal && (
         <ModalEntrada

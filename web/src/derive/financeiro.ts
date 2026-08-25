@@ -243,11 +243,42 @@ function media(valores: number[]): number | null {
  */
 export function diasRecebimento(saidas: SaidaFin[], periodo: string): number | null {
   const dias = noPeriodo(saidas, periodo, s => s.entrega)
-    .filter(s => s.status === 'Entregue')
-    .map(s => (s.entrega && s.data_pag) ? diasEntre(s.entrega, s.data_pag) : null)
-    .filter((d): d is number => d !== null && d >= 0)
+    .map(diasRecebimentoSaida)
+    .filter((d): d is number => d !== null)
   const m = media(dias)
   return m === null ? null : Math.round(m)
+}
+
+/**
+ * Dias de recebimento de UMA saída — `data_pag − entrega`. É o insumo por
+ * linha do que `diasRecebimento` (acima) promedia, extraído para a coluna
+ * RECEB. da tabela de Saídas (screens/SaidasLista.tsx) mostrar por pedido o
+ * mesmo número que alimenta o componente "recebimento" do ciclo de caixa —
+ * e não uma segunda subtração de datas escrita à mão na tela.
+ *
+ * `null` (a tela mostra travessão) em quatro casos, todos "não há prazo de
+ * recebimento a exibir", nunca "o prazo foi zero":
+ *
+ *   1. pedido não entregue — o prazo conta a partir da entrega, que ainda
+ *      não aconteceu;
+ *   2. sem `entrega` ou sem `data_pag` — ainda não foi pago, ou o pagamento
+ *      foi registrado sem data;
+ *   3. alguma das duas datas inválida;
+ *   4. diferença NEGATIVA — pagamento registrado antes da entrega, que é
+ *      erro de digitação e não um recebimento adiantado.
+ *
+ * Zero, por outro lado, é resultado válido e sai como 0: pago no mesmo dia
+ * da entrega, o melhor cliente que existe. O protótipo escondia esse caso
+ * (`p.recebDias > 0`, linha 2406) e a média o descartava — o defeito já
+ * corrigido e documentado em `diasRecebimento`. A coluna não repete o erro.
+ */
+export function diasRecebimentoSaida(
+  saida: Pick<SaidaFin, 'status' | 'entrega' | 'data_pag'>,
+): number | null {
+  if (saida.status !== 'Entregue') return null
+  if (!saida.entrega || !saida.data_pag) return null
+  const d = diasEntre(saida.entrega, saida.data_pag)
+  return d === null || d < 0 ? null : d
 }
 
 /**

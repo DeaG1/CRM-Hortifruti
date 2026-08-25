@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { api, ErroApi } from '../api/client'
 import type { Cliente } from '../derive/clientes'
+import { diasRecebimentoSaida } from '../derive/financeiro'
 import { situacaoExibidaSaida, type SituacaoPagamentoEscolhivel } from '../derive/pagamento'
+import type { SaidaResumo } from '../derive/relatorios'
+import { derivarResumoSaidas, type ResumoSaidas } from '../derive/resumoOperacional'
 import { ModalSaida, type Saida, type StatusSaida, type PagSaida } from '../components/ModalSaida'
 import { SeletorPagamento } from '../components/SeletorPagamento'
 import './SaidasLista.css'
@@ -55,6 +58,111 @@ const COR_FILTRO_PAG: Record<FiltroPag, string> = {
 
 const money = (n: number) => 'R$ ' + n.toLocaleString('pt-BR')
 const pesoTxt = (n: number) => n.toLocaleString('pt-BR') + ' kg'
+
+/** O que os cartões mostram quando não há base para calcular — nunca zero.
+ * Zero é uma MEDIDA ("não há nada em aberto porque tudo foi pago"), e é
+ * justamente a informação boa; travessão é a ausência de medida. */
+const TRACO = '—'
+
+/** Aviso do número de quilos que pode estar incompleto — mesmo texto e mesma
+ * regra de EntradasLista.tsx e da nota de rodapé de Relatórios (a API deixa
+ * de fora o item em unidade ≠ KG sem peso médio cadastrado em vez de
+ * inventar um fator; ver `itens_sem_conversao` em api/src/routes/saidas.ts). */
+function avisoSemConversao(n: number): string {
+  const itens = n === 1 ? '1 item' : `${n} itens`
+  const verbo = n === 1 ? 'está' : 'estão'
+  return `${itens} em unidade diferente de KG sem peso médio cadastrado no produto: `
+    + `${verbo} fora desta quantidade, porque sem o peso da embalagem não há como converter em quilos. `
+    + 'Cadastre o peso médio em Produtos para que entrem na conta.'
+}
+
+/**
+ * Cor da coluna RECEB. — pela situação DERIVADA de pagamento (não pelo `pag`
+ * gravado), igual ao resto desta tela. Protótipo linha 2407: verde quando
+ * pago, vermelho quando atrasado, neutro no resto (e sempre neutro quando
+ * não há prazo a exibir).
+ */
+function corReceb(dias: number | null, situacao: string): string {
+  if (dias === null) return NEUTRO
+  if (situacao === 'Pago') return VERDE
+  if (situacao === 'Atrasado') return VERMELHO
+  return NEUTRO
+}
+
+/** Um cartão de resumo. `sub` ganha cor só quando há semáforo a mostrar. */
+function Cartao({ label, valor, sub, corSub }: {
+  label: string
+  valor: ReactNode
+  sub: ReactNode
+  corSub?: string
+}) {
+  return (
+    <div className="saidas-stat">
+      <div className="saidas-stat-label">{label}</div>
+      <div className="saidas-stat-valor">{valor}</div>
+      <div className="saidas-stat-sub" style={corSub ? { color: corSub } : undefined}>{sub}</div>
+    </div>
+  )
+}
+
+/**
+ * Os quatro cartões de resumo (protótipo `pedidoStats`, linhas 412-419 e
+ * 2394-2399). `resumo` nulo = não foi possível calcular: todos os quatro
+ * viram travessão e o aviso ao lado explica, mas a lista de saídas abaixo
+ * continua inteira — padrão de isolação de falha de ClientesLista.tsx.
+ *
+ * O terceiro cartão é o motivo de este bloco existir: "quanto os
+ * minimercados me devem" não aparecia em nenhuma tela de rotina, só em
+ * Relatórios ▸ Inadimplentes, que é tela de análise.
+ */
+function CartoesResumo({ resumo }: { resumo: ResumoSaidas | null }) {
+  const entregues = resumo
+    ? `${resumo.pedidosEntregues} ${resumo.pedidosEntregues === 1 ? 'pedido entregue' : 'pedidos entregues'}`
+    : TRACO
+  // Semáforo no ATRASO, não no valor a receber. O protótipo pinta o cartão
+  // de vermelho sempre que há qualquer coisa a receber (`aReceber>0?RED`,
+  // linha 2397) — mas ter contas a receber é o estado normal de quem vende a
+  // prazo, e um cartão permanentemente vermelho para de ser lido. Vermelho
+  // fica para o que de fato é problema: pedido com vencimento já decorrido.
+  const atraso = resumo
+    ? (resumo.pedidosAtrasados === 0
+      ? { texto: 'nenhum em atraso', cor: VERDE }
+      : {
+        texto: `${resumo.pedidosAtrasados} ${resumo.pedidosAtrasados === 1 ? 'pedido' : 'pedidos'} em atraso`,
+        cor: VERMELHO,
+      })
+    : { texto: TRACO, cor: undefined }
+
+  return (
+    <div className="saidas-stats" role="group" aria-label="Resumo das saídas">
+      <Cartao label="PEDIDOS" valor={resumo ? String(resumo.pedidos) : TRACO} sub="todos os lançados" />
+      <Cartao
+        label="FATURADO (ENTREGUE)"
+        valor={resumo ? money(resumo.faturadoEntregue) : TRACO}
+        sub={entregues}
+      />
+      <Cartao
+        label="A RECEBER / ATRASADO"
+        valor={resumo ? money(resumo.aReceber) : TRACO}
+        sub={atraso.texto}
+        corSub={atraso.cor}
+      />
+      <Cartao
+        label="QTD ENTREGUE"
+        valor={!resumo
+          ? TRACO
+          : resumo.itensSemConversao > 0
+            ? (
+              <span className="saidas-incompleto" title={avisoSemConversao(resumo.itensSemConversao)}>
+                {pesoTxt(resumo.qtdEntregueKg)}*
+              </span>
+            )
+            : pesoTxt(resumo.qtdEntregueKg)}
+        sub="nos pedidos entregues"
+      />
+    </div>
+  )
+}
 
 /** 'AAAA-MM-DD' -> 'DD/MM'. Vazio/nulo vira travessao. */
 function dataBr(iso: string | null): string {
@@ -215,6 +323,44 @@ export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
   const contagemPag = (f: FiltroPag) =>
     f === 'Todos' ? saidas.length : saidas.filter(s => situacaoExibidaSaida(s.pag, s.venc, hojeIso) === f).length
 
+  // Os cartões somam a BASE INTEIRA, nunca `visiveis`: "quanto os
+  // minimercados me devem" tem que responder pela carteira toda. Se
+  // seguissem os filtros, filtrar por "Pago" zeraria o cartão de "A receber"
+  // e a tela responderia outra pergunta com o mesmo rótulo. A nota logo
+  // abaixo dos cartões diz isso ao usuário, para o número não parecer
+  // discordar da tabela.
+  //
+  // `valor`/`peso` são opcionais em `Saida` (GET /:id não traz agregado) e
+  // obrigatórios em `SaidaResumo`; a listagem sempre os manda, mas o `?? 0`
+  // deixa o contrato explícito em vez de confiar num campo opcional.
+  const paraResumo: SaidaResumo[] = saidas.map(s => ({
+    numero: s.numero,
+    cliente_id: s.cliente_id,
+    rota: s.rota,
+    entrega: s.entrega,
+    status: s.status,
+    pag: s.pag,
+    venc: s.venc,
+    data_pag: s.data_pag,
+    perda_kg: s.perda_kg,
+    valor: s.valor ?? 0,
+    peso: s.peso ?? 0,
+    itens_sem_conversao: s.itens_sem_conversao,
+  }))
+
+  // Isolação de falha (padrão de ClientesLista.tsx): se a derivação não
+  // puder ser feita, os cartões viram travessão e um aviso explica — a
+  // lista de saídas continua visível e utilizável, que é o trabalho de
+  // rotina desta tela. Nunca deixar um erro de resumo derrubar o lançamento
+  // de pedidos.
+  let resumo: ResumoSaidas | null = null
+  let resumoFalhou = false
+  try {
+    resumo = derivarResumoSaidas(paraResumo, hojeIso)
+  } catch {
+    resumoFalhou = true
+  }
+
   return (
     <div className="saidas-lista">
       <div className="saidas-topo">
@@ -222,6 +368,19 @@ export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
         <button type="button" className="saidas-botao-novo" onClick={() => setModal(null)}>
           ＋ Novo pedido
         </button>
+      </div>
+
+      {resumoFalhou && (
+        <p className="saidas-aviso-resumo" role="status">
+          Não foi possível calcular o resumo das saídas — os cartões ficam indisponíveis. A lista abaixo
+          continua correta.
+        </p>
+      )}
+
+      <CartoesResumo resumo={resumo} />
+
+      <div className="saidas-resumo-nota">
+        Os cartões somam <strong>todas as saídas lançadas</strong>; os filtros abaixo valem só para a tabela.
       </div>
 
       <div className="saidas-filtros" role="group" aria-label="Filtrar por status">
@@ -265,10 +424,17 @@ export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
           <div className="saidas-col-num">VALOR</div>
           <div>STATUS</div>
           <div>PAGAMENTO</div>
+          <div className="saidas-col-num">RECEB.</div>
         </div>
 
         {visiveis.map(s => {
           const situacao = situacaoExibidaSaida(s.pag, s.venc, hojeIso)
+          // Coluna RECEB. (protótipo: cabeçalho 424, célula 436, dado 2406):
+          // quantos dias o cliente levou da entrega até pagar. É o insumo
+          // visível do componente "recebimento" do ciclo de caixa, e sai da
+          // MESMA função que alimenta essa média (derive/financeiro.ts) —
+          // não de uma subtração de datas escrita aqui.
+          const receb = diasRecebimentoSaida(s)
           return (
             <div key={s.id} className="saidas-linha saidas-linha--dados" onClick={() => setModal(s.id)}>
               <div className="saidas-numero">{s.numero}</div>
@@ -302,6 +468,9 @@ export function SaidasLista({ onSessaoExpirada }: SaidasListaProps) {
                   />
                 )}
                 {s.venc && <div className="saidas-venc">venc. {dataBr(s.venc)}</div>}
+              </div>
+              <div className="saidas-col-num saidas-mono" style={{ color: corReceb(receb, situacao) }}>
+                {receb === null ? TRACO : `${receb} d`}
               </div>
             </div>
           )

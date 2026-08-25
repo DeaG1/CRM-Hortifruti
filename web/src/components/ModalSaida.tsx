@@ -37,6 +37,16 @@ export interface Saida {
   alterado_em?: string
   valor?: number
   peso?: number
+  /**
+   * Quantos itens desta saída ficaram FORA de `peso` por não serem
+   * convertíveis em quilos (unidade ≠ KG sem `produtos.peso_medio`
+   * cadastrado). Só vem em GET / (listagem), junto de `valor`/`peso` — a API
+   * não inventa fator, conta quantos ficaram de fora e deixa a tela dizer
+   * que o total está incompleto. Ver o comentário grande em
+   * api/src/routes/saidas.ts (GET /) e `SaidaResumo.itens_sem_conversao` em
+   * derive/relatorios.ts.
+   */
+  itens_sem_conversao?: number
   itens?: ItemSaida[]
 }
 

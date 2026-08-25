@@ -4,6 +4,7 @@ import { SaidasLista } from './SaidasLista'
 import { api, ErroApi } from '../api/client'
 import type { Saida } from '../components/ModalSaida'
 import type { Cliente } from '../derive/clientes'
+import { derivarResumoSaidas } from '../derive/resumoOperacional'
 
 // Mock so de `api.get/patch` — mantem a classe ErroApi real (o componente
 // faz `err instanceof ErroApi`, precisa ser o mesmo construtor dos dois
@@ -13,8 +14,20 @@ vi.mock('../api/client', async (importOriginal) => {
   return { ...actual, api: { ...actual.api, get: vi.fn(), patch: vi.fn() } }
 })
 
+// Espiao sobre a derivacao dos cartoes: a implementacao REAL continua
+// valendo em todos os testes (vi.fn(actual)); so o teste de isolacao de
+// falha a troca por uma que lanca. Sem isso nao ha como provar que os
+// cartoes falham sozinhos — a lista e os cartoes saem da MESMA chamada de
+// API, entao nao existe um 401/500 que atinja um e nao o outro.
+vi.mock('../derive/resumoOperacional', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../derive/resumoOperacional')>()
+  return { ...actual, derivarResumoSaidas: vi.fn(actual.derivarResumoSaidas) }
+})
+
 const mockGet = api.get as unknown as ReturnType<typeof vi.fn>
 const mockPatch = api.patch as unknown as ReturnType<typeof vi.fn>
+const espiaoResumo = vi.mocked(derivarResumoSaidas)
+const resumoReal = espiaoResumo.getMockImplementation() as typeof derivarResumoSaidas
 
 const saida = (over: Partial<Saida> = {}): Saida => ({
   id: '1',
@@ -59,9 +72,29 @@ function botaoFiltro(grupo: string, rotulo: string) {
   return within(screen.getByRole('group', { name: grupo })).getByRole('button', { name: new RegExp('^' + rotulo) })
 }
 
+/** O bloco de cartoes de resumo — pra distinguir o "R$ 100" de um cartao do
+ * "R$ 100" da coluna VALOR da tabela. */
+function cartoes() {
+  return within(screen.getByRole('group', { name: 'Resumo das saídas' }))
+}
+
+/** Um cartao pelo rotulo: devolve o card inteiro (valor + sub-linha). */
+function cartao(rotulo: string): HTMLElement {
+  return cartoes().getByText(rotulo).parentElement as HTMLElement
+}
+
+/** 'AAAA-MM-DD' local, igual ao que a tela usa pra derivar atraso. */
+function isoDe(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+const HOJE = new Date()
+const ONTEM = isoDe(new Date(HOJE.getTime() - 86_400_000))
+const AMANHA = isoDe(new Date(HOJE.getTime() + 86_400_000))
+
 beforeEach(() => {
   mockGet.mockReset()
   mockPatch.mockReset()
+  espiaoResumo.mockImplementation(resumoReal)
 })
 
 describe('SaidasLista — os quatro estados', () => {
@@ -121,10 +154,13 @@ describe('SaidasLista — resolve o nome do cliente sem quebrar a lista', () => 
       if (rota === '/api/clientes') return Promise.reject(new ErroApi(403, { erro: 'sem permissao' }))
       return Promise.reject(new Error('rota inesperada: ' + rota))
     })
-    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    const { container } = render(<SaidasLista onSessaoExpirada={() => {}} />)
     expect(await screen.findByText('S-0001')).toBeInTheDocument()
-    // sem o nome resolvido, cai no travessao — a lista continua utilizavel
-    expect(screen.getByText('—')).toBeInTheDocument()
+    // Sem o nome resolvido, a celula do cliente cai no travessao — a lista
+    // continua utilizavel. Aponta pra celula pelo seletor de classe: a
+    // coluna RECEB. desta mesma linha tambem mostra travessao (pedido nao
+    // pago nao tem prazo de recebimento).
+    expect(container.querySelector('.saidas-cliente-nome')?.textContent).toBe('—')
   })
 })
 
@@ -263,13 +299,17 @@ describe('SaidasLista — pagamento editável na linha (chip vira seletor, Atras
   })
 
   it('pag="—" (nao aplicavel) continua um badge estatico, sem virar seletor', async () => {
-    // cliente_id resolvido (clienteA) pra so existir UM travessao na linha
-    // — o do badge de pagamento — e a asserção abaixo ficar sem ambiguidade.
+    // cliente_id resolvido (clienteA) pra o travessao do nome do cliente nao
+    // entrar na conta. A coluna RECEB. tambem mostra travessao nesta linha
+    // (pedido sem pagamento nao tem prazo de recebimento), entao a asserção
+    // aponta pro badge de pagamento pelo seletor de classe, e nao pro texto
+    // solto na tela.
     mockGetPadrao([saida({ pag: '—', cliente_id: 'cli-1' })], [clienteA])
-    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    const { container } = render(<SaidasLista onSessaoExpirada={() => {}} />)
     await screen.findByText('S-0001')
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
-    expect(screen.getByText('—')).toBeInTheDocument()
+    const badges = [...container.querySelectorAll('.saidas-badge')]
+    expect(badges.map(b => b.textContent)).toContain('—')
   })
 
   it('marcar Pago chama PATCH /api/saidas/:id/pag e atualiza a linha com a resposta', async () => {
@@ -369,5 +409,198 @@ describe('SaidasLista — abrir o modal', () => {
     render(<SaidasLista onSessaoExpirada={() => {}} />)
     fireEvent.click(await screen.findByRole('button', { name: /lançar primeira saída/i }))
     expect(await screen.findByRole('dialog', { name: 'Nova saída' })).toBeInTheDocument()
+  })
+})
+
+/**
+ * Os quatro cartoes de resumo (achado S-1 da auditoria; protótipo
+ * `pedidoStats`, markup 412-419 e dados 2394-2399). O terceiro e o motivo de
+ * este bloco existir: "quanto os minimercados me devem" nao aparecia em
+ * nenhuma tela de rotina, so em Relatorios ▸ Inadimplentes, que e tela de
+ * analise.
+ */
+describe('SaidasLista — cartoes de resumo', () => {
+  it('"Pedidos" conta todas as saidas lancadas', async () => {
+    mockGetPadrao([saida({ id: '1', numero: 'S-1' }), saida({ id: '2', numero: 'S-2' })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+    expect(within(cartao('PEDIDOS')).getByText('2')).toBeInTheDocument()
+  })
+
+  it('"Faturado (entregue)" soma so os entregues e diz quantos sao', async () => {
+    mockGetPadrao([
+      saida({ id: '1', numero: 'S-1', status: 'Entregue', pag: 'Pago', valor: 1000, data_pag: '2026-08-06' }),
+      saida({ id: '2', numero: 'S-2', status: 'Em rota', valor: 9999 }),
+    ])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+    const c = cartao('FATURADO (ENTREGUE)')
+    expect(within(c).getByText('R$ 1.000')).toBeInTheDocument()
+    expect(within(c).getByText('1 pedido entregue')).toBeInTheDocument()
+  })
+
+  it('"A receber / atrasado" soma o que os minimercados ainda devem', async () => {
+    mockGetPadrao([
+      saida({ id: '1', numero: 'S-1', pag: 'Pago', valor: 1000, data_pag: '2026-08-06' }),
+      saida({ id: '2', numero: 'S-2', pag: 'Pendente', venc: AMANHA, valor: 300 }),
+      saida({ id: '3', numero: 'S-3', pag: 'Pendente', venc: ONTEM, valor: 200 }),
+    ])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+    expect(within(cartao('A RECEBER / ATRASADO')).getByText('R$ 500')).toBeInTheDocument()
+  })
+
+  it('pedido cancelado ("—" no pagamento) nao entra em "A receber" — nao e divida', async () => {
+    mockGetPadrao([
+      saida({ id: '1', numero: 'S-1', status: 'Cancelado', pag: '—', valor: 4000 }),
+      saida({ id: '2', numero: 'S-2', pag: 'Pendente', venc: AMANHA, valor: 300 }),
+    ])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+    expect(within(cartao('A RECEBER / ATRASADO')).getByText('R$ 300')).toBeInTheDocument()
+  })
+
+  it('a sub-linha conta atraso pelo vencimento DECORRIDO, nao pelo `pag` gravado', async () => {
+    mockGetPadrao([saida({ id: '1', numero: 'S-1', pag: 'Pendente', venc: ONTEM, valor: 200 })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+    expect(within(cartao('A RECEBER / ATRASADO')).getByText('1 pedido em atraso')).toBeInTheDocument()
+  })
+
+  it('vencimento no futuro nao conta como atraso', async () => {
+    mockGetPadrao([saida({ id: '1', numero: 'S-1', pag: 'Pendente', venc: AMANHA, valor: 200 })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+    expect(within(cartao('A RECEBER / ATRASADO')).getByText('nenhum em atraso')).toBeInTheDocument()
+  })
+
+  it('tudo pago: R$ 0 MEDIDO e "nenhum em atraso" — nunca travessao', async () => {
+    mockGetPadrao([
+      saida({ id: '1', numero: 'S-1', pag: 'Pago', valor: 1000, data_pag: '2026-08-06' }),
+      saida({ id: '2', numero: 'S-2', pag: 'Pago', valor: 500, data_pag: '2026-08-06' }),
+    ])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+    const c = cartao('A RECEBER / ATRASADO')
+    expect(within(c).getByText('R$ 0')).toBeInTheDocument()
+    expect(within(c).getByText('nenhum em atraso')).toBeInTheDocument()
+    expect(within(c).queryByText('—')).not.toBeInTheDocument()
+  })
+
+  it('"Qtd entregue" soma o peso so dos entregues', async () => {
+    mockGetPadrao([
+      saida({ id: '1', numero: 'S-1', status: 'Entregue', pag: 'Pago', peso: 100, data_pag: '2026-08-06' }),
+      saida({ id: '2', numero: 'S-2', status: 'Em rota', peso: 900 }),
+    ])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+    expect(within(cartao('QTD ENTREGUE')).getByText('100 kg')).toBeInTheDocument()
+  })
+
+  it('"Qtd entregue" com item nao convertivel sai marcado com * e explicacao no title', async () => {
+    mockGetPadrao([
+      saida({
+        id: '1', numero: 'S-1', status: 'Entregue', pag: 'Pago',
+        peso: 100, data_pag: '2026-08-06', itens_sem_conversao: 1,
+      }),
+    ])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+    const marcado = within(cartao('QTD ENTREGUE')).getByText('100 kg*')
+    expect(marcado.getAttribute('title')).toContain('peso médio')
+    expect(marcado.getAttribute('title')).toContain('1 item')
+  })
+
+  it('os cartoes somam a base inteira, NAO o que os filtros deixam visivel', async () => {
+    mockGetPadrao([
+      saida({ id: '1', numero: 'S-1', pag: 'Pago', valor: 1000, data_pag: '2026-08-06' }),
+      saida({ id: '2', numero: 'S-2', pag: 'Pendente', venc: AMANHA, valor: 300 }),
+    ])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+
+    fireEvent.click(botaoFiltro('Filtrar por pagamento', 'Pago'))
+    expect(screen.queryByText('S-2')).not.toBeInTheDocument()
+    // A tabela mostra so a saida paga, mas o cartao continua respondendo
+    // "quanto os minimercados me devem" pela carteira inteira.
+    expect(within(cartao('A RECEBER / ATRASADO')).getByText('R$ 300')).toBeInTheDocument()
+    expect(within(cartao('PEDIDOS')).getByText('2')).toBeInTheDocument()
+  })
+
+  it('sem nenhuma saida lancada nao existe cartao com R$ 0 — o estado vazio explica', async () => {
+    mockGetPadrao([])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText(/nenhuma saída lançada/i)
+    expect(screen.queryByRole('group', { name: 'Resumo das saídas' })).not.toBeInTheDocument()
+    expect(screen.queryByText('R$ 0')).not.toBeInTheDocument()
+  })
+})
+
+describe('SaidasLista — isolacao de falha dos cartoes', () => {
+  it('resumo que nao pode ser calculado vira travessao com aviso, e a lista continua visivel', async () => {
+    espiaoResumo.mockImplementation(() => { throw new Error('base inconsistente') })
+    mockGetPadrao([saida({ id: '1', numero: 'S-1', valor: 1000 })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+
+    // A lista — o trabalho de rotina desta tela — nao foi derrubada.
+    expect(await screen.findByText('S-1')).toBeInTheDocument()
+
+    expect(screen.getByRole('status')).toHaveTextContent(/não foi possível calcular o resumo/i)
+
+    for (const rotulo of ['PEDIDOS', 'FATURADO (ENTREGUE)', 'A RECEBER / ATRASADO', 'QTD ENTREGUE']) {
+      expect(within(cartao(rotulo)).getAllByText('—').length).toBeGreaterThan(0)
+    }
+    expect(cartoes().queryByText('R$ 0')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Coluna RECEB. (achado S-2; protótipo cabecalho 424, celula 436, dado
+ * 2406): dias entre a entrega e o pagamento. E o insumo visivel do
+ * componente "recebimento" do ciclo de caixa, e sai da MESMA funcao que
+ * alimenta essa media (diasRecebimentoSaida, derive/financeiro.ts).
+ */
+describe('SaidasLista — coluna RECEB.', () => {
+  it('a coluna existe no cabecalho da tabela', async () => {
+    mockGetPadrao([saida()])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+    expect(screen.getByText('RECEB.')).toBeInTheDocument()
+  })
+
+  it('mostra os dias entre entrega e pagamento do pedido entregue e pago', async () => {
+    mockGetPadrao([
+      saida({
+        id: '1', numero: 'S-1', status: 'Entregue', pag: 'Pago',
+        entrega: '2026-08-05', data_pag: '2026-08-08',
+      }),
+    ])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+    expect(screen.getByText('3 d')).toBeInTheDocument()
+  })
+
+  it('pago no mesmo dia da entrega mostra "0 d", nao travessao', async () => {
+    mockGetPadrao([
+      saida({
+        id: '1', numero: 'S-1', status: 'Entregue', pag: 'Pago',
+        entrega: '2026-08-05', data_pag: '2026-08-05',
+      }),
+    ])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+    expect(screen.getByText('0 d')).toBeInTheDocument()
+  })
+
+  it('pedido ainda nao pago nao tem prazo a exibir', async () => {
+    mockGetPadrao([
+      saida({
+        id: '1', numero: 'S-1', status: 'Entregue', pag: 'Pendente',
+        entrega: '2026-08-05', data_pag: null, venc: AMANHA,
+      }),
+    ])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-1')
+    expect(screen.queryByText(/^\d+ d$/)).not.toBeInTheDocument()
   })
 })

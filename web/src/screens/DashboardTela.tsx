@@ -37,6 +37,13 @@ import type { ProdutoAgregado } from '../derive/relatorios'
 import {
   filtrarPorPeriodo, queryDePeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo,
 } from '../derive/periodo'
+import {
+  guiaDePrimeirosPassos,
+  type ContagensDeCadastro,
+  type GuiaDePrimeirosPassos,
+} from '../derive/primeirosPassos'
+import { guiaFoiDispensado, dispensarGuia } from '../preferenciaGuia'
+import type { Tela } from '../telas'
 import './DashboardTela.css'
 
 const CORES: Record<Health, string> = { green: '#3f8f5b', amber: '#c79320', red: '#c2502f' }
@@ -141,6 +148,97 @@ function cartaoDeIndicador(
   }
 }
 
+// -------------------------------- guia de primeiros passos (achado D-2)
+
+/**
+ * O painel de onboarding. Só DESENHA — quem decide o que está feito, qual é
+ * o passo atual e se o painel deve existir é `guiaDePrimeirosPassos()`
+ * (derive/primeirosPassos.ts), e quem lembra da dispensa é
+ * preferenciaGuia.ts. Portado de design/CRM Hortifruti.dc.html:119-150.
+ */
+function PainelPrimeirosPassos(
+  { guia, onIr, onDispensar }:
+  { guia: GuiaDePrimeirosPassos; onIr: (tela: Tela) => void; onDispensar: () => void },
+) {
+  return (
+    <section className="dashboard-guia" aria-label="Guia de primeiros passos">
+      <div className="dashboard-guia-cabecalho">
+        <div className="dashboard-guia-textos">
+          <div className="dashboard-guia-titulo">{guia.titulo}</div>
+          <div className="dashboard-guia-sub">{guia.sub}</div>
+        </div>
+        <div className="dashboard-guia-progresso">
+          <div className="dashboard-guia-progresso-texto">{guia.progresso}</div>
+          <div className="dashboard-guia-barra-trilha">
+            <div className="dashboard-guia-barra-preenchimento" style={{ width: `${guia.barraPct}%` }} />
+          </div>
+        </div>
+        {/* O guia fecha sozinho na primeira saída lançada; até lá, quem não
+            quer o painel precisa de uma saída que não seja "cumpra os cinco
+            passos agora". */}
+        <button
+          type="button"
+          className="dashboard-guia-dispensar"
+          onClick={onDispensar}
+          title="Não mostrar mais este guia"
+        >
+          Dispensar
+        </button>
+      </div>
+      <div className="dashboard-guia-passos">
+        {guia.passos.map(p => (
+          <div
+            key={p.id}
+            className={`dashboard-guia-passo${p.atual ? ' dashboard-guia-passo--atual' : ''}`}
+          >
+            <span
+              className={
+                'dashboard-guia-marca'
+                + (p.feito ? ' dashboard-guia-marca--feito' : p.atual ? ' dashboard-guia-marca--atual' : '')
+              }
+              aria-hidden="true"
+            >
+              {p.marca}
+            </span>
+            <div className="dashboard-guia-passo-corpo">
+              <div className={`dashboard-guia-passo-label${p.feito ? ' dashboard-guia-passo-label--feito' : ''}`}>
+                {p.label}
+                {/* O ✓ é decorativo (aria-hidden na bolinha); sem isto,
+                    "feito" e "pendente" soam idênticos num leitor de tela. */}
+                <span className="dashboard-guia-passo-situacao"> — {p.feito ? 'concluído' : 'pendente'}</span>
+              </div>
+              <div className="dashboard-guia-passo-hint">{p.hint}</div>
+            </div>
+            <div className="dashboard-guia-passo-contagem">{p.contagemTexto}</div>
+            {p.mostrarCta && (
+              <button type="button" className="dashboard-guia-cta" onClick={() => onIr(p.tela)}>
+                {p.cta}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * Estado da carga dos DOIS cadastros que o Dashboard ainda não buscava
+ * (produtos e fornecedores). Fica separado do `Promise.all` das cinco listas
+ * de propósito, por duas razões:
+ *
+ *  - Uma falha aqui não pode derrubar o painel inteiro. Os oito KPIs não
+ *    dependem de produtos nem de fornecedores; se essa busca falhar, o que
+ *    se perde é o guia, não a tela.
+ *  - E o guia, sem esse dado, não pode CHUTAR. 'falhou' vira `null` na
+ *    derivação, que fecha o painel — nunca "cadastre um produto" para quem
+ *    tem cem e sofreu um erro de rede (ver derive/primeirosPassos.ts).
+ */
+type CargaDeCadastros =
+  | { situacao: 'carregando' }
+  | { situacao: 'ok'; produtos: number; fornecedores: number }
+  | { situacao: 'falhou' }
+
 interface DashboardTelaProps {
   /**
    * Período global do cabeçalho (App.tsx, achado S-3). Esta tela é a razão
@@ -156,11 +254,18 @@ interface DashboardTelaProps {
    * vendas, dizendo que a base de clientes evaporou.
    */
   periodo?: Periodo
+  /**
+   * Leva o usuário a outra tela — hoje só o botão do guia de primeiros
+   * passos usa (achado D-2). Obrigatória, e não opcional com no-op: o botão
+   * "Cadastrar produto" que não sai do lugar é pior que guia nenhum, e o
+   * compilador é o único lugar onde esse esquecimento é barato de pegar.
+   */
+  onNavegar: (tela: Tela) => void
   /** Sessão expirou (401 da API) — a tela volta ao login em vez de mostrar erro. */
   onSessaoExpirada: () => void
 }
 
-export function DashboardTela({ periodo = PERIODO_TODOS, onSessaoExpirada }: DashboardTelaProps) {
+export function DashboardTela({ periodo = PERIODO_TODOS, onNavegar, onSessaoExpirada }: DashboardTelaProps) {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [saidas, setSaidas] = useState<Saida[]>([])
   const [entradas, setEntradas] = useState<Entrada[]>([])
@@ -169,6 +274,10 @@ export function DashboardTela({ periodo = PERIODO_TODOS, onSessaoExpirada }: Das
   const [produtosAgregados, setProdutosAgregados] = useState<ProdutoAgregado[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
+  const [cadastros, setCadastros] = useState<CargaDeCadastros>({ situacao: 'carregando' })
+  // Inicializador preguiçoso: lê o armazenamento UMA vez, na montagem — e
+  // nunca deixa uma exceção de `localStorage` subir (ver preferenciaGuia.ts).
+  const [guiaDispensado, setGuiaDispensado] = useState(guiaFoiDispensado)
 
   useEffect(() => {
     let cancelado = false
@@ -217,15 +326,90 @@ export function DashboardTela({ periodo = PERIODO_TODOS, onSessaoExpirada }: Das
     return () => { cancelado = true }
   }, [periodo, onSessaoExpirada])
 
+  /**
+   * Produtos e fornecedores — os dois únicos dados do guia que o Dashboard
+   * ainda não tinha. Os outros três passos saem das listas que já estavam
+   * aqui: clientes, entradas e saídas (base inteira, não a recortada).
+   *
+   * Não dava para derivar nenhum dos dois do que já havia. O agregado de
+   * `/api/relatorios/produtos` só traz produto MOVIMENTADO e vem filtrado
+   * pelo período — produto recém-cadastrado, que é justo o caso do passo 1,
+   * não aparece nele. E fornecedor só apareceria através de uma entrada, que
+   * é o passo 4: o passo 2 precisa poder ser cumprido ANTES do 4, ou a ordem
+   * do guia se contradiz. Duas listas curtas (`select *` sem join pesado nem
+   * agregação), buscadas uma vez na montagem.
+   *
+   * SEM `periodo` NA DEPENDÊNCIA — de propósito: o guia é sobre CADASTRO, e
+   * cadastro não pertence a mês nenhum. É a mesma razão pela qual a carteira
+   * de clientes não é filtrada (ver a prop `periodo` acima). Trocar o mês no
+   * cabeçalho não muda o guia nem refaz esta busca.
+   */
+  useEffect(() => {
+    let cancelado = false
+    Promise.all([
+      api.get<unknown[]>('/api/produtos'),
+      api.get<unknown[]>('/api/fornecedores'),
+    ])
+      .then(([ps, fs]) => {
+        if (cancelado) return
+        setCadastros({ situacao: 'ok', produtos: ps.length, fornecedores: fs.length })
+      })
+      .catch((err: unknown) => {
+        if (cancelado) return
+        if (err instanceof ErroApi && err.status === 401) {
+          onSessaoExpirada()
+          return
+        }
+        // Não mexe em `erro`: uma falha aqui esconde o guia, não a tela.
+        setCadastros({ situacao: 'falhou' })
+      })
+    return () => { cancelado = true }
+  }, [onSessaoExpirada])
+
   if (carregando) return <p className="dashboard-estado">Carregando…</p>
   if (erro) return <p className="dashboard-estado dashboard-estado--erro" role="alert">{erro}</p>
+
+  // ---- guia de primeiros passos (achado D-2) ----
+  // As contagens vêm da base INTEIRA — `clientes`, `entradas` e `saidas`, e
+  // não `saidasPeriodo`/`entradasPeriodo` (que nem existem ainda neste ponto
+  // do arquivo, o que é proposital: o guia não tem como filtrar por engano).
+  const contagens: ContagensDeCadastro | null = cadastros.situacao === 'ok'
+    ? {
+      produtos: cadastros.produtos,
+      fornecedores: cadastros.fornecedores,
+      clientes: clientes.length,
+      entradas: entradas.length,
+      saidas: saidas.length,
+    }
+    : null
+  const guia = guiaDePrimeirosPassos(contagens, guiaDispensado)
+
+  function dispensar() {
+    // O retorno diz se a preferência sobreviverá ao F5; o painel fecha de
+    // qualquer jeito. Quem clicou em "Dispensar" tem direito a ver o painel
+    // sumir mesmo com o armazenamento bloqueado — só voltará na próxima
+    // recarga (ver preferenciaGuia.ts).
+    dispensarGuia()
+    setGuiaDispensado(true)
+  }
+
+  const painelDoGuia = guia.aberto
+    ? <PainelPrimeirosPassos guia={guia} onIr={onNavegar} onDispensar={dispensar} />
+    : null
+
   if (clientes.length === 0) {
+    // O guia vem ANTES do estado vazio, e não no lugar dele: o estado vazio
+    // explica por que a tela está muda, o guia diz o que fazer a respeito —
+    // e é justamente aqui, no sistema recém-aberto, que ele mais serve.
     return (
-      <div className="estado-vazio dashboard-vazio">
-        <div className="dashboard-vazio-titulo">Nenhum cliente cadastrado ainda.</div>
-        <div className="dashboard-vazio-sub">
-          Cadastre os minimercados que você atende para começar a acompanhar a saúde do negócio — os
-          indicadores desta tela dependem da carteira de clientes.
+      <div className="dashboard-tela">
+        {painelDoGuia}
+        <div className="estado-vazio dashboard-vazio">
+          <div className="dashboard-vazio-titulo">Nenhum cliente cadastrado ainda.</div>
+          <div className="dashboard-vazio-sub">
+            Cadastre os minimercados que você atende para começar a acompanhar a saúde do negócio — os
+            indicadores desta tela dependem da carteira de clientes.
+          </div>
         </div>
       </div>
     )
@@ -304,6 +488,8 @@ export function DashboardTela({ periodo = PERIODO_TODOS, onSessaoExpirada }: Das
 
   return (
     <div className="dashboard-tela">
+      {painelDoGuia}
+
       {/* ---- cartoes do topo ---- */}
       <div className="dashboard-cards-topo">
         <div className="dashboard-card-topo">

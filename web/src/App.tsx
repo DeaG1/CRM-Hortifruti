@@ -215,7 +215,13 @@ function App() {
       onSair={sair}
       onSessaoExpirada={sair}
     >
-      <Conteudo tela={telaEfetiva} papel={eu.papel} periodo={periodo} onSessaoExpirada={sair} />
+      <Conteudo
+        tela={telaEfetiva}
+        papel={eu.papel}
+        periodo={periodo}
+        onNavegar={setTela}
+        onSessaoExpirada={sair}
+      />
     </Shell>
   )
 }
@@ -237,11 +243,15 @@ function App() {
  * precisam saber o papel de quem esta olhando.
  */
 function Conteudo(
-  { tela, papel, periodo, onSessaoExpirada }:
-  { tela: Tela; papel: Papel; periodo: Periodo; onSessaoExpirada: () => void },
+  { tela, papel, periodo, onNavegar, onSessaoExpirada }:
+  { tela: Tela; papel: Papel; periodo: Periodo; onNavegar: (tela: Tela) => void; onSessaoExpirada: () => void },
 ) {
   switch (tela) {
-    case 'dashboard':     return <DashboardTela periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
+    // `onNavegar` e o MESMO `setTela` do menu lateral: o botao do guia de
+    // primeiros passos (achado D-2) leva a tela do passo atual exatamente
+    // como se o usuario tivesse clicado no item do menu — mesmo destino,
+    // mesmo estado, periodo global preservado.
+    case 'dashboard':     return <DashboardTela periodo={periodo} onNavegar={onNavegar} onSessaoExpirada={onSessaoExpirada} />
     case 'relatorios':    return <RelatoriosTela periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
     case 'clientes':      return <ClientesModulo periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
     case 'produtos':      return <ProdutosLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />

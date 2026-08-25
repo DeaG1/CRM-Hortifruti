@@ -15,6 +15,10 @@ import {
   type PerdaDeposito,
   type ProdutoAgregado,
 } from './relatorios'
+// A aba Perdas nao calcula o indice: ela chama esta funcao. Importada aqui
+// para comparar os dois lado a lado — ver o describe no fim de
+// `derivarRelatorioPerdas`.
+import { indiceDePerdas } from './dashboard'
 import type { Cliente } from './clientes'
 import type { Fornecedor } from './fornecedores'
 import type { Lancamento } from './lancamentos'
@@ -989,8 +993,8 @@ describe('derivarRelatorioPerdas', () => {
 
   it('por produto reaproveita a view de produtos ja calculada, filtrando perdaPct null', () => {
     const produtosView = [
-      { produtoId: 'p1', nome: 'Com perda', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 0, margem: 0, markupPct: null, perdaPct: 20 },
-      { produtoId: 'p2', nome: 'Sem compra', compradoQtd: 0, vendidoQtd: 0, faturamento: 0, itensSemConversao: 0, margem: 0, markupPct: null, perdaPct: null },
+      { produtoId: 'p1', nome: 'Com perda', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p2', nome: 'Sem compra', compradoQtd: 0, vendidoQtd: 0, faturamento: 0, itensSemConversao: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: null },
     ]
     const { porProduto } = derivarRelatorioPerdas([], [], produtosView, '', '')
     expect(porProduto).toHaveLength(1)
@@ -1029,8 +1033,8 @@ describe('derivarRelatorioPerdas', () => {
 
   it('repassa itensSemConversao de cada linha de produtos para "perdas por produto"', () => {
     const produtosView = [
-      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 2, margem: 0, markupPct: null, perdaPct: 20 },
-      { produtoId: 'p2', nome: 'Batata', compradoQtd: 200, vendidoQtd: 20, faturamento: 20, itensSemConversao: 0, margem: 0, markupPct: null, perdaPct: 5 },
+      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 2, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p2', nome: 'Batata', compradoQtd: 200, vendidoQtd: 20, faturamento: 20, itensSemConversao: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 5 },
     ]
     const { porProduto } = derivarRelatorioPerdas([], [], produtosView, '', '')
     expect(porProduto.find(p => p.nome === 'Alface')!.itensSemConversao).toBe(2)
@@ -1039,13 +1043,13 @@ describe('derivarRelatorioPerdas', () => {
 
   it('totais.itensSemConversaoProduto soma as linhas exibidas — 0 quando a tabela esta completa', () => {
     const completa = [
-      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 0, margem: 0, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
     ]
     expect(derivarRelatorioPerdas([], [], completa, '', '').totais.itensSemConversaoProduto).toBe(0)
 
     const incompleta = [
-      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 2, margem: 0, markupPct: null, perdaPct: 20 },
-      { produtoId: 'p2', nome: 'Tomate', compradoQtd: 50, vendidoQtd: 5, faturamento: 5, itensSemConversao: 3, margem: 0, markupPct: null, perdaPct: 8 },
+      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 2, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p2', nome: 'Tomate', compradoQtd: 50, vendidoQtd: 5, faturamento: 5, itensSemConversao: 3, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 8 },
     ]
     expect(derivarRelatorioPerdas([], [], incompleta, '', '').totais.itensSemConversaoProduto).toBe(5)
   })
@@ -1139,7 +1143,7 @@ describe('derivarRelatorioPerdas', () => {
     // "perdas por produto" sai de outra rota (o agregado por produto): o que
     // ficou de fora la nao diz nada sobre a perda total nem sobre o indice.
     const produtosView = [
-      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 5, margem: 0, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 5, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
     ]
     const { totais } = derivarRelatorioPerdas([entrada({ peso_total: 1000 })], [], produtosView, '', '')
     expect(totais.itensSemConversaoProduto).toBe(5)
@@ -1149,11 +1153,171 @@ describe('derivarRelatorioPerdas', () => {
 
   it('linha sem perdaPct nao entra na tabela nem no contador (nao e exibida)', () => {
     const produtosView = [
-      { produtoId: 'p1', nome: 'Sem compra', compradoQtd: 0, vendidoQtd: 0, faturamento: 0, itensSemConversao: 7, margem: 0, markupPct: null, perdaPct: null },
+      { produtoId: 'p1', nome: 'Sem compra', compradoQtd: 0, vendidoQtd: 0, faturamento: 0, itensSemConversao: 7, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: null },
     ]
     const { porProduto, totais } = derivarRelatorioPerdas([], [], produtosView, '', '')
     expect(porProduto).toHaveLength(0)
     expect(totais.itensSemConversaoProduto).toBe(0)
+  })
+
+  // ---- o indice desta aba E o indiceDePerdas do painel ----
+  //
+  // Ate esta versao a aba reimplementava a formula a mao, com um comentario
+  // dizendo que era "o mesmo perdaMedia do dashboard/financeiro" — a terceira
+  // instancia do mesmo numero (as outras duas fechadas em a20e9d6 e 7a16a20).
+  // Estes testes comparam os dois NUMERO A NUMERO, no molde de
+  // resumoOperacional.test.ts, para que uma futura mudanca de formula em um
+  // lado so nao possa passar despercebida.
+
+  describe('indicePerdaPct e indiceDePerdas (derive/dashboard.ts), nao uma segunda conta', () => {
+    /** O mesmo adaptador que `derivarRelatorioPerdas` usa por dentro: id
+     * sintetico = numero da coleta, campo que `indiceDePerdas` nunca le. */
+    const indiceDireto = (entradas: EntradaResumo[], perdas: PerdaDeposito[]) =>
+      indiceDePerdas(entradas.map(en => ({ ...en, id: en.numero })), perdas)
+
+    /** Os casos que interessam ao indice, todos com denominador. O periodo
+     * fica aberto ('' / '') para que a lista que a aba agrega seja a MESMA
+     * que vai para `indiceDePerdas` — o recorte tem teste proprio abaixo. */
+    const casos: { nome: string; entradas: EntradaResumo[]; perdas: PerdaDeposito[]; esperado: number }[] = [
+      {
+        nome: 'so perda de coleta',
+        entradas: [entrada({ peso_total: 1000, perda_kg: 50 })],
+        perdas: [],
+        esperado: 5,
+      },
+      {
+        nome: 'coleta + deposito em KG',
+        entradas: [entrada({ peso_total: 1000, perda_kg: 50 })],
+        perdas: [perdaDaApi({ un: 'KG', qtd: 20, qtd_kg: 20 })],
+        esperado: 7,
+      },
+      {
+        nome: 'deposito em CX com fator entra pelos quilos, nunca pelas caixas',
+        entradas: [entrada({ peso_total: 1000, perda_kg: 10 })],
+        perdas: [perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: 32 })],
+        esperado: 4.2,
+      },
+      {
+        nome: 'deposito em CX sem fator fica fora do numerador (nunca vira 1)',
+        entradas: [entrada({ peso_total: 1000, perda_kg: 10 })],
+        perdas: [perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: null })],
+        esperado: 1,
+      },
+      {
+        nome: 'cabecalho e itens sao a MESMA perda de coleta: o maior, nunca a soma',
+        entradas: [entrada({ peso_total: 1000, perda_kg: 100, perda_itens_qtd: 60 })],
+        perdas: [],
+        esperado: 10,
+      },
+      {
+        nome: 'perda zero MEDIDA com peso recebido: 0%, e 0 e um numero',
+        entradas: [entrada({ peso_total: 1000, perda_kg: 0 })],
+        perdas: [],
+        esperado: 0,
+      },
+      {
+        nome: 'varias entradas e varias perdas somam antes de dividir',
+        entradas: [
+          entrada({ numero: 'C-1', peso_total: 1000, perda_kg: 20 }),
+          entrada({ numero: 'C-2', peso_total: 3000, perda_kg: 60, perda_itens_qtd: 90 }),
+        ],
+        perdas: [
+          perdaDaApi({ un: 'KG', qtd: 10, qtd_kg: 10 }),
+          perdaDaApi({ un: 'CX', qtd: 3, qtd_kg: 60, motivo: 'armazenagem' }),
+        ],
+        // (20 + 90 + 10 + 60) / 4000 * 100 = 4,5 — `perda_itens_qtd` 90 vence
+        // o cabecalho 60 da segunda coleta.
+        esperado: 4.5,
+      },
+      {
+        nome: 'o seed do prototipo: 296 kg de coleta + 92 kg de deposito sobre 8700 kg',
+        entradas: [entrada({ peso_total: 8700, perda_kg: 296, perda_itens_qtd: 296 })],
+        perdas: [
+          perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: 32 }),
+          perdaDaApi({ un: 'CX', qtd: 3, qtd_kg: 60, motivo: 'armazenagem' }),
+        ],
+        esperado: 4.4598,
+      },
+    ]
+
+    casos.forEach(({ nome, entradas, perdas, esperado }) => {
+      it(`bate com o painel: ${nome}`, () => {
+        const { totais } = derivarRelatorioPerdas(entradas, perdas, [], '', '')
+        const indice = indiceDireto(entradas, perdas)
+        expect(indice.disponivel).toBe(true)
+        // Numero a numero, com 10 casas: nao "arredondam igual", sao o mesmo.
+        expect(totais.indicePerdaPct).toBeCloseTo(indice.disponivel ? indice.valor : NaN, 10)
+        expect(totais.indicePerdaPct).toBeCloseTo(esperado, 3)
+        // O contador do cartao tambem vem de la, nao de uma soma paralela.
+        expect(totais.itensSemConversaoIndice)
+          .toBe(indice.disponivel ? (indice.itensSemConversao ?? 0) : 0)
+      })
+    })
+
+    it('bate com o painel tambem depois do recorte de periodo (a aba filtra, o painel recebe filtrado)', () => {
+      const entradas = [
+        entrada({ numero: 'C-1', data: '2026-06-01', peso_total: 1000, perda_kg: 40 }),
+        entrada({ numero: 'C-2', data: '2026-05-01', peso_total: 9000, perda_kg: 900 }),
+      ]
+      const perdas = [
+        perdaDaApi({ data: '2026-06-10', un: 'KG', qtd: 10, qtd_kg: 10 }),
+        perdaDaApi({ data: '2026-05-10', un: 'KG', qtd: 800, qtd_kg: 800 }),
+      ]
+      const { totais } = derivarRelatorioPerdas(entradas, perdas, [], '2026-06', '2026-06')
+      // O painel, recebendo so o que cai no mesmo recorte, tem que dar igual.
+      const indice = indiceDireto([entradas[0]], [perdas[0]])
+      expect(indice.disponivel && indice.valor).toBeCloseTo(totais.indicePerdaPct as number, 10)
+      expect(totais.indicePerdaPct).toBeCloseTo(5, 10) // (40+10)/1000*100
+    })
+
+    it('itens sem conversao dos DOIS lados da fracao chegam somados, como no painel', () => {
+      const entradas = [entrada({ peso_total: 1000, perda_kg: 10, itens_sem_conversao: 2 })]
+      const perdas = [perdaDaApi({ un: 'CX', qtd: 4, qtd_kg: null })]
+      const { totais } = derivarRelatorioPerdas(entradas, perdas, [], '', '')
+      const indice = indiceDireto(entradas, perdas)
+      expect(totais.itensSemConversaoIndice).toBe(3)
+      expect(indice.disponivel && indice.itensSemConversao).toBe(3)
+      // O contador do cartao "Perda total" continua sendo outro (so o
+      // numerador): os dois numeros ficam incompletos por motivos diferentes.
+      expect(totais.itensSemConversaoPerdaTotal).toBe(1)
+    })
+
+    // ---- a UNICA divergencia que havia entre as duas implementacoes ----
+
+    it('sem quilo comprado no periodo o indice e null (travessao), nunca 0%', () => {
+      // A conta escrita a mao daqui devolvia `0` neste caso; o painel devolve
+      // indisponivel. Zero era a resposta errada, e a pior errada possivel:
+      // "0,0% de perdas" e exatamente o que tranquiliza o dono no cartao onde
+      // nada foi medido. Vale nos dois casos em que nao ha denominador —
+      // nenhuma entrada, ou entradas cujo peso_total soma zero.
+      const semEntrada = derivarRelatorioPerdas([], [perdaDaApi({ un: 'KG', qtd: 9, qtd_kg: 9 })], [], '', '')
+      expect(semEntrada.totais.indicePerdaPct).toBeNull()
+      expect(indiceDireto([], [perdaDaApi({ un: 'KG', qtd: 9, qtd_kg: 9 })]).disponivel).toBe(false)
+
+      const entradasSemPeso = [entrada({ peso_total: 0, perda_kg: 5 })]
+      const semPeso = derivarRelatorioPerdas(entradasSemPeso, [], [], '', '')
+      expect(semPeso.totais.indicePerdaPct).toBeNull()
+      expect(indiceDireto(entradasSemPeso, []).disponivel).toBe(false)
+
+      // Travessao no indice nao apaga o resto da aba: a perda MEDIDA continua
+      // sendo um numero (5 kg de coleta aconteceram), e o zero do indice e
+      // que seria a mentira.
+      expect(semPeso.totais.perdaTotalQtd).toBe(5)
+      expect(semEntrada.totais.perdaTotalQtd).toBe(9)
+    })
+
+    it('indice null zera o contador do indice — nao ha numero para marcar com *', () => {
+      const { totais } = derivarRelatorioPerdas(
+        [entrada({ peso_total: 0, itens_sem_conversao: 4 })],
+        [perdaDaApi({ un: 'CX', qtd: 2, qtd_kg: null })],
+        [], '', '',
+      )
+      expect(totais.indicePerdaPct).toBeNull()
+      expect(totais.itensSemConversaoIndice).toBe(0)
+      // O cartao "Perda total", que nao depende de denominador, continua
+      // marcado normalmente.
+      expect(totais.itensSemConversaoPerdaTotal).toBe(1)
+    })
   })
 })
 

@@ -24,6 +24,22 @@ import { healthDoCliente, type Cliente, type Health, type StatusCliente } from '
 import type { Fornecedor } from './fornecedores'
 import type { Lancamento } from './lancamentos'
 import { situacaoExibidaSaida } from './pagamento'
+/**
+ * O índice de perdas da aba Perdas NÃO é uma conta deste módulo: é
+ * `indiceDePerdas` (derive/dashboard.ts), a mesma função que alimenta o KPI
+ * do painel e o cartão de Entradas (desde 7a16a20). Ver o comentário de
+ * `derivarRelatorioPerdas` para a divergência que a reutilização fechou.
+ *
+ * Isto fecha um CICLO de import — dashboard.ts já importa
+ * `perdaColetaEfetiva`/`derivarRelatorioProdutos` daqui. É seguro e
+ * deliberado: nenhum dos dois módulos CHAMA função do outro durante a
+ * avaliação do módulo (só dentro de corpos de função, executados na
+ * renderização), e os dois lados são `export function` (hoisted). A
+ * alternativa — um terceiro módulo só para esta função — arrastaria junto
+ * `Indicador`/`disponivel`/`indisponivel` e as interfaces `Entrada`/`Perda`,
+ * um refactor grande para evitar um ciclo que não faz mal.
+ */
+import { indiceDePerdas } from './dashboard'
 
 // ---------------------------------------------------------------- entrada
 
@@ -898,9 +914,20 @@ export interface RelatorioPerdasTotais {
    * convertida pela unidade dela. Incompleta quando
    * `itensSemConversaoPerdaTotal > 0`. */
   perdaTotalQtd: number
-  /** Mesmo `perdaMedia` do dashboard/financeiro: perda (coleta + depósito)
-   * sobre o total comprado no período, não sobre o total perdido. */
-  indicePerdaPct: number
+  /**
+   * Perda (coleta + depósito) sobre o total comprado no período, em % — o
+   * MESMO número que `indiceDePerdas` (derive/dashboard.ts) devolve para o
+   * KPI do painel e para o cartão de Entradas, porque é literalmente a
+   * chamada dessa função e não uma segunda implementação (ver
+   * `derivarRelatorioPerdas`).
+   *
+   * `null` quando não há quilo comprado no período para dividir — não dá
+   * para medir um índice sem denominador, e "0,0%" ali seria a leitura mais
+   * tranquilizadora possível ("não perdemos nada") justamente onde não se
+   * mediu nada. A tela mostra travessão. Zero MEDIDO (houve compra e não
+   * houve perda) continua saindo `0` normalmente.
+   */
+  indicePerdaPct: number | null
   principalMotivo: string | null
   principalMotivoPct: number | null
   perdasNoDeposito: number
@@ -922,6 +949,11 @@ export interface RelatorioPerdasTotais {
    * Deixa incompleto `indicePerdaPct` (cartão "Índice de perdas"), que é uma
    * fração: perda no numerador, kg comprado no denominador — os dois lados
    * podem perder lançamentos, e por isso a marca dele conta os dois.
+   *
+   * Vem de `indiceDePerdas().itensSemConversao`, não de uma soma própria — o
+   * contador é parte do que aquela função apura. `0` quando o índice é
+   * `null`: não há número para marcar (a marca do cartão "Perda total"
+   * continua saindo pelo contador dele, acima).
    */
   itensSemConversaoIndice: number
   /**
@@ -970,6 +1002,27 @@ export interface RelatorioPerdasTotais {
  * vez de 4,5%. Os dois saíam PARA BAIXO, que é a direção que esconde
  * sangria. Mesma regra e mesma leitura de api/src/routes/relatorios.ts e
  * estoque.ts, para as três telas não divergirem de novo.
+ *
+ * ---- o índice não é calculado aqui ----
+ *
+ * `indicePerdaPct` é `indiceDePerdas(entradas, perdas)` (derive/dashboard.ts)
+ * — a MESMA função do KPI do painel e do cartão de Entradas, chamada, não
+ * reescrita. Até esta versão havia aqui uma segunda implementação da mesma
+ * fórmula, com um comentário avisando que era "o mesmo perdaMedia do
+ * dashboard/financeiro": duplicação documentada continua sendo duplicação, e
+ * a terceira instância deste mesmo número (as duas anteriores fechadas em
+ * 7a16a20 e a20e9d6) é evidência de que o bilhete não protege ninguém — quem
+ * ajusta um lado não lê o comentário do outro.
+ *
+ * As duas implementações batiam número a número em todo caso com denominador
+ * (mesmos três termos, mesmo filtro de período, mesmo `perdaColetaEfetiva`,
+ * mesmo `qtd_kg`, mesmo par de contadores de itens sem conversão) e
+ * DIVERGIAM em um: sem quilo comprado no período, a versão daqui devolvia
+ * `0` e a do painel devolve indisponível. Zero era a resposta errada — e a
+ * pior errada possível, porque "0,0% de perdas" é exatamente o que o dono
+ * gostaria de ler no cartão em que nada foi medido. É a regra do projeto,
+ * que valia para o travessão que vira zero e vale igual no sentido inverso:
+ * ausência de base não é medida. Daí `indicePerdaPct: number | null`.
  */
 export function derivarRelatorioPerdas(
   entradas: EntradaResumo[],
@@ -1028,28 +1081,34 @@ export function derivarRelatorioPerdas(
       itensSemConversao: p.itensSemConversao,
     }))
 
-  const entKgTot = entradasPeriodo.reduce((s, e) => s + (e.peso_total || 0), 0)
-  const entPerdaTot = entradasPeriodo.reduce((s, e) => s + perdaColetaEfetiva(e), 0)
-    + perdasPeriodo.reduce((s, p) => s + (p.qtd_kg || 0), 0)
-
   // Só as perdas de depósito: a perda de coleta é kg por contrato e nunca
   // fica de fora. Igual à soma dos contadores por motivo, calculada aqui
   // sobre a mesma lista para não depender da ordem das linhas.
   const semConversaoPerda = perdasPeriodo.reduce((s, p) => s + (p.itens_sem_conversao || 0), 0)
-  // O denominador do índice (kg comprado) tem o contador dele desde 203fb28.
-  const semConversaoCompra = entradasPeriodo.reduce((s, e) => s + (e.itens_sem_conversao || 0), 0)
+
+  // O índice e o contador dele saem inteiros de `indiceDePerdas` — nenhuma
+  // aritmética própria aqui (ver o comentário acima). `id: en.numero` é um
+  // valor sintético: `indiceDePerdas` nunca lê esse campo (só soma peso e
+  // perda), ele é obrigatório no TIPO porque outras funções do mesmo módulo
+  // (giroDeEstoque, cicloDeCaixa) precisam de um id de verdade —
+  // `EntradaResumo` não carrega um. Mesmo adaptador de
+  // `derivarResumoEntradas` (derive/resumoOperacional.ts).
+  const indice = indiceDePerdas(
+    entradasPeriodo.map(en => ({ ...en, id: en.numero })),
+    perdasPeriodo,
+  )
 
   return {
     porMotivo,
     porProduto,
     totais: {
       perdaTotalQtd,
-      indicePerdaPct: entKgTot ? (entPerdaTot / entKgTot) * 100 : 0,
+      indicePerdaPct: indice.disponivel ? indice.valor : null,
       principalMotivo: porMotivo[0]?.motivo ?? null,
       principalMotivoPct: porMotivo[0]?.pct ?? null,
       perdasNoDeposito: perdasPeriodo.length,
       itensSemConversaoPerdaTotal: semConversaoPerda,
-      itensSemConversaoIndice: semConversaoPerda + semConversaoCompra,
+      itensSemConversaoIndice: indice.disponivel ? (indice.itensSemConversao ?? 0) : 0,
       itensSemConversaoProduto: porProduto.reduce((s, p) => s + p.itensSemConversao, 0),
     },
   }

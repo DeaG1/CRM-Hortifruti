@@ -850,15 +850,20 @@ function AbaPerdas({ dados }: { dados: ReturnType<typeof derivarRelatorioPerdas>
           sub: 'somando coleta e depósito',
         },
         {
+          // O mesmo número do KPI do painel e do cartão de Entradas: a aba
+          // chama `indiceDePerdas` (ver derivarRelatorioPerdas). Travessão —
+          // não "0,0%" — quando não houve compra no período: sem denominador
+          // não se mediu perda nenhuma, e zero ali seria a leitura mais
+          // tranquilizadora possível justamente onde não há medida.
           label: 'Índice de perdas',
-          valor: (
+          valor: totais.indicePerdaPct == null ? '—' : (
             <NumIncompleto
               texto={pct1(totais.indicePerdaPct)}
               n={totais.itensSemConversaoIndice}
               consequencia={CONSEQ_PERDA_INDICE}
             />
           ),
-          sub: 'meta ≤ 10%',
+          sub: totais.indicePerdaPct == null ? 'sem compra no período para medir' : 'meta ≤ 10%',
         },
         { label: 'Principal motivo', valor: totais.principalMotivo ?? '—', sub: totais.principalMotivoPct != null ? `${pctInt(totais.principalMotivoPct)} do total` : 'sem perdas' },
         { label: 'Perdas no depósito', valor: String(totais.perdasNoDeposito), sub: 'lançamentos avulsos' },

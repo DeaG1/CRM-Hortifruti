@@ -439,6 +439,75 @@ describe('RelatoriosTela — lançamentos (livro-caixa)', () => {
   })
 })
 
+describe('RelatoriosTela — indice de perdas (o mesmo numero do painel)', () => {
+  function cartaoDe(rotulo: string): HTMLElement {
+    const el = screen.getByText(rotulo).closest('.relatorios-cartao')
+    if (!el) throw new Error(`cartao "${rotulo}" nao encontrado`)
+    return el as HTMLElement
+  }
+
+  async function abrirPerdas() {
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByRole('button', { name: 'Perdas' })
+    fireEvent.click(screen.getByRole('button', { name: 'Perdas' }))
+    await screen.findByText('Perdas por motivo')
+  }
+
+  it('com dado: soma coleta e deposito sobre o kg comprado, igual ao KPI do painel', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ perda_kg: 50, peso_total: 1000 })],
+      '/api/perdas': [perda({ un: 'CX', qtd: 4, qtd_kg: 20 })],
+    })
+    await abrirPerdas()
+    // (50 + 20) / 1000 = 7% — o mesmo que indiceDePerdas devolve (comparado
+    // numero a numero em derive/relatorios.test.ts).
+    expect(within(cartaoDe('Índice de perdas')).getByText('7,0%')).toBeInTheDocument()
+    expect(within(cartaoDe('Índice de perdas')).getByText('meta ≤ 10%')).toBeInTheDocument()
+  })
+
+  it('zero MEDIDO continua sendo 0,0%: houve compra e nao houve perda', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ perda_kg: 0, peso_total: 1000 })],
+    })
+    await abrirPerdas()
+    expect(within(cartaoDe('Índice de perdas')).getByText('0,0%')).toBeInTheDocument()
+  })
+
+  it('sem dado: sem compra no periodo o cartao vira travessao, NUNCA 0,0%', async () => {
+    // A conta que a aba fazia a mao devolvia 0 aqui — "0,0% de perdas" no
+    // cartao em que nada foi medido, a leitura mais tranquilizadora possivel
+    // justamente onde nao ha medida. `indiceDePerdas` devolve indisponivel.
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/perdas': [perda({ un: 'KG', qtd: 9, qtd_kg: 9 })],
+    })
+    await abrirPerdas()
+    const cartao = cartaoDe('Índice de perdas')
+    expect(within(cartao).getByText('—')).toBeInTheDocument()
+    expect(within(cartao).queryByText('0,0%')).not.toBeInTheDocument()
+    expect(within(cartao).getByText('sem compra no período para medir')).toBeInTheDocument()
+    // O resto da aba continua vivo: a perda de deposito MEDIDA e um numero.
+    expect(within(cartaoDe('Perda total (kg)')).getByText('9')).toBeInTheDocument()
+  })
+
+  it('falha de carregamento: a tela inteira avisa em vez de mostrar indice pela metade', async () => {
+    // A aba Perdas depende de DUAS rotas (entradas e perdas) que vem na mesma
+    // carga; sem uma delas o indice sairia parcial, e um indice parcial e
+    // exatamente a divergencia que esta unificacao fecha. A tela nao tenta
+    // adivinhar: mostra o alerta e nao renderiza numero nenhum.
+    mockGet.mockImplementation((rota: string) => {
+      if (rota === '/api/perdas') return Promise.reject(new Error('falha de rede'))
+      if (rota.startsWith('/api/relatorios/produtos')) return Promise.resolve([])
+      return Promise.resolve([])
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível carregar os relatórios.')
+    expect(screen.queryByText('Índice de perdas')).not.toBeInTheDocument()
+  })
+})
+
 describe('RelatoriosTela — perdas', () => {
   it('mostra perda por motivo a partir do cabecalho da entrada e das perdas de deposito', async () => {
     mockCarga({

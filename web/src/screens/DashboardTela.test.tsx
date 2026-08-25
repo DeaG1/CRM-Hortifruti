@@ -286,7 +286,8 @@ describe('DashboardTela — KPI bate a meta / fora da meta', () => {
     await screen.findByText('Painel de indicadores')
     expect(within(cartao('Ticket médio por entrega')).getByText('R$ 1.000')).toBeInTheDocument()
     expect(within(cartao('Ticket médio por entrega')).queryByText('R$ 1.000*')).not.toBeInTheDocument()
-    expect(within(cartao('Nº de minimercados ativos')).getByText('1')).toBeInTheDocument()
+    expect(within(cartao('Ticket médio / minimercado')).getByText('R$ 1.000')).toBeInTheDocument()
+    expect(within(cartao('Ticket médio / minimercado')).queryByText('R$ 1.000*')).not.toBeInTheDocument()
   })
 
   it('item de entrada sem peso medio marca o indice pelo DENOMINADOR (kg recebido curto)', async () => {
@@ -318,6 +319,56 @@ describe('DashboardTela — KPI bate a meta / fora da meta', () => {
     const card = cartao('Ticket médio por entrega')
     expect(within(card).getByText('R$ 100')).toBeInTheDocument()
     expect(within(card).getByText('fora da meta')).toBeInTheDocument()
+  })
+})
+
+// =============== minimercados ativos: removido a pedido do dono ===============
+
+/**
+ * Guarda de reintroducao. A metrica "minimercados ativos" aparecia DUAS vezes
+ * no painel, comparada contra duas reguas diferentes: o cartao do topo dizia
+ * "-19 vs. equilibrio (20)" e o KPI da grade media o mesmo numero contra 35.
+ * O dono do produto mandou remover as duas formas.
+ *
+ * Estes testes existem porque a ausencia de um cartao nao aparece em teste
+ * nenhum dos outros: quem mexer no painel amanha e recolocar o cartao (ou
+ * reintroduzir clientesAtivos()) precisa esbarrar aqui, e nao descobrir pela
+ * tela do dono. A contagem de cartoes vai junto de proposito — e o que pega o
+ * cartao acrescentado sem rotulo conhecido.
+ */
+describe('DashboardTela — minimercados ativos NAO e renderizado', () => {
+  const comCarteiraCheia = () => mockApiPara({
+    // Dois clientes ativos: com o cartao vivo, o topo mostraria "2" e
+    // "-18 vs. equilibrio (20)". Nada disso pode aparecer.
+    clientes: [cliente({ id: '1' }), cliente({ id: '2', nome: 'Mercado B' })],
+    saidas: [saida({ entrega: '2026-06-10', valor: 1000 })],
+  })
+
+  it('nao ha cartao "Minimercados ativos" no topo, nem a regua de equilibrio', async () => {
+    comCarteiraCheia()
+    render(<DashboardTela onNavegar={() => {}} onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    expect(screen.queryByText('Minimercados ativos')).not.toBeInTheDocument()
+    expect(screen.queryByText(/vs\. equilíbrio/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/equilíbrio \(20\)/i)).not.toBeInTheDocument()
+  })
+
+  it('nao ha KPI "Nº de minimercados ativos" na grade, nem a meta de 35', async () => {
+    comCarteiraCheia()
+    render(<DashboardTela onNavegar={() => {}} onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    expect(screen.queryByText(/minimercados ativos/i)).not.toBeInTheDocument()
+    expect(screen.queryByText('~35')).not.toBeInTheDocument()
+  })
+
+  it('o topo tem TRES cartoes e a grade tem SETE KPIs — nenhum a mais', async () => {
+    comCarteiraCheia()
+    const { container } = render(<DashboardTela onNavegar={() => {}} onSessaoExpirada={() => {}} />)
+    await screen.findByText('Painel de indicadores')
+    expect(container.querySelectorAll('.dashboard-card-topo')).toHaveLength(3)
+    expect(container.querySelectorAll('.dashboard-kpi-card')).toHaveLength(7)
+    // E o cabecalho do painel imprime a mesma contagem que a grade tem.
+    expect(screen.getByText(/KPIs do estudo/)).toHaveTextContent('7 KPIs do estudo')
   })
 })
 
@@ -426,17 +477,6 @@ describe('DashboardTela — periodo global', () => {
     render(<DashboardTela onNavegar={() => {}} periodo="2026-06" onSessaoExpirada={() => {}} />)
     await screen.findByText('Painel de indicadores')
     expect(cartao('Índice de perdas (%)')).toHaveTextContent('5,0%')
-  })
-
-  it('minimercados ativos NAO some com o filtro: e cadastro, nao fluxo', async () => {
-    mockApiPara({
-      clientes: [cliente({ id: '1' }), cliente({ id: '2', nome: 'Mercado B' })],
-      saidas: [saida({ entrega: '2026-06-10', valor: 1000 })],
-    })
-    render(<DashboardTela onNavegar={() => {}} periodo="2026-01" onSessaoExpirada={() => {}} />)
-    await screen.findByText('Painel de indicadores')
-    const ativos = screen.getByText('Minimercados ativos').closest('.dashboard-card-topo') as HTMLElement
-    expect(within(ativos).getByText('2')).toBeInTheDocument()
   })
 
   it('busca o agregado de produtos ja filtrado no servidor', async () => {

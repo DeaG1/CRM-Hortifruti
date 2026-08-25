@@ -30,11 +30,19 @@ export const FORNECEDOR_NOVO = {
 // ------------------------------------------------- métricas por fornecedor
 
 /**
- * Referência CEASA usada pelo protótipo para o semáforo da variação de preço
- * de compra (design/CRM Hortifruti.dc.html:2440 e o sub do cartão de resumo
- * em 2457): oscilação de até 4% é ruído normal de mercado, de 4% a 7% pede
- * atenção, e a partir de ±7% o produtor mudou de patamar de preço — é o
- * momento em que o comprador precisa renegociar ou procurar outro.
+ * Limiares do semáforo da variação de preço de compra (a célula "Variação"
+ * de cada fornecedor em FornecedoresLista.tsx): oscilação de até 4% conta
+ * como ruído, de 4% a 7% pede atenção, e a partir de ±7% o produtor mudou de
+ * patamar de preço — é o momento em que o comprador precisa renegociar ou
+ * procurar outro.
+ *
+ * SÃO CONSTANTES HERDADAS DO PROTÓTIPO, NÃO COTAÇÃO DE MERCADO. O protótipo
+ * as rotulava como "referência CEASA" e o cartão de resumo desta tela exibia
+ * "±7% CEASA" ao lado da média, como se alguém consultasse a CEASA — nada
+ * neste sistema consulta. O rótulo saiu junto com o cartão (decisão do dono
+ * do produto); os dois números ficaram porque o semáforo da célula precisa de
+ * uma régua, e uma régua arbitrária assumida é honesta — uma régua
+ * arbitrária vestida de cotação não é.
  */
 export const VARIACAO_ATENCAO_PCT = 4
 export const VARIACAO_ALERTA_PCT = 7
@@ -80,17 +88,15 @@ export interface MetricasFornecedor {
   itensSemConversao: number
 }
 
+/**
+ * O que a tela precisa saber sobre o conjunto, e não sobre um fornecedor.
+ *
+ * Hoje é um campo só. Já teve também `variacaoMediaPct`,
+ * `fornecedoresComVariacao` e `coletasNoPeriodo`, que existiam para o cartão
+ * "Variação de preço de compra" — removido a pedido do dono do produto.
+ * Saíram junto: sem o cartão, ninguém os lia.
+ */
 export interface ResumoFornecedores {
-  /**
-   * Média das variações dos fornecedores que TÊM variação (protótipo 2436).
-   * `null` quando nenhum fornecedor tem duas coletas para comparar — não 0,
-   * que leria como "os preços estão estáveis".
-   */
-  variacaoMediaPct: number | null
-  /** Quantos fornecedores entraram nessa média. */
-  fornecedoresComVariacao: number
-  /** Coletas no período, de todos os fornecedores. 0 = nada lançado ainda. */
-  coletasNoPeriodo: number
   /**
    * Soma de `itensSemConversao` dos fornecedores exibidos — decide se a nota
    * de rodapé aparece. Difere de propósito de
@@ -123,9 +129,10 @@ function precoMedioDaColeta(en: EntradaResumo): number | null {
 }
 
 /**
- * As quatro métricas por fornecedor e o cartão de resumo da tela de
- * Fornecedores — portado do bloco `// ---- fornecedores ----` do protótipo
- * (design/CRM Hortifruti.dc.html:2419-2458).
+ * As quatro métricas por fornecedor da tela de Fornecedores — portado do
+ * bloco `// ---- fornecedores ----` do protótipo (design/CRM
+ * Hortifruti.dc.html:2419-2458), menos o cartão de resumo de 2436/2457, que
+ * o dono do produto mandou remover.
  *
  * Preço médio, perda e aproveitamento NÃO são recalculados aqui: vêm de
  * `derivarRelatorioCompras`, a mesma função que alimenta a aba Compras de
@@ -145,7 +152,7 @@ export function derivarFornecedores(
   de = '',
   ate = '',
 ): { porFornecedor: Map<string, MetricasFornecedor>; resumo: ResumoFornecedores } {
-  const { linhas, totais } = derivarRelatorioCompras(fornecedores, entradas, de, ate)
+  const { linhas } = derivarRelatorioCompras(fornecedores, entradas, de, ate)
   const linhaPorId = new Map(
     linhas.filter(l => l.fornecedorId != null).map(l => [l.fornecedorId as string, l]),
   )
@@ -191,16 +198,10 @@ export function derivarFornecedores(
   })
 
   const metricas = Array.from(porFornecedor.values())
-  const variacoes = metricas.map(m => m.variacaoPct).filter((v): v is number => v != null)
 
   return {
     porFornecedor,
     resumo: {
-      variacaoMediaPct: variacoes.length
-        ? variacoes.reduce((s, v) => s + v, 0) / variacoes.length
-        : null,
-      fornecedoresComVariacao: variacoes.length,
-      coletasNoPeriodo: totais.coletasNoPeriodo,
       itensSemConversao: metricas.reduce((s, m) => s + m.itensSemConversao, 0),
     },
   }

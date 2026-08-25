@@ -122,13 +122,6 @@ export const METAS_DASHBOARD = {
   perdaAmbarAtePct: 13,
   /** Markup médio venda/compra (%) — meta ≥60%, sem faixa âmbar (só bate ou não). */
   markupMetaPct: 60,
-  /** Nº de minimercados ativos (KPI) — meta ~35, âmbar a partir de 25. */
-  clientesAtivosMeta: 35,
-  clientesAtivosAmbarAte: 25,
-  /** Minimercados ativos (cartão do topo) — referência de "equilíbrio" do
-   * estudo, DIFERENTE da meta do KPI acima (a mesma métrica é comparada
-   * contra dois números diferentes em dois lugares — assim no protótipo). */
-  clientesAtivosEquilibrio: 20,
   /** Ticket médio por entrega (R$) — meta ≥430, âmbar a partir de 150. */
   ticketEntregaMeta: 430,
   ticketEntregaAmbarAte: 150,
@@ -354,12 +347,6 @@ export function inadimplenciaGeral(saidas: Saida[], hojeIso: string): Indicador 
   return disponivel((valorAtraso / receita.valor) * 100)
 }
 
-/** Contagem simples — sempre calculável, e zero clientes ativos é uma
- * medida real (e grave), não uma lacuna de dado. */
-export function clientesAtivos(clientes: Cliente[]): number {
-  return clientes.filter(c => c.status === 'ativo').length
-}
-
 /**
  * Markup médio (venda/compra por produto) = média simples do markup de cada
  * produto movimentado — (preço médio de venda − preço médio de compra) /
@@ -501,16 +488,6 @@ export function statusIndiceDePerdas(pct: number): Health {
 
 export function statusMarkup(pct: number): Health {
   return pct >= METAS_DASHBOARD.markupMetaPct ? 'green' : 'red'
-}
-
-export function statusClientesAtivosKpi(n: number): Health {
-  if (n >= METAS_DASHBOARD.clientesAtivosMeta) return 'green'
-  if (n >= METAS_DASHBOARD.clientesAtivosAmbarAte) return 'amber'
-  return 'red'
-}
-
-export function statusEquilibrioClientes(n: number): Health {
-  return n >= METAS_DASHBOARD.clientesAtivosEquilibrio ? 'green' : 'red'
 }
 
 export function statusTicketMes(v: number): Health {

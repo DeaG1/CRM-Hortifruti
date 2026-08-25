@@ -12,14 +12,11 @@ import {
   ticketMedioPorEntrega,
   ticketMedioPorMinimercado,
   inadimplenciaGeral,
-  clientesAtivos,
   markupMedio,
   giroDeEstoque,
   cicloDeCaixa,
   statusIndiceDePerdas,
   statusMarkup,
-  statusClientesAtivosKpi,
-  statusEquilibrioClientes,
   statusTicketMes,
   statusTicketEntrega,
   statusInadimplencia,
@@ -227,7 +224,7 @@ function PainelPrimeirosPassos(
  * (produtos e fornecedores). Fica separado do `Promise.all` das cinco listas
  * de propósito, por duas razões:
  *
- *  - Uma falha aqui não pode derrubar o painel inteiro. Os oito KPIs não
+ *  - Uma falha aqui não pode derrubar o painel inteiro. Os sete KPIs não
  *    dependem de produtos nem de fornecedores; se essa busca falhar, o que
  *    se perde é o guia, não a tela.
  *  - E o guia, sem esse dado, não pode CHUTAR. 'falhou' vira `null` na
@@ -248,10 +245,10 @@ interface DashboardTelaProps {
    * "esta tela nunca teve seletor de período" estava errado — o protótipo
    * (markup 95-101) sempre teve, e o Dashboard sempre respeitou.
    *
-   * A CARTEIRA DE CLIENTES não é filtrada: "minimercados ativos" é uma
-   * contagem de CADASTRO (quantos clientes estão com status ativo agora),
-   * não um fluxo do mês. Filtrá-la faria o número cair para zero num mês sem
-   * vendas, dizendo que a base de clientes evaporou.
+   * A CARTEIRA DE CLIENTES não é filtrada: ela é CADASTRO (quem está na
+   * base agora), não um fluxo do mês. Filtrá-la faria a concentração de
+   * carteira ser calculada sobre uma lista que encolhe num mês sem vendas,
+   * como se clientes tivessem evaporado.
    */
   periodo?: Periodo
   /**
@@ -430,7 +427,6 @@ export function DashboardTela({ periodo = PERIODO_TODOS, onNavegar, onSessaoExpi
   const custo = custoTotal(entradasPeriodo, lancamentosPeriodo)
   const lucro = lucroLiquido(receita, custo)
   const pctLucro = percentualLucro(receita, lucro)
-  const nAtivos = clientesAtivos(clientes)
   // Giro e ciclo recebem as listas INTEIRAS mais o período: os dois medem
   // DIAS, e o denominador deles é o número de dias do período escolhido
   // (`diasDoPeriodo` em derive/financeiro.ts). Passar a lista já filtrada com
@@ -441,9 +437,6 @@ export function DashboardTela({ periodo = PERIODO_TODOS, onNavegar, onSessaoExpi
   const ciclo = cicloDeCaixa(entradas, saidas, periodo)
 
   const entreguesCount = saidasPeriodo.filter(s => s.status === 'Entregue').length
-
-  // ---- cartoes do topo ----
-  const equilibrioDiff = nAtivos - METAS_DASHBOARD.clientesAtivosEquilibrio
 
   // ---- KPIs (painel de indicadores) ----
   const perdas1 = indiceDePerdas(entradasPeriodo, perdasPeriodo)
@@ -456,15 +449,6 @@ export function DashboardTela({ periodo = PERIODO_TODOS, onNavegar, onSessaoExpi
   const kpis: CartaoKpi[] = [
     cartaoDeIndicador('Índice de perdas (%)', perdas1, pct1, '≤ 10%', statusIndiceDePerdas, METAS_DASHBOARD.perdaMetaPct),
     cartaoDeIndicador('Markup médio (venda/compra)', markup, v => Math.round(v) + '%', '≥ 60%', statusMarkup, METAS_DASHBOARD.markupMetaPct),
-    {
-      rotulo: 'Nº de minimercados ativos', valorTexto: String(nAtivos), metaTexto: '~35',
-      tagTexto: statusClientesAtivosKpi(nAtivos) === 'green' ? 'na meta' : statusClientesAtivosKpi(nAtivos) === 'amber' ? 'atenção' : 'fora da meta',
-      cor: CORES[statusClientesAtivosKpi(nAtivos)],
-      barraPct: Math.min(100, Math.round((nAtivos / METAS_DASHBOARD.clientesAtivosMeta) * 100)),
-      // Contagem de cadastro, não soma de quantidade — nunca fica incompleta
-      // por falta de peso médio.
-      semConversao: 0,
-    },
     cartaoDeIndicador('Ticket médio / minimercado', ticketMes, money, '3,5–3,8k', statusTicketMes, METAS_DASHBOARD.ticketMesMetaAlto),
     cartaoDeIndicador('Ticket médio por entrega', ticketEntrega, money, '≥ R$ 430', statusTicketEntrega, METAS_DASHBOARD.ticketEntregaMeta),
     cartaoDeIndicador('Inadimplência por cliente', inad, pct1, '≤ 1%', statusInadimplencia, METAS_DASHBOARD.inadimplenciaMetaPct),
@@ -517,13 +501,6 @@ export function DashboardTela({ periodo = PERIODO_TODOS, onNavegar, onSessaoExpi
             style={{ color: ciclo.disponivel ? CORES[statusCicloDeCaixa(ciclo.valor)] : NEUTRO }}
           >
             {ciclo.disponivel ? 'meta ≤ 13 dias' : ciclo.motivo}
-          </div>
-        </div>
-        <div className="dashboard-card-topo">
-          <div className="dashboard-card-topo-rotulo">Minimercados ativos</div>
-          <div className="dashboard-card-topo-valor">{nAtivos}</div>
-          <div className="dashboard-card-topo-delta" style={{ color: CORES[statusEquilibrioClientes(nAtivos)] }}>
-            {equilibrioDiff >= 0 ? `+${equilibrioDiff}` : equilibrioDiff} vs. equilíbrio (20)
           </div>
         </div>
       </div>

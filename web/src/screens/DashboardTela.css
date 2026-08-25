@@ -41,9 +41,14 @@
 
 /* ---------- cartoes do topo ---------- */
 
+/* TRES cartoes (receita, lucro, ciclo de caixa) desde que "Minimercados
+   ativos" saiu. Tres colunas em cima e uma embaixo, sem passo intermediario
+   de duas: com tres cartoes, uma grade de duas colunas deixa o terceiro
+   sozinho numa linha. Se um cartao entrar ou sair daqui, este numero muda
+   junto. */
 .dashboard-cards-topo {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 14px;
 }
 
@@ -121,10 +126,31 @@
   flex: 0 0 9px;
 }
 
+/*
+ * SETE cartoes de KPI desde que "No de minimercados ativos" saiu — e sete e
+ * primo: qualquer numero fixo de colunas entre 2 e 6 deixa buraco na ultima
+ * linha (com 4 colunas, 4+3 e uma celula vazia no canto).
+ *
+ * A saida e uma base de 12 colunas, que aceita as duas divisoes: a primeira
+ * linha leva 4 cartoes de 3 colunas cada, a segunda leva 3 cartoes de 4
+ * colunas cada. Nenhuma celula vazia, nenhum cartao esticado sozinho — so
+ * duas linhas cheias, a de baixo com cartoes um pouco mais largos.
+ *
+ * O `nth-child(n + 5)` esta amarrado a SETE cartoes. Trocar a quantidade de
+ * KPIs pede rever este bloco (ver o array `kpis` em DashboardTela.tsx).
+ */
 .dashboard-kpis-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(12, 1fr);
   gap: 14px;
+}
+
+.dashboard-kpis-grid > .dashboard-kpi-card {
+  grid-column: span 3;
+}
+
+.dashboard-kpis-grid > .dashboard-kpi-card:nth-child(n + 5) {
+  grid-column: span 4;
 }
 
 .dashboard-kpi-card {
@@ -366,17 +392,25 @@
   padding: 9px 12px;
 }
 
+/* Abaixo de 1100px os KPIs vao a duas colunas (span 6 das 12) e os cartoes
+   do topo continuam em tres — sao curtos (rotulo, numero, delta) e cabem.
+   Os KPIs sao sete, entao a ultima linha fica com um cartao so: ele mantem a
+   largura das duas colunas, alinhado a esquerda, e nao estica pela linha. */
 @media (max-width: 1100px) {
-  .dashboard-cards-topo,
-  .dashboard-kpis-grid {
-    grid-template-columns: repeat(2, 1fr);
+  .dashboard-kpis-grid > .dashboard-kpi-card,
+  .dashboard-kpis-grid > .dashboard-kpi-card:nth-child(n + 5) {
+    grid-column: span 6;
   }
 }
 
 @media (max-width: 640px) {
-  .dashboard-cards-topo,
-  .dashboard-kpis-grid {
+  .dashboard-cards-topo {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-kpis-grid > .dashboard-kpi-card,
+  .dashboard-kpis-grid > .dashboard-kpi-card:nth-child(n + 5) {
+    grid-column: span 12;
   }
 }
 

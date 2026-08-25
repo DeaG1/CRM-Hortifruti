@@ -154,8 +154,8 @@ const FECHADO: GuiaDePrimeirosPassos = {
  *
  * PERÍODO: `contagens` tem de vir da base INTEIRA, nunca do recorte do filtro
  * global do cabeçalho. O guia é sobre o estado do CADASTRO ("já existe algum
- * produto?"), não sobre o movimento de um mês — pela mesma razão que
- * "minimercados ativos" não é filtrado no Dashboard (ver a prop `periodo` em
+ * produto?"), não sobre o movimento de um mês — pela mesma razão que a
+ * carteira de clientes não é filtrada no Dashboard (ver a prop `periodo` em
  * DashboardTela.tsx). Filtrar faria o guia ressuscitar em janeiro dizendo
  * "cadastre um produto" para quem tem cem produtos e não comprou nada no mês.
  *

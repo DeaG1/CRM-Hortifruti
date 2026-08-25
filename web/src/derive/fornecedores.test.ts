@@ -224,49 +224,11 @@ describe('derivarFornecedores — itens sem conversão propagam a sinalização'
   })
 })
 
-describe('derivarFornecedores — cartão de resumo (variação média)', () => {
-  const comDuasColetas = (id: string, de: number, para: number): EntradaResumo[] => [
-    { ...entrada({ numero: `${id}-1`, data: '2026-06-01' }), fornecedor_id: id, valor_total: de * 1000, peso_total: 1000 },
-    { ...entrada({ numero: `${id}-2`, data: '2026-06-10' }), fornecedor_id: id, valor_total: para * 1000, peso_total: 1000 },
-  ]
-
-  it('média das variações dos fornecedores que TÊM variação', () => {
-    const fs = [fornecedor({ id: 'f1' }), fornecedor({ id: 'f2', nome: 'Sítio Vale Verde' })]
-    const entradas = [
-      ...comDuasColetas('f1', 2, 2.2), // +10%
-      ...comDuasColetas('f2', 2, 1.6), // -20%
-    ]
-    const { resumo } = derivarFornecedores(fs, entradas)
-    expect(resumo.variacaoMediaPct).toBeCloseTo(-5, 10)
-    expect(resumo.fornecedoresComVariacao).toBe(2)
-  })
-
-  it('fornecedor com uma coleta só não puxa a média para zero — fica fora dela', () => {
-    const fs = [fornecedor({ id: 'f1' }), fornecedor({ id: 'f2', nome: 'Sítio Vale Verde' })]
-    const entradas = [
-      ...comDuasColetas('f1', 2, 2.2), // +10%
-      entrada({ numero: 'C-9', fornecedor_id: 'f2' }), // uma só: sem variação
-    ]
-    const { resumo } = derivarFornecedores(fs, entradas)
-    expect(resumo.variacaoMediaPct).toBeCloseTo(10, 10)
-    expect(resumo.fornecedoresComVariacao).toBe(1)
-  })
-
-  it('ninguém com duas coletas: média é null, não 0 (que leria "preços estáveis")', () => {
-    const { resumo } = derivarFornecedores([fornecedor()], [entrada()])
-    expect(resumo.variacaoMediaPct).toBeNull()
-    expect(resumo.fornecedoresComVariacao).toBe(0)
-    expect(resumo.coletasNoPeriodo).toBe(1)
-  })
-
-  it('sem entrada nenhuma: média null e coletasNoPeriodo 0 (a tela distingue os dois casos)', () => {
-    const { resumo } = derivarFornecedores([fornecedor()], [])
-    expect(resumo.variacaoMediaPct).toBeNull()
-    expect(resumo.coletasNoPeriodo).toBe(0)
-  })
-})
-
-describe('derivarFornecedores — limites CEASA do semáforo', () => {
+describe('derivarFornecedores — limiares do semáforo da variação', () => {
+  // As duas constantes continuam vivas: o semáforo da célula "Variação" de
+  // cada fornecedor as usa. O que saiu foi o cartão de resumo, e com ele o
+  // rótulo "±7% CEASA" — que vendia como cotação de mercado um número
+  // herdado do protótipo.
   it('as constantes são ±4% (atenção) e ±7% (alerta)', () => {
     expect(VARIACAO_ATENCAO_PCT).toBe(4)
     expect(VARIACAO_ALERTA_PCT).toBe(7)

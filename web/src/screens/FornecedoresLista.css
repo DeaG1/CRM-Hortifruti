@@ -68,42 +68,11 @@
   background: #4a6b2e;
 }
 
-/* ---------- resumo ---------- */
-
-.fornecedores-resumo {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14px;
-  margin-bottom: 18px;
-}
-
-.fornecedores-resumo-card {
-  background: #fff;
-  border: 1px solid #e6e2d4;
-  border-radius: 13px;
-  padding: 16px 18px;
-}
-
-.fornecedores-resumo-label {
-  font-size: 12px;
-  color: #8a8775;
-  font-weight: 600;
-}
-
-.fornecedores-resumo-valor {
-  font-family: 'IBM Plex Mono', monospace;
-  font-weight: 600;
-  font-size: 24px;
-  color: #9a9784;
-  margin-top: 6px;
-}
-
-.fornecedores-resumo-sub {
-  font-size: 11.5px;
-  color: #9a9784;
-}
-
-/* ---------- grade de cartoes ---------- */
+/* ---------- grade de cartoes ----------
+   A faixa de resumo que ficava entre o topo e esta grade saiu junto com o
+   cartao "Variacao de preco de compra" (unico que ela continha, numa grade
+   de tres colunas herdada do prototipo). Sem ela a grade sobe direto para
+   baixo do topo, que ja reserva os 16px de respiro. */
 
 .fornecedores-grade {
   display: grid;

@@ -44,19 +44,15 @@ function dataBrCompleta(iso: string | null): string {
 }
 
 /**
- * Semáforo da variação de preço de compra — ±7% é a referência CEASA
- * (protótipo 2440): até 4% é ruído de mercado, de 4% a 7% pede atenção, a
- * partir de 7% o produtor mudou de patamar. Vale para os dois lados: cair
- * 9% também é uma mudança de patamar que o comprador precisa notar (safra,
- * qualidade caindo), não uma boa notícia silenciosa.
+ * Semáforo da variação de preço de compra da célula do fornecedor: até 4% é
+ * ruído, de 4% a 7% pede atenção, a partir de 7% o produtor mudou de
+ * patamar. Vale para os dois lados: cair 9% também é uma mudança de patamar
+ * que o comprador precisa notar (safra, qualidade caindo), não uma boa
+ * notícia silenciosa.
  *
- * O MESMO semáforo serve a célula do fornecedor e o cartão de resumo. O
- * protótipo usa dois: no cartão (2457) ele só alterna RED/AMBER e nunca
- * chega ao verde, o que pinta de âmbar até uma média de 0,0% — um alarme
- * onde não há nada acontecendo. Divergir aqui é deliberado: duas escalas de
- * cor para o mesmo número na mesma tela ensinariam duas convenções ao leitor
- * (mesmo raciocínio do `NumIncompleto` compartilhado entre abas em
- * RelatoriosTela.tsx).
+ * Os dois limiares saem de `derive/fornecedores.ts` e são herdados do
+ * protótipo — não são referência de mercado consultada em lugar nenhum. Ver
+ * o comentário deles lá antes de tratá-los como cotação.
  */
 function corVariacao(pct: number | null): string {
   if (pct == null) return NEUTRO
@@ -127,9 +123,9 @@ interface FornecedoresListaProps {
    * Período global do cabeçalho (App.tsx, achado S-3). O CADASTRO não some
    * com ele — um fornecedor não deixa de existir porque não houve coleta em
    * julho. O que respeita o recorte são as quatro métricas derivadas (última
-   * coleta, preço médio, variação, aproveitamento) e o cartão de resumo:
-   * fornecedor sem coleta no período fica na lista com travessão nas quatro,
-   * e `motivoSemVariacao` já explica cada caso.
+   * coleta, preço médio, variação, aproveitamento): fornecedor sem coleta no
+   * período fica na lista com travessão nas quatro, e `motivoSemVariacao` já
+   * explica cada caso.
    */
   periodo?: Periodo
   onSessaoExpirada: () => void
@@ -270,20 +266,6 @@ export function FornecedoresLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
   const { de, ate } = intervaloDoPeriodo(periodo)
   const { porFornecedor, resumo } = derivarFornecedores(fornecedores, entradas, de, ate)
 
-  // Sub do cartão de resumo: o texto do protótipo ('última compra vs.
-  // anterior · ±7% CEASA') só é verdade quando existe alguma variação
-  // calculada. O que estava aqui antes ("Sem entradas registradas ainda")
-  // mentia sempre que HAVIA entradas — cada caso agora diz o que de fato
-  // impede o número de existir.
-  const subResumo = erroEntradas
-    ? 'Coletas indisponíveis'
-    : resumo.coletasNoPeriodo === 0
-      ? `Nenhuma coleta registrada em ${rotuloPeriodo(periodo).toLowerCase()}`
-      : resumo.variacaoMediaPct == null
-        ? 'Nenhum fornecedor com duas coletas para comparar'
-        : `última compra vs. anterior · ±${VARIACAO_ALERTA_PCT}% CEASA · `
-          + `${resumo.fornecedoresComVariacao} fornecedor(es)`
-
   return (
     <div className="fornecedores-lista">
       <div className="fornecedores-topo">
@@ -300,26 +282,6 @@ export function FornecedoresLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
       {erroEntradas && (
         <p className="fornecedores-aviso-metricas" role="status">{erroEntradas}</p>
       )}
-
-      <div className="fornecedores-resumo">
-        <div className="fornecedores-resumo-card">
-          <div className="fornecedores-resumo-label">Variação de preço de compra</div>
-          <div
-            className="fornecedores-resumo-valor"
-            style={{ color: corVariacao(resumo.variacaoMediaPct) }}
-          >
-            {resumo.variacaoMediaPct == null
-              ? '—'
-              : (
-                <NumIncompleto
-                  texto={pctVariacao(resumo.variacaoMediaPct)}
-                  n={resumo.itensSemConversao}
-                />
-              )}
-          </div>
-          <div className="fornecedores-resumo-sub">{subResumo}</div>
-        </div>
-      </div>
 
       <div className="fornecedores-grade">
         {fornecedores.map(f => {

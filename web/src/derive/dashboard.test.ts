@@ -9,15 +9,12 @@ import {
   ticketMedioPorEntrega,
   ticketMedioPorMinimercado,
   inadimplenciaGeral,
-  clientesAtivos,
   markupMedio,
   giroDeEstoque,
   cicloDeCaixa,
   cicloRecebimentoDias,
   statusIndiceDePerdas,
   statusMarkup,
-  statusClientesAtivosKpi,
-  statusEquilibrioClientes,
   statusTicketMes,
   statusTicketEntrega,
   statusInadimplencia,
@@ -387,36 +384,6 @@ describe('statusInadimplencia', () => {
   })
   it('acima de 2% e vermelho', () => {
     expect(statusInadimplencia(METAS_DASHBOARD.inadimplenciaAmbarAtePct + 0.1)).toBe('red')
-  })
-})
-
-describe('clientesAtivos', () => {
-  it('conta so status ativo, e zero e uma medida real', () => {
-    expect(clientesAtivos([])).toBe(0)
-    expect(clientesAtivos([
-      cliente({ status: 'ativo' }),
-      cliente({ status: 'inativo' }),
-      cliente({ status: 'ativo' }),
-    ])).toBe(2)
-  })
-})
-
-describe('statusClientesAtivosKpi', () => {
-  it('bate a meta (~35) e verde', () => {
-    expect(statusClientesAtivosKpi(METAS_DASHBOARD.clientesAtivosMeta)).toBe('green')
-  })
-  it('entre 25 e 34 e ambar', () => {
-    expect(statusClientesAtivosKpi(METAS_DASHBOARD.clientesAtivosAmbarAte)).toBe('amber')
-  })
-  it('abaixo de 25 e vermelho', () => {
-    expect(statusClientesAtivosKpi(METAS_DASHBOARD.clientesAtivosAmbarAte - 1)).toBe('red')
-  })
-})
-
-describe('statusEquilibrioClientes', () => {
-  it('usa a referencia de equilibrio (20), diferente da meta do KPI (35)', () => {
-    expect(statusEquilibrioClientes(20)).toBe('green')
-    expect(statusEquilibrioClientes(19)).toBe('red')
   })
 })
 

@@ -168,9 +168,9 @@ describe('FornecedoresLista — as quatro metricas por fornecedor', () => {
     expect(screen.getByText('R$ 2,10')).toBeInTheDocument()
     expect(screen.getByText('10/06')).toBeInTheDocument()
     expect(screen.getByText('95%')).toBeInTheDocument()
-    // duas vezes: a celula do fornecedor e o cartao de resumo (com um unico
-    // fornecedor comparavel, a media DAS variacoes e a propria variacao)
-    expect(screen.getAllByText('+10,0%')).toHaveLength(2)
+    // uma vez so: a celula do fornecedor. O cartao de resumo, que repetia a
+    // media DAS variacoes, saiu a pedido do dono do produto.
+    expect(screen.getAllByText('+10,0%')).toHaveLength(1)
   })
 
   it('aproveitamento aparece — e a metrica que o cartao nem renderizava', async () => {
@@ -185,8 +185,8 @@ describe('FornecedoresLista — as quatro metricas por fornecedor', () => {
     soUmFornecedor([])
     render(<FornecedoresLista onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
-    // 4 metricas do cartao + 1 no card de resumo "Variacao de preco de compra"
-    expect(screen.getAllByText('—')).toHaveLength(5)
+    // so as 4 metricas do cartao do fornecedor
+    expect(screen.getAllByText('—')).toHaveLength(4)
     expect(screen.queryByText('R$ 0,00')).not.toBeInTheDocument()
     expect(screen.queryByText('0%')).not.toBeInTheDocument()
   })
@@ -221,8 +221,8 @@ describe('FornecedoresLista — as quatro metricas por fornecedor', () => {
     ])
     render(<FornecedoresLista onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
-    // celula + cartao de resumo, como no caso de +10,0% acima
-    expect(screen.getAllByText('0,0%')).toHaveLength(2)
+    // so a celula, como no caso de +10,0% acima
+    expect(screen.getAllByText('0,0%')).toHaveLength(1)
   })
 
   it('coletas de outro fornecedor nao vazam para quem nunca coletou', async () => {
@@ -237,51 +237,62 @@ describe('FornecedoresLista — as quatro metricas por fornecedor', () => {
     render(<FornecedoresLista onSessaoExpirada={() => {}} />)
     await screen.findByText('Sitio Vale Verde')
     // f-1 tem preco/coleta/aproveitamento (so a variacao dele fica em
-    // travessao: uma coleta so); f-2 fica com as 4 em travessao; + o resumo
+    // travessao: uma coleta so); f-2 fica com as 4 em travessao
     expect(screen.getByText('R$ 2,00')).toBeInTheDocument()
-    expect(screen.getAllByText('—')).toHaveLength(1 + 4 + 1)
+    expect(screen.getAllByText('—')).toHaveLength(1 + 4)
   })
 })
 
-describe('FornecedoresLista — cartao de resumo "Variacao de preco de compra"', () => {
-  const duasColetas = (id: string, de: number, para: number): EntradaResumo[] => [
-    entradaBase({ numero: `${id}-1`, fornecedor_id: id, data: '2026-06-01', valor_total: de * 1000, peso_total: 1000 }),
-    entradaBase({ numero: `${id}-2`, fornecedor_id: id, data: '2026-06-10', valor_total: para * 1000, peso_total: 1000 }),
-  ]
+// ========= cartao de resumo: removido a pedido do dono do produto =========
 
-  it('mostra a media das variacoes e o sub do prototipo (+-7% CEASA)', async () => {
-    configurarGet({
-      lista: [fornecedorBase()],
-      detalhes: { 'f-1': fornecedorBase({ produtos: [] }) },
-      entradas: duasColetas('f-1', 2, 2.2),
-    })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
-    await screen.findByText('Fazenda Boa Terra')
-    expect(screen.getAllByText('+10,0%').length).toBeGreaterThan(0)
-    expect(screen.getByText(/±7% CEASA/)).toBeInTheDocument()
+/**
+ * Guarda de reintroducao. O cartao "Variacao de preco de compra" exibia a
+ * media das variacoes com o sub "ultima compra vs. anterior · ±7% CEASA",
+ * como se 7% fosse cotacao consultada na CEASA. Nao era: e uma constante fixa
+ * herdada do prototipo, que nada neste sistema consulta. O dono do produto
+ * mandou remover o cartao inteiro.
+ *
+ * A VARIACAO EM SI CONTINUA VIVA — na celula "Variacao" de cada fornecedor,
+ * que compara a ultima coleta com a anterior a partir de dado real. O que nao
+ * pode voltar e o cartao agregado e, principalmente, o rotulo CEASA em
+ * qualquer lugar da tela.
+ */
+describe('FornecedoresLista — cartao de resumo NAO e renderizado', () => {
+  const comDuasColetas = () => configurarGet({
+    lista: [fornecedorBase()],
+    detalhes: { 'f-1': fornecedorBase({ produtos: [] }) },
+    entradas: [
+      entradaBase({ numero: 'C-1', data: '2026-06-01', valor_total: 2000, peso_total: 1000 }),
+      entradaBase({ numero: 'C-2', data: '2026-06-10', valor_total: 2200, peso_total: 1000 }),
+    ],
   })
 
-  it('com entradas lancadas mas sem par para comparar, o sub NAO mente "sem entradas"', async () => {
-    configurarGet({
-      lista: [fornecedorBase()],
-      detalhes: { 'f-1': fornecedorBase({ produtos: [] }) },
-      entradas: [entradaBase()],
-    })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+  it('nao ha cartao "Variacao de preco de compra" nem o sub do prototipo', async () => {
+    comDuasColetas()
+    const { container } = render(<FornecedoresLista onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
-    expect(screen.queryByText(/Sem entradas registradas/i)).not.toBeInTheDocument()
-    expect(screen.getByText(/duas coletas para comparar/i)).toBeInTheDocument()
+    expect(screen.queryByText('Variação de preço de compra')).not.toBeInTheDocument()
+    expect(container.querySelector('.fornecedores-resumo')).toBeNull()
+    expect(container.querySelector('.fornecedores-resumo-card')).toBeNull()
+    expect(screen.queryByText(/última compra vs\. anterior/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/fornecedor\(es\)/i)).not.toBeInTheDocument()
   })
 
-  it('sem coleta nenhuma, o sub diz que nada foi registrado ainda', async () => {
-    configurarGet({
-      lista: [fornecedorBase()],
-      detalhes: { 'f-1': fornecedorBase({ produtos: [] }) },
-      entradas: [],
-    })
+  it('a referencia CEASA nao sobrevive em lugar nenhum da tela', async () => {
+    comDuasColetas()
+    const { container } = render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Fazenda Boa Terra')
+    expect(container.textContent).not.toMatch(/CEASA/i)
+    expect(container.textContent).not.toMatch(/±7%/)
+  })
+
+  it('a variacao POR FORNECEDOR continua — so o agregado saiu', async () => {
+    comDuasColetas()
     render(<FornecedoresLista onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
-    expect(screen.getByText(/Nenhuma coleta registrada em todo o período/i)).toBeInTheDocument()
+    expect(screen.getByText('Variação')).toBeInTheDocument()
+    // Uma unica ocorrencia: a celula. Com o cartao vivo seriam duas.
+    expect(screen.getAllByText('+10,0%')).toHaveLength(1)
   })
 })
 
@@ -302,19 +313,7 @@ describe('FornecedoresLista — isolacao de falha das coletas', () => {
     expect(aviso).toHaveTextContent(/não foi possível carregar as coletas/i)
     // aviso, nao erro: a tela nao quebrou
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(screen.getAllByText('—')).toHaveLength(5)
-  })
-
-  it('com as coletas indisponiveis, o sub do resumo nao afirma que nao ha entradas', async () => {
-    configurarGet({
-      lista: [fornecedorBase()],
-      detalhes: { 'f-1': fornecedorBase({ produtos: [] }) },
-      entradas: 'falha',
-    })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
-    await screen.findByRole('status')
-    expect(screen.getByText('Coletas indisponíveis')).toBeInTheDocument()
-    expect(screen.queryByText(/Nenhuma coleta registrada ainda/i)).not.toBeInTheDocument()
+    expect(screen.getAllByText('—')).toHaveLength(4)
   })
 })
 
@@ -461,7 +460,12 @@ describe('FornecedoresLista — periodo global', () => {
     // Um fornecedor não deixa de existir porque não houve coleta em janeiro.
     expect(await screen.findByText('Fazenda Boa Terra')).toBeInTheDocument()
     expect(screen.getByText('Sitio das Flores')).toBeInTheDocument()
-    expect(screen.getByText(/Nenhuma coleta registrada em janeiro\/2026/i)).toBeInTheDocument()
+    // Os dois ficam na lista com as quatro metricas em travessao — 4 + 4. A
+    // afirmacao sobre o periodo vazio vivia no sub do cartao de resumo, que
+    // saiu; o que ela protegia (cadastro nao some, metrica nao inventa zero)
+    // continua protegido pela contagem de travessoes.
+    expect(screen.getAllByText('—')).toHaveLength(8)
+    expect(screen.queryByText('R$ 0,00')).not.toBeInTheDocument()
   })
 
   it('a dica diz qual recorte vale, e que o cadastro nao segue', async () => {

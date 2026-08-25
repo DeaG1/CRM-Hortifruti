@@ -278,6 +278,14 @@
   margin-top: 2px;
 }
 
+/* Sub-linha "PIX · 12/06" sob o chip de pagamento (achado S-3) — mesma
+   discrição da sub-linha de vencimento logo acima dela. */
+.saidas-pag-info {
+  font-size: 10.5px;
+  color: #9a9784;
+  margin-top: 2px;
+}
+
 .saidas-sem-filtro {
   padding: 30px 18px;
   text-align: center;

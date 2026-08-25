@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   periodoDe,
   receitaBrutaPeriodo,
+  saidasDaReceita,
   compraMercadoriaPeriodo,
   custosPorCategoria,
   calcularResultado,
@@ -439,5 +440,52 @@ describe('calcularCicloCaixa — CCC padrao (subtrai pagamentoProdutor, defeito 
   it('total e null quando nao ha dado nenhum (todos os tres null)', () => {
     const ciclo = calcularCicloCaixa([], [], 'all')
     expect(ciclo).toEqual({ pagamentoProdutor: null, estoque: null, recebimento: null, total: null })
+  })
+})
+
+// ---- rastreabilidade da receita bruta (achado FI-1)
+
+describe('saidasDaReceita / entregasNaReceita', () => {
+  it('devolve exatamente as saidas que compoem a receita do periodo', () => {
+    const saidas = [
+      saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+      saida({ id: 's2', entrega: '2026-06-20', valor: 500 }),
+      saida({ id: 's3', entrega: '2026-07-01', valor: 900 }),
+      saida({ id: 's4', entrega: '2026-06-25', valor: 700, status: 'Em rota' }),
+    ]
+    expect(saidasDaReceita(saidas, '2026-06').map(s => s.id)).toEqual(['s1', 's2'])
+  })
+
+  it('a contagem do resultado bate com a soma: mesma lista, um filtro so', () => {
+    const saidas = [
+      saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+      saida({ id: 's2', entrega: '2026-06-20', valor: 500 }),
+      saida({ id: 's3', entrega: '2026-06-25', valor: 700, status: 'Cancelado' }),
+    ]
+    const r = calcularResultado(saidas, [], [], '2026-06')
+    expect(r.receitaBruta).toBe(1500)
+    expect(r.entregasNaReceita).toBe(2)
+  })
+
+  it('receitaBrutaPeriodo e a soma da MESMA lista — as duas nao podem divergir', () => {
+    const saidas = [
+      saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+      saida({ id: 's2', entrega: '2026-05-10', valor: 400 }),
+    ]
+    for (const periodo of ['all', '2026-06', '2026-05', '2026-01']) {
+      const daLista = saidasDaReceita(saidas, periodo)
+      expect(receitaBrutaPeriodo(saidas, periodo)).toBe(daLista.reduce((s, x) => s + (x.valor || 0), 0))
+      expect(calcularResultado(saidas, [], [], periodo).entregasNaReceita).toBe(daLista.length)
+    }
+  })
+
+  it('periodo sem entrega: receita 0 e 0 pedidos — zero MEDIDO nos dois', () => {
+    const r = calcularResultado([saida({ entrega: '2026-06-10' })], [], [], '2026-08')
+    expect(r.receitaBruta).toBe(0)
+    expect(r.entregasNaReceita).toBe(0)
+  })
+
+  it('sem saida nenhuma (lista vazia) tambem conta zero, sem quebrar', () => {
+    expect(calcularResultado([], [], [], 'all').entregasNaReceita).toBe(0)
   })
 })

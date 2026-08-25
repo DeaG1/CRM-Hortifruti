@@ -684,3 +684,156 @@ describe('EntradasLista — periodo global', () => {
     expect(screen.getByText(/clique numa entrada para editar/i)).toHaveTextContent('Agosto/2026')
   })
 })
+
+/**
+ * Achado E-3: a coluna PERDA mostrava quilos absolutos, sempre na mesma cor
+ * de alerta — 140 kg pode ser rotina numa coleta de 8 t e catastrofe numa de
+ * 300 kg, e a coluna nao dizia qual. Agora e % do peso recebido daquela
+ * coleta, com a MESMA regua do cartao logo acima (10/13, METAS_DASHBOARD) e
+ * nao a regua propria 10/15 do prototipo, que era exatamente a duplicacao
+ * removida em 7a16a20.
+ */
+describe('EntradasLista — coluna PERDA em % (achado E-3)', () => {
+  const VERDE = 'rgb(63, 143, 91)'
+  const AMBAR = 'rgb(199, 147, 32)'
+  const VERMELHO = 'rgb(194, 80, 47)'
+
+  /** A celula PERDA da linha da tabela — nao a do cartao de mesmo tema. */
+  function celulaPerda(): HTMLElement {
+    const linha = screen.getByText('C-1040').closest('.entradas-linha--dados') as HTMLElement
+    // Ordem das colunas: ENTRADA, FORNECEDOR, MOTIVO, PESO, PERDA, VALOR...
+    return linha.children[4] as HTMLElement
+  }
+
+  it('com dado: 140 kg em 1.400 kg recebidos sai 10,0%, em verde', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1400, perda_kg: 140, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    const celula = celulaPerda()
+    expect(celula).toHaveTextContent('10,0%')
+    expect(celula).toHaveStyle({ color: VERDE })
+    // Os quilos nao se perdem: continuam no title, ao lado da base.
+    expect(within(celula).getByTitle(/140 kg de perda em 1\.400 kg recebidos/)).toBeInTheDocument()
+  })
+
+  it('a mesma perda absoluta muda de cor conforme o tamanho da coleta', async () => {
+    // 140 kg sobre 1.000 = 14% -> vermelho na regua 10/13. O numero absoluto
+    // e o mesmo do teste anterior; so o denominador mudou.
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 140, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(celulaPerda()).toHaveTextContent('14,0%')
+    expect(celulaPerda()).toHaveStyle({ color: VERMELHO })
+  })
+
+  it('a faixa ambar existe: 12% fica entre a meta e o limite', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 120, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(celulaPerda()).toHaveStyle({ color: AMBAR })
+  })
+
+  it('usa a perda EFETIVA (maior entre cabecalho e itens), igual ao cartao', async () => {
+    // Cabecalho 60, itens somam 100: a linha nao pode mostrar 6% enquanto o
+    // cartao mostra 10% sobre a mesma coleta.
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 60, perda_itens_qtd: 100 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(celulaPerda()).toHaveTextContent('10,0%')
+    expect(within(cartao('ÍNDICE DE PERDAS')).getByText('10,0%')).toBeInTheDocument()
+  })
+
+  it('zero MEDIDO e 0,0% em verde — houve coleta e nao houve perda', async () => {
+    mockRotasPadrao([entrada({ peso_total: 1000, perda_kg: 0, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(celulaPerda()).toHaveTextContent('0,0%')
+    expect(celulaPerda()).toHaveStyle({ color: VERDE })
+  })
+
+  it('sem dado: coleta sem peso recebido vira travessao, nunca 0,0%', async () => {
+    mockRotasPadrao([entrada({ peso_total: 0, perda_kg: 5, perda_itens_qtd: 0 })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(celulaPerda()).toHaveTextContent('—')
+    expect(celulaPerda()).not.toHaveTextContent('%')
+  })
+
+  it('peso incompleto marca a % com * e explica: o denominador encurtou', async () => {
+    mockRotasPadrao([
+      entrada({ peso_total: 1000, perda_kg: 100, perda_itens_qtd: 0, itens_sem_conversao: 2 }),
+    ])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    const marcado = within(celulaPerda()).getByText('10,0%*')
+    expect(marcado.getAttribute('title')).toContain('2 itens')
+    expect(marcado.getAttribute('title')).toContain('sai para cima')
+    // O numero absoluto continua no mesmo title, antes do aviso.
+    expect(marcado.getAttribute('title')).toContain('100 kg de perda')
+  })
+
+  it('falha de carregamento: sem lista nao ha celula nenhuma, so o alerta', async () => {
+    mockGet.mockImplementation((url: string) => (
+      url === '/api/entradas'
+        ? Promise.reject(new Error('falha de rede'))
+        : Promise.resolve([])
+    ))
+    render(<EntradasLista />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível carregar as entradas.')
+    expect(screen.queryByText('C-1040')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Achado E-4: `forma_pag` e `data_pag` ja vinham em GET /api/entradas e nao
+ * apareciam em lugar nenhum da tela — o chip dizia "Pago" e a unica forma de
+ * saber COMO e QUANDO era abrir o modal.
+ */
+describe('EntradasLista — sub-linha "forma · data" do pagamento (achado E-4)', () => {
+  function blocoPagamento(): HTMLElement {
+    const linha = screen.getByText('C-1040').closest('.entradas-linha--dados') as HTMLElement
+    return linha.children[6] as HTMLElement
+  }
+
+  it('com dado: entrada paga mostra "PIX · 11/08" sob o chip', async () => {
+    mockRotasPadrao([entrada({ pago: 'Pago', forma_pag: 'PIX', data_pag: '2026-08-11' })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(within(blocoPagamento()).getByText('PIX · 11/08')).toBeInTheDocument()
+  })
+
+  it('sem dado: entrada pendente nao desenha sub-linha — nem travessao', async () => {
+    // Nao e dado faltando: e pagamento que nao aconteceu, e o chip ja diz.
+    mockRotasPadrao([entrada({ pago: 'Pendente', forma_pag: 'PIX', data_pag: null })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(blocoPagamento().querySelector('.entradas-pag-info')).toBeNull()
+  })
+
+  it('paga sem data registrada mostra so a forma, sem separador solto', async () => {
+    mockRotasPadrao([entrada({ pago: 'Pago', forma_pag: 'Boleto', data_pag: null })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(within(blocoPagamento()).getByText('Boleto')).toBeInTheDocument()
+    expect(blocoPagamento().textContent).not.toContain('· ')
+  })
+
+  it('paga sem forma nem data nao inventa sub-linha', async () => {
+    mockRotasPadrao([entrada({ pago: 'Pago', forma_pag: '', data_pag: null })])
+    render(<EntradasLista />)
+    await screen.findByText('C-1040')
+    expect(blocoPagamento().querySelector('.entradas-pag-info')).toBeNull()
+  })
+
+  it('falha de carregamento: nenhuma linha, nenhuma sub-linha, so o alerta', async () => {
+    mockGet.mockImplementation((url: string) => (
+      url === '/api/entradas'
+        ? Promise.reject(new Error('falha de rede'))
+        : Promise.resolve([])
+    ))
+    render(<EntradasLista />)
+    await screen.findByRole('alert')
+    expect(document.querySelector('.entradas-pag-info')).toBeNull()
+  })
+})
+

@@ -4,9 +4,19 @@ import { type Produto } from '../derive/produtos'
 import { derivarRelatorioProdutos, type ProdutoAgregado } from '../derive/relatorios'
 import { ModalProduto } from '../components/ModalProduto'
 import { queryDePeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
+import { statusIndiceDePerdas } from '../derive/dashboard'
+import type { Health } from '../derive/clientes'
 import './ProdutosLista.css'
 
 const NEUTRO = '#9a9784'
+
+/** Mesmas cores do semáforo do Painel de Indicadores (e de EntradasLista) —
+ * `Health` é o mesmo tipo, e os limiares moram todos em METAS_DASHBOARD. */
+const CORES_SEMAFORO: Record<Health, string> = {
+  green: '#3f8f5b',
+  amber: '#c79320',
+  red: '#c2502f',
+}
 
 // ---------------------------------------------------------- formatação
 
@@ -15,7 +25,9 @@ const NEUTRO = '#9a9784'
  * R$ desta tela usam `money`, arredondado). Formatação é responsabilidade
  * da tela, não de derive/relatorios.ts — mesmo padrão do resto do app. */
 const moneyDetalhado = (n: number) => 'R$ ' + n.toFixed(2).replace('.', ',')
-const money = (n: number) => 'R$ ' + Math.round(n).toLocaleString('pt-BR')
+// `money` (R$ arredondado) saiu junto com a margem TOTAL do período: a coluna
+// MARGEM passou a mostrar a margem por quilo, e todo valor em R$ desta tela é
+// agora um preço unitário, com as duas casas de `moneyDetalhado`.
 const pctInt = (n: number) => Math.round(n) + '%'
 const pct1 = (n: number) => n.toFixed(1).replace('.', ',') + '%'
 
@@ -42,6 +54,20 @@ function avisoSemConversao(n: number): string {
   return `${itens} deste produto em unidade diferente de KG, sem peso médio cadastrado, ${verbo} `
     + 'fora das quantidades — sem o peso da embalagem não há como somar em quilos. '
     + 'As métricas desta linha estão calculadas sobre quantidade incompleta.'
+}
+
+/**
+ * Mesmo aviso, para o número que fala da TELA INTEIRA (a perda média
+ * realizada do rodapé): a redação de `avisoSemConversao` é "deste produto",
+ * certa numa célula de linha e falsa numa soma de todas elas. Mesma razão
+ * pela qual a nota de rodapé já tinha texto próprio.
+ */
+function avisoSemConversaoTotal(n: number): string {
+  const itens = n === 1 ? '1 lançamento' : `${n} lançamentos`
+  const verbo = n === 1 ? 'ficou' : 'ficaram'
+  return `${itens} em unidade diferente de KG, sem peso médio cadastrado no produto, ${verbo} fora das `
+    + 'quantidades — sem o peso da embalagem não há como somar em quilos. A perda média está calculada '
+    + 'sobre quantidade incompleta.'
 }
 
 /** Um número que pode estar incompleto: com `n` = 0 sai limpo (o caso normal);
@@ -229,10 +255,6 @@ export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Pro
           // travessão — nunca "R$ 0,00", que fingiria um preço medido.
           const compraMedia = ag && ag.compra_qtd > 0 ? ag.compra_valor / ag.compra_qtd : null
           const vendaMedia = ag && ag.venda_qtd > 0 ? ag.venda_valor / ag.venda_qtd : null
-          // Margem sempre vem calculada de derivarRelatorioProdutos (vira 0
-          // quando vendidoQtd é 0) — mesmo guard de vendidoQtd que
-          // RelatoriosTela.tsx usa pra decidir entre valor e travessão.
-          const temVenda = !!linha && linha.vendidoQtd > 0
           // Lançamento não convertível (unidade ≠ KG sem peso médio) deixa as
           // CINCO métricas desta linha calculadas sobre quantidade incompleta,
           // não só uma — marcar apenas parte delas sugeriria que o resto está
@@ -254,8 +276,23 @@ export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Pro
               <div className="produtos-col-num produtos-mono">
                 {linha?.markupPct != null ? <NumIncompleto texto={pctInt(linha.markupPct)} n={inc} /> : '—'}
               </div>
+              {/* MARGEM = quanto sobra POR QUILO, e que % isso é do preço de
+                  venda (achado P-2). Esta coluna mostrava a margem TOTAL do
+                  período em R$; o total continua existindo, na coluna MARGEM
+                  de Relatórios ▸ Produtos, que é a tela de análise. Aqui é
+                  onde se decide preço de venda, e a pergunta é por quilo.
+                  Travessão pelo mesmo critério de MARKUP (sem preço de compra
+                  E de venda no período não há comparação a fazer) — nunca
+                  "R$ 0,00", que afirmaria margem zero medida. */}
               <div className="produtos-col-num produtos-mono">
-                {temVenda ? <NumIncompleto texto={money(linha!.margem)} n={inc} /> : '—'}
+                {linha?.margemUnit != null && linha.margemPct != null
+                  ? (
+                    <NumIncompleto
+                      texto={`${moneyDetalhado(linha.margemUnit)} · ${pctInt(linha.margemPct)}`}
+                      n={inc}
+                    />
+                  )
+                  : '—'}
               </div>
               <div className="produtos-col-num produtos-mono">
                 {linha?.perdaPct != null ? <NumIncompleto texto={pct1(linha.perdaPct)} n={inc} /> : '—'}
@@ -264,16 +301,44 @@ export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Pro
           )
         })}
 
+        {/*
+          Perda média realizada de todos os produtos (achado P-1). Esta célula
+          era um travessão escrito à mão, com um comentário dizendo que
+          "nenhum relatório expõe uma perda média ponderada" — a justificativa
+          envelheceu junto com o código: `perdaMediaPct` sai das mesmas duas
+          somas do agregado que esta tela já tinha carregado. Travessão só
+          quando não houve compra no período (nada a dividir); `null` ali é
+          ausência de operação, não "perda zero".
+
+          O semáforo é `statusIndiceDePerdas` (derive/dashboard.ts), o mesmo
+          do KPI "Índice de perdas" do painel e do cartão de perda de
+          Entradas — e não a faixa própria do protótipo (≤15% para âmbar):
+          é a MESMA grandeza nas três telas e não pode mudar de cor conforme
+          onde se olha. Mesma decisão já registrada em EntradasLista.tsx.
+        */}
         <div className="produtos-linha produtos-linha--resumo">
           <div className="produtos-resumo-titulo">Perda média (realizada)</div>
           <div /><div /><div /><div />
           <div className="produtos-col-num produtos-resumo-rotulo">MÉDIA →</div>
-          {/* Continua travessão fixo, fora do escopo desta wiring: não é
-              uma das cinco colunas por produto, e nenhum relatório hoje
-              expõe uma perda média PONDERADA entre todos os produtos —
-              ficaria pra uma soma nova, não uma reexibição do que
-              derivarRelatorioProdutos já calcula. */}
-          <div className="produtos-col-num produtos-mono produtos-resumo-valor">—</div>
+          <div
+            className="produtos-col-num produtos-mono produtos-resumo-valor"
+            style={totais.perdaMediaPct != null
+              ? { color: CORES_SEMAFORO[statusIndiceDePerdas(totais.perdaMediaPct)] }
+              : undefined}
+          >
+            {totais.perdaMediaPct == null
+              ? '—'
+              : totais.itensSemConversao > 0
+                // `title` próprio, e não o de `NumIncompleto`: aquele texto
+                // diz "deste produto" (é título de célula de uma linha), e
+                // reusá-lo aqui afirmaria isso sobre a soma de todos.
+                ? (
+                  <span className="produtos-incompleto" title={avisoSemConversaoTotal(totais.itensSemConversao)}>
+                    {pct1(totais.perdaMediaPct)}*
+                  </span>
+                )
+                : pct1(totais.perdaMediaPct)}
+          </div>
         </div>
       </div>
 

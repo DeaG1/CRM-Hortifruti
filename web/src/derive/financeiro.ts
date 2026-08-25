@@ -67,6 +67,18 @@ export interface CustoCategoria {
 
 export interface Resultado {
   receitaBruta: number
+  /**
+   * Quantas saídas entregues compuseram `receitaBruta` no período — a
+   * rastreabilidade da primeira linha do DRE ("essa receita veio de quantas
+   * entregas?"). Portado de `finReceitaSub` (protótipo ~2896), achado FI-1.
+   *
+   * Sai da MESMA lista filtrada que soma a receita (`saidasDaReceita`), não
+   * de uma segunda contagem escrita ao lado: um número e a explicação dele
+   * discordarem é pior do que não haver explicação. Zero aqui é medido —
+   * período sem entrega tem receita 0 e 0 pedidos, e as duas coisas são
+   * verdade.
+   */
+  entregasNaReceita: number
   /** Primeira linha é sempre "Compra de mercadoria" (das entradas); o resto
    * são as categorias de lançamentos agrupadas, maior valor primeiro. */
   custos: CustoCategoria[]
@@ -114,9 +126,18 @@ const DATA_RE = /^\d{4}-\d{2}-\d{2}/
  * `derivarClientes` em clientes.ts para "faturado".
  */
 export function receitaBrutaPeriodo(saidas: SaidaFin[], periodo: string): number {
-  return noPeriodo(saidas, periodo, s => s.entrega)
-    .filter(s => s.status === 'Entregue')
-    .reduce((soma, s) => soma + (s.valor || 0), 0)
+  return saidasDaReceita(saidas, periodo).reduce((soma, s) => soma + (s.valor || 0), 0)
+}
+
+/**
+ * As saídas que COMPÕEM a receita bruta do período — a lista de onde
+ * `receitaBrutaPeriodo` tira a soma, exposta para que a sub-linha da tela
+ * (achado FI-1, "N pedido(s) entregue(s) no período") conte exatamente os
+ * mesmos pedidos que o valor somou, em vez de repetir o filtro num segundo
+ * lugar e poder divergir dele.
+ */
+export function saidasDaReceita(saidas: SaidaFin[], periodo: string): SaidaFin[] {
+  return noPeriodo(saidas, periodo, s => s.entrega).filter(s => s.status === 'Entregue')
 }
 
 /**
@@ -160,7 +181,8 @@ export function calcularResultado(
   lancamentos: Lancamento[],
   periodo: string,
 ): Resultado {
-  const receitaBruta = receitaBrutaPeriodo(saidas, periodo)
+  const entregues = saidasDaReceita(saidas, periodo)
+  const receitaBruta = entregues.reduce((soma, s) => soma + (s.valor || 0), 0)
   const compra = compraMercadoriaPeriodo(entradas, periodo)
   const custos: CustoCategoria[] = [
     { categoria: 'Compra de mercadoria', valor: compra },
@@ -169,7 +191,7 @@ export function calcularResultado(
   const custoTotal = custos.reduce((soma, c) => soma + c.valor, 0)
   const lucroLiquido = receitaBruta - custoTotal
   const pctLucro = receitaBruta ? (lucroLiquido / receitaBruta) * 100 : 0
-  return { receitaBruta, custos, custoTotal, lucroLiquido, pctLucro }
+  return { receitaBruta, entregasNaReceita: entregues.length, custos, custoTotal, lucroLiquido, pctLucro }
 }
 
 /* =========================== ciclo de caixa =========================== */

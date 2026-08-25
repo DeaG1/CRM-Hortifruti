@@ -121,8 +121,11 @@ describe('ProdutosLista — metricas (GET /api/relatorios/produtos)', () => {
     expect(within(linha).getByText('R$ 8,00')).toBeInTheDocument()
     // markup = (8-5)/5 * 100 = 60%
     expect(within(linha).getByText('60%')).toBeInTheDocument()
-    // margem = venda_valor - venda_qtd*compra_media = 80 - 10*5 = 30
-    expect(within(linha).getByText('R$ 30')).toBeInTheDocument()
+    // margem POR QUILO (achado P-2) = 8,00 - 5,00 = R$ 3,00, que e 37,5% do
+    // preco de venda -> "R$ 3,00 · 38%". NAO e mais a margem total do periodo
+    // (R$ 30) — essa continua na coluna MARGEM de Relatorios ▸ Produtos.
+    expect(within(linha).getByText('R$ 3,00 · 38%')).toBeInTheDocument()
+    expect(within(linha).queryByText('R$ 30')).not.toBeInTheDocument()
     // perda = (0+1)/10 * 100 = 10,0%
     expect(within(linha).getByText('10,0%')).toBeInTheDocument()
     expect(within(linha).queryByText('—')).not.toBeInTheDocument()
@@ -285,8 +288,8 @@ describe('ProdutosLista — metricas incompletas (lancamento sem peso medio)', (
     render(<ProdutosLista onSessaoExpirada={() => {}} />)
     const linha = (await screen.findByText('Batata')).closest('.produtos-linha') as HTMLElement
 
-    // compra media 5,00 · venda media 8,00 · markup 60% · margem R$ 30 · perda 10,0%
-    const marcados = ['R$ 5,00*', 'R$ 8,00*', '60%*', 'R$ 30*', '10,0%*']
+    // compra media 5,00 · venda media 8,00 · markup 60% · margem R$ 3,00 · 38% · perda 10,0%
+    const marcados = ['R$ 5,00*', 'R$ 8,00*', '60%*', 'R$ 3,00 · 38%*', '10,0%*']
     for (const texto of marcados) expect(within(linha).getByText(texto)).toBeInTheDocument()
     // A explicacao vive no title da propria celula — o asterisco sozinho
     // sinalizaria sem dizer o que falta.
@@ -362,5 +365,180 @@ describe('ProdutosLista — periodo global', () => {
     const dica = screen.getByText(/calculados das compras e vendas/i)
     expect(dica).toHaveTextContent('Junho/2026')
     expect(dica).toHaveTextContent(/cadastro aparece inteiro/i)
+  })
+})
+
+// ============ perda media realizada no rodape (achado P-1 da auditoria)
+
+/**
+ * A celula do rodape era um travessao escrito a mao, com um comentario
+ * dizendo que "nenhum relatorio expoe uma perda media ponderada" — quando as
+ * duas somas saem do agregado que a propria tela ja tinha carregado. Um
+ * travessao falso e pior que um numero ausente: ele PARECE a convencao de
+ * honestidade do projeto e e, na verdade, uma ligacao que nunca foi feita.
+ */
+describe('ProdutosLista — perda media realizada (rodape)', () => {
+  /** A linha de resumo do rodape, a unica com a classe --resumo. */
+  function rodape(): HTMLElement {
+    return document.querySelector('.produtos-linha--resumo') as HTMLElement
+  }
+
+  it('e a media PONDERADA pelo volume, nao a media das perdas de cada linha', async () => {
+    // Alface: 100 kg comprados, 20 perdidos (20%). Batata: 900 kg, 0 perdidos
+    // (0%). Media simples das linhas daria 10%; a ponderada e 20/1000 = 2,0%.
+    mockRotas(
+      [produto({ id: '1', nome: 'Alface' }), produto({ id: '2', nome: 'Batata' })],
+      [
+        agregado({ produto_id: '1', nome: 'Alface', compra_qtd: 100, compra_valor: 300, perda_coleta_qtd: 20 }),
+        agregado({ produto_id: '2', nome: 'Batata', compra_qtd: 900, compra_valor: 900 }),
+      ],
+    )
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Alface')
+    expect(within(rodape()).getByText('2,0%')).toBeInTheDocument()
+    expect(within(rodape()).queryByText('10,0%')).not.toBeInTheDocument()
+  })
+
+  it('soma perda de coleta E de deposito, como diz a nota da tela', async () => {
+    // 10 de coleta + 15 de deposito sobre 500 kg = 5,0%. Contar so a coleta
+    // daria 2,0% — a perda depois da compra sumiria do indice.
+    mockRotas(
+      [produto({ id: '1', nome: 'Batata' })],
+      [agregado({
+        produto_id: '1', compra_qtd: 500, compra_valor: 1000,
+        perda_coleta_qtd: 10, perda_deposito_qtd: 15,
+      })],
+    )
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    expect(within(rodape()).getByText('5,0%')).toBeInTheDocument()
+  })
+
+  it('comprou e nao perdeu nada: 0,0% MEDIDO, nunca travessao', async () => {
+    mockRotas(
+      [produto({ id: '1', nome: 'Batata' })],
+      [agregado({ produto_id: '1', compra_qtd: 200, compra_valor: 400 })],
+    )
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    expect(within(rodape()).getByText('0,0%')).toBeInTheDocument()
+    expect(within(rodape()).queryByText('—')).not.toBeInTheDocument()
+  })
+
+  it('sem compra no periodo: travessao, nunca "0,0%" — ausencia de operacao nao e perda zero', async () => {
+    mockRotas(
+      [produto({ id: '1', nome: 'Batata' })],
+      [agregado({ produto_id: '1', compra_qtd: 0, compra_valor: 0, venda_qtd: 5, venda_valor: 40 })],
+    )
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    expect(within(rodape()).getByText('—')).toBeInTheDocument()
+    expect(within(rodape()).queryByText('0,0%')).not.toBeInTheDocument()
+  })
+
+  it('falha em /api/relatorios/produtos deixa a perda media em travessao, com a lista visivel', async () => {
+    mockRotas([produto({ id: '1', nome: 'Batata' })], new Error('falha de rede'))
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    expect(await screen.findByText('Batata')).toBeInTheDocument()
+    expect(await screen.findByRole('status')).toHaveTextContent(/não foi possível carregar as métricas/i)
+    expect(within(rodape()).getByText('—')).toBeInTheDocument()
+  })
+
+  it('semaforo: <=10% verde, ate 13% ambar, acima vermelho — a mesma escala do painel', async () => {
+    /** Renderiza a tela com `perdaKg` sobre 100 kg comprados e devolve a cor
+     * da celula do rodape. */
+    async function corCom(perdaKg: number): Promise<string> {
+      mockRotas(
+        [produto({ id: '1', nome: 'Batata' })],
+        [agregado({ produto_id: '1', compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: perdaKg })],
+      )
+      const { unmount } = render(<ProdutosLista onSessaoExpirada={() => {}} />)
+      await screen.findByText('Batata')
+      const cor = (rodape().querySelector('.produtos-resumo-valor') as HTMLElement).style.color
+      unmount()
+      return cor
+    }
+
+    // rgb() porque o jsdom normaliza a cor inline; os hex sao os de
+    // CORES_SEMAFORO (#3f8f5b / #c79320 / #c2502f).
+    expect(await corCom(8)).toBe('rgb(63, 143, 91)')
+    expect(await corCom(12)).toBe('rgb(199, 147, 32)')
+    expect(await corCom(20)).toBe('rgb(194, 80, 47)')
+  })
+
+  it('quantidade incompleta marca a perda media com * e o title fala do TOTAL, nao "deste produto"', async () => {
+    mockRotas(
+      [produto({ id: '1', nome: 'Batata' })],
+      [agregado({
+        produto_id: '1', compra_qtd: 100, compra_valor: 200,
+        perda_coleta_qtd: 10, itens_sem_conversao: 3,
+      })],
+    )
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    const celula = within(rodape()).getByText('10,0%*')
+    expect(celula.getAttribute('title')).toContain('3 lançamentos')
+    expect(celula.getAttribute('title')).toContain('A perda média está calculada')
+    // O texto de celula de linha ("deste produto") seria falso sobre a soma
+    // de todos os produtos.
+    expect(celula.getAttribute('title')).not.toContain('deste produto')
+  })
+})
+
+// ================= margem por quilo na coluna MARGEM (achado P-2)
+
+describe('ProdutosLista — coluna MARGEM e por quilo, com a %', () => {
+  function linhaDe(nome: string): HTMLElement {
+    return screen.getByText(nome).closest('.produtos-linha') as HTMLElement
+  }
+
+  it('margem por quilo e o quanto ela representa do preco de venda', async () => {
+    // compra media 2,00 · venda media 3,20 -> margem R$ 1,20, que e 37,5% do
+    // preco de venda (38% arredondado). O markup da mesma linha e 60% — sao
+    // numeros diferentes de proposito.
+    mockRotas(
+      [produto({ id: '1', nome: 'Batata' })],
+      [agregado({ produto_id: '1', compra_qtd: 100, compra_valor: 200, venda_qtd: 50, venda_valor: 160 })],
+    )
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    expect(within(linhaDe('Batata')).getByText('R$ 1,20 · 38%')).toBeInTheDocument()
+    expect(within(linhaDe('Batata')).getByText('60%')).toBeInTheDocument()
+  })
+
+  it('margem negativa aparece com o sinal — vender abaixo do custo nao pode sair como travessao', async () => {
+    // compra media 3,00 · venda media 2,00 -> -R$ 1,00, -50% da venda.
+    mockRotas(
+      [produto({ id: '1', nome: 'Batata' })],
+      [agregado({ produto_id: '1', compra_qtd: 10, compra_valor: 30, venda_qtd: 10, venda_valor: 20 })],
+    )
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    expect(within(linhaDe('Batata')).getByText('R$ -1,00 · -50%')).toBeInTheDocument()
+  })
+
+  it('so compra, sem venda: travessao junto com o markup — nunca "R$ 0,00 · 0%"', async () => {
+    mockRotas(
+      [produto({ id: '1', nome: 'Batata' })],
+      [agregado({ produto_id: '1', compra_qtd: 10, compra_valor: 30 })],
+    )
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    const linha = linhaDe('Batata')
+    // venda media, markup e margem: os tres em travessao
+    expect(within(linha).getAllByText('—')).toHaveLength(3)
+    expect(within(linha).queryByText(/R\$ 0,00/)).not.toBeInTheDocument()
+  })
+
+  it('so venda, sem compra: travessao — sem custo nao ha margem a apurar', async () => {
+    mockRotas(
+      [produto({ id: '1', nome: 'Batata' })],
+      [agregado({ produto_id: '1', venda_qtd: 10, venda_valor: 80 })],
+    )
+    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+    // compra media, markup, margem e perda (compra_qtd 0): quatro travessoes
+    const linha = linhaDe('Batata')
+    expect(within(linha).getAllByText('—')).toHaveLength(4)
   })
 })

@@ -1,5 +1,8 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { api, ErroApi } from '../api/client'
+import { perdaColetaPct, qtdEmKg, somarQtdEmKg } from '../derive/coleta'
+import { statusIndiceDePerdas } from '../derive/dashboard'
+import type { Health } from '../derive/clientes'
 import './ModalEntrada.css'
 
 /** Unidades aceitas — mesmo enum de `produtos.un` (produtos_un_check, migration
@@ -121,6 +124,84 @@ function itensDeEntrada(e: EntradaComItens | null): ItemRascunho[] {
 
 const money = (n: number) =>
   'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const peso = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' kg'
+/** Percentual com uma casa, em pt-BR — mesmo `fmtPct1` do protótipo e mesmo
+ * `pct1` de EntradasLista.tsx, que formata esta mesma perda por linha. */
+const pct1 = (n: number) => n.toFixed(1).replace('.', ',') + '%'
+
+/** Travessão: não há o que medir. Nunca "0,0%", que afirmaria perda zero. */
+const TRACO = '—'
+
+/** Mesmas cores de semáforo de EntradasLista.tsx — a coluna PERDA % daqui e
+ * a coluna PERDA da tabela medem a mesma coisa sobre a mesma coleta. */
+const CORES_SEMAFORO: Record<Health, string> = {
+  green: '#3f8f5b',
+  amber: '#c79320',
+  red: '#c2502f',
+}
+
+/**
+ * Aviso do que ficou fora do peso em quilos deste rascunho — o item em
+ * unidade diferente de KG cujo produto não tem peso médio cadastrado (ou que
+ * ainda não teve produto escolhido). O peso da embalagem é o que falta, e sem
+ * ele não há como somar caixas com quilos; a alternativa (fator 1) diria que
+ * uma caixa pesa um quilo. Mesma regra e mesma honestidade de
+ * `itens_sem_conversao` na API (api/src/routes/entradas.ts).
+ */
+function avisoPerdaIncompleta(n: number): string {
+  const itens = n === 1 ? '1 item' : `${n} itens`
+  const verbo = n === 1 ? 'ficou' : 'ficaram'
+  return `${itens} em unidade diferente de KG, sem peso médio conhecido, ${verbo} fora do peso: `
+    + 'sem o peso da embalagem não há como somar em quilos. A perda % acima está calculada sobre '
+    + 'peso incompleto — escolha o produto e cadastre o peso médio dele em Produtos.'
+}
+
+/**
+ * A célula PERDA % de um item do rascunho (achado E-5). Travessão — nunca
+ * "0,0%" — em dois casos, os dois "não dá para medir":
+ *
+ *   - quantidade ainda em branco (não há denominador);
+ *   - item em unidade diferente de KG sem peso médio conhecido (produto ainda
+ *     não escolhido, ou escolhido sem peso médio cadastrado): o denominador
+ *     existe em caixas, e dividir quilos de perda por caixas não dá
+ *     percentual nenhum — foi exatamente esse cálculo que o protótipo fazia.
+ *
+ * Zero MEDIDO (quantidade em quilos e nenhuma perda) sai 0,0% em verde: é a
+ * boa notícia da coleta e não pode virar travessão.
+ */
+function PerdaPctItem({ idx, un, qtd, perdaKg, pesoMedio }: {
+  idx: number
+  un: string
+  qtd: number
+  perdaKg: number
+  pesoMedio: number
+}) {
+  const emKg = qtdEmKg(un, qtd, pesoMedio)
+  const pct = emKg === null ? null : perdaColetaPct(perdaKg, emKg)
+  if (pct === null) {
+    return (
+      <div className="modal-entrada-item-col-num modal-entrada-item-perda-pct">
+        <span
+          title={emKg === null
+            ? 'Quantidade em unidade diferente de KG sem peso médio conhecido — sem o peso da '
+              + 'embalagem não há como calcular a perda em % do que entrou.'
+            : 'Sem quantidade lançada ainda — não há sobre o que medir a perda.'}
+          aria-label={`Perda percentual do item ${idx + 1}`}
+        >
+          {TRACO}
+        </span>
+      </div>
+    )
+  }
+  return (
+    <div
+      className="modal-entrada-item-col-num modal-entrada-item-perda-pct"
+      style={{ color: CORES_SEMAFORO[statusIndiceDePerdas(pct)] }}
+    >
+      <span aria-label={`Perda percentual do item ${idx + 1}`}>{pct1(pct)}</span>
+    </div>
+  )
+}
 
 interface ModalEntradaProps {
   /** null = criando; objeto com itens (GET /api/entradas/:id) = editando. */
@@ -253,6 +334,33 @@ export function ModalEntrada({ entrada, onSalvo, onFechar, onSessaoExpirada }: M
   const totalQtd = itens.reduce((s, it) => s + (Number(it.qtd) || 0), 0)
   const totalPerda = itens.reduce((s, it) => s + (Number(it.perda_kg) || 0), 0)
   const totalValor = itens.reduce((s, it) => s + (Number(it.qtd) || 0) * (Number(it.preco) || 0), 0)
+
+  /** Peso médio da embalagem do produto escolhido, em kg. `0` (= "não
+   * informado", migration 009) também quando o produto ainda não foi
+   * escolhido ou a lista não carregou: nos três casos não há fator, e
+   * `qtdEmKg` devolve `null` em vez de inventar um. */
+  const pesoMedioDe = (produtoId: string) => produtos.find(p => p.id === produtoId)?.peso_medio ?? 0
+
+  /**
+   * A PERDA % (achado E-5; protótipo: cabeçalho 1441, célula 1459, total
+   * 1473, cálculo 2284/2306) precisa dos dois lados EM QUILOS, e só um deles
+   * já está: `perda_kg` é kg por contrato para item de qualquer unidade (o
+   * rótulo do campo diz kg), mas `qtd` está na unidade da linha. O protótipo
+   * dividia um pelo outro cru (`it.perdaKg / it.kg`) — 8 kg de perda sobre
+   * "4" caixas dava 200%. Aqui a quantidade converte pela MESMA regra da API
+   * (derive/coleta.ts), e o item que não converte não ganha uma % inventada:
+   * ganha travessão.
+   *
+   * O denominador do TOTAL é `somarQtdEmKg`, não `totalQtd` (que soma caixas
+   * com quilos e continua exibido cru na coluna QTD, como no protótipo) —
+   * dividir quilos de perda por essa soma seria o mesmo defeito no rodapé.
+   */
+  const totalEmKg = somarQtdEmKg(itens.map(it => ({
+    un: it.un,
+    qtd: Number(it.qtd) || 0,
+    pesoMedio: pesoMedioDe(it.produto_id),
+  })))
+  const totalPerdaPct = perdaColetaPct(totalPerda, totalEmKg.kg)
 
   async function salvar(e: FormEvent) {
     e.preventDefault()
@@ -454,6 +562,7 @@ export function ModalEntrada({ entrada, onSalvo, onFechar, onSessaoExpirada }: M
                     <div className="modal-entrada-item-col-num">Qtd</div>
                     <div className="modal-entrada-item-col-num">R$/un</div>
                     <div className="modal-entrada-item-col-num">Perda</div>
+                    <div className="modal-entrada-item-col-num">Perda %</div>
                     <div className="modal-entrada-item-col-num">Subtotal</div>
                     <div />
                   </div>
@@ -511,6 +620,13 @@ export function ModalEntrada({ entrada, onSalvo, onFechar, onSessaoExpirada }: M
                       value={it.perda_kg}
                       onChange={e => atualizarItem(idx, 'perda_kg', e.target.value)}
                     />
+                    <PerdaPctItem
+                      idx={idx}
+                      un={it.un}
+                      qtd={Number(it.qtd) || 0}
+                      perdaKg={Number(it.perda_kg) || 0}
+                      pesoMedio={pesoMedioDe(it.produto_id)}
+                    />
                     <div className="modal-entrada-item-subtotal">
                       {money((Number(it.qtd) || 0) * (Number(it.preco) || 0))}
                     </div>
@@ -538,6 +654,25 @@ export function ModalEntrada({ entrada, onSalvo, onFechar, onSessaoExpirada }: M
                     <div className="modal-entrada-item-col-num">{totalQtd.toLocaleString('pt-BR')}</div>
                     <div />
                     <div className="modal-entrada-item-col-num">{totalPerda.toLocaleString('pt-BR')} kg</div>
+                    <div
+                      className="modal-entrada-item-col-num"
+                      style={totalPerdaPct === null
+                        ? undefined
+                        : { color: CORES_SEMAFORO[statusIndiceDePerdas(totalPerdaPct)] }}
+                    >
+                      {totalPerdaPct === null
+                        ? TRACO
+                        : (
+                          <span
+                            className={totalEmKg.itensSemConversao > 0 ? 'modal-entrada-incompleto' : undefined}
+                            title={totalEmKg.itensSemConversao > 0
+                              ? avisoPerdaIncompleta(totalEmKg.itensSemConversao)
+                              : `${peso(totalPerda)} de perda em ${peso(totalEmKg.kg)} recebidos.`}
+                          >
+                            {pct1(totalPerdaPct)}{totalEmKg.itensSemConversao > 0 ? '*' : ''}
+                          </span>
+                        )}
+                    </div>
                     <div className="modal-entrada-item-col-num">{money(totalValor)}</div>
                     <div />
                   </div>

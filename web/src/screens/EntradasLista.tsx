@@ -4,8 +4,9 @@ import { ModalEntrada, type EntradaComItens, type Fornecedor } from '../componen
 import { SeletorPagamento } from '../components/SeletorPagamento'
 import type { Health } from '../derive/clientes'
 import { METAS_DASHBOARD, statusIndiceDePerdas, type Perda } from '../derive/dashboard'
-import type { SituacaoPagamentoEscolhivel } from '../derive/pagamento'
-import type { EntradaResumo } from '../derive/relatorios'
+import { infoPagamento, type SituacaoPagamentoEscolhivel } from '../derive/pagamento'
+import { perdaColetaPct } from '../derive/coleta'
+import { perdaColetaEfetiva, type EntradaResumo } from '../derive/relatorios'
 import { derivarResumoEntradas, type ResumoEntradas } from '../derive/resumoOperacional'
 import { filtrarPorPeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import './EntradasLista.css'
@@ -24,9 +25,10 @@ interface Entrada {
    * de perda que `perda_kg` (o cabeçalho), em outra granularidade — nunca
    * dois números a somar. O cartão ÍNDICE DE PERDAS usa `perdaColetaEfetiva`
    * (o maior dos dois, ver derive/relatorios.ts) para não contar em dobro,
-   * que é também o número de Relatórios ▸ Compras e do saldo de Estoque; a
-   * coluna PERDA da tabela continua mostrando só o cabeçalho, então os dois
-   * podem divergir quando o dado gravado diverge.
+   * que é também o número de Relatórios ▸ Compras e do saldo de Estoque. A
+   * coluna PERDA da tabela usa o MESMO `perdaColetaEfetiva` desde o achado
+   * E-3 (ver `CelulaPerda`): antes ela mostrava só o cabeçalho, e a linha
+   * podia discordar do cartão logo acima sobre a mesma coleta.
    */
   perda_itens_qtd?: number
   motivo: string
@@ -210,6 +212,69 @@ function CartoesResumo({ resumo, periodo }: { resumo: ResumoEntradas | null; per
         valor={resumo ? money(resumo.valorTotal) : TRACO}
         sub="comprado no total"
       />
+    </div>
+  )
+}
+
+/**
+ * A célula PERDA de uma linha da tabela — em % do peso recebido daquela
+ * coleta, com semáforo (achado E-3 da auditoria; protótipo: markup 489,
+ * cálculo 2510, cor 2515).
+ *
+ * Antes mostrava `peso(e.perda_kg)`: quilos absolutos, sempre na mesma cor
+ * de alerta. 140 kg pode ser rotina numa coleta de 8 t e catástrofe numa de
+ * 300 kg, e a coluna não dizia qual — o mesmo defeito que o cartão de perda
+ * desta tela tinha antes de 7a16a20, uma linha abaixo. Os quilos não se
+ * perdem: continuam no `title`, ao lado do peso que serve de base.
+ *
+ * TRÊS decisões que valem registro:
+ *
+ * 1. O numerador é `perdaColetaEfetiva(e)` (o MAIOR entre o cabeçalho e a
+ *    soma dos itens), não `e.perda_kg` cru. Os dois campos descrevem o mesmo
+ *    evento de perda em granularidades diferentes (ver derive/relatorios.ts);
+ *    a linha usar o cabeçalho enquanto o cartão logo acima usa o efetivo faria
+ *    a coluna e o cartão da MESMA tela discordarem sobre a mesma coleta.
+ *    O protótipo usa `en.perdaKg` porque lá o cabeçalho é recalculado a
+ *    partir dos itens ao salvar (2037) — o que a API portada não faz.
+ *
+ * 2. O semáforo é `statusIndiceDePerdas` (10% / 13%, METAS_DASHBOARD), e não
+ *    a faixa 10/15 do protótipo. É deliberado: a régua duplicada era
+ *    exatamente o que 7a16a20 removeu desta tela, e reintroduzi-la na coluna
+ *    pintaria de cores diferentes, na mesma tela, o mesmo tipo de número que
+ *    o cartão ÍNDICE DE PERDAS pinta pela régua do painel. Uma tela, uma
+ *    régua.
+ *
+ * 3. Travessão quando não há peso recebido — nunca "0,0%", que afirmaria não
+ *    ter havido perda numa coleta que não pesou nada (o protótipo já faz
+ *    assim, 2513). Zero MEDIDO (houve peso, não houve perda) sai 0,0% e em
+ *    verde, que é a boa notícia da coleta.
+ */
+function CelulaPerda({ entrada }: { entrada: Entrada }) {
+  const perdaKg = perdaColetaEfetiva(entrada)
+  const pct = perdaColetaPct(perdaKg, entrada.peso_total)
+  if (pct === null) {
+    return (
+      <div className="entradas-col-num entradas-mono" style={{ color: '#6a685c' }}>
+        {TRACO}
+      </div>
+    )
+  }
+  // O peso recebido é o denominador desta fração: se ele está incompleto
+  // (item sem peso médio ficou fora), a % sai PARA CIMA — a mesma
+  // consequência que a célula PESO ao lado já explica, e por isso o mesmo
+  // texto. Os quilos de perda continuam no title, que é onde o número
+  // absoluto passou a morar.
+  const incompleto = entrada.itens_sem_conversao ?? 0
+  const detalhe = `${peso(perdaKg)} de perda em ${peso(entrada.peso_total)} recebidos.`
+  const titulo = incompleto > 0 ? `${detalhe} ${avisoPesoIncompleto(incompleto)}` : detalhe
+  return (
+    <div
+      className="entradas-col-num entradas-mono"
+      style={{ color: CORES_SEMAFORO[statusIndiceDePerdas(pct)] }}
+    >
+      <span className={incompleto > 0 ? 'entradas-incompleto' : undefined} title={titulo}>
+        {pct1(pct)}{incompleto > 0 ? '*' : ''}
+      </span>
     </div>
   )
 }
@@ -550,12 +615,7 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
                     )
                     : peso(e.peso_total)}
                 </div>
-                <div
-                  className="entradas-col-num entradas-mono"
-                  style={{ color: e.perda_kg > 0 ? '#c2502f' : '#2a2a24' }}
-                >
-                  {peso(e.perda_kg)}
-                </div>
+                <CelulaPerda entrada={e} />
                 <div className="entradas-col-num entradas-mono entradas-valor">{money(e.valor_total)}</div>
                 <div>
                   {/* Entradas não têm vencimento (a tabela `entradas` não
@@ -572,6 +632,21 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
                     aoEscolher={pago => alterarPagamento(e.id, pago)}
                     rotulo={`Pagamento da entrada ${e.numero}`}
                   />
+                  {/* "PIX · 10/06" — COMO e QUANDO se pagou ao produtor
+                      (achado E-4; protótipo markup 491, montagem 2517).
+                      `forma_pag`/`data_pag` já vinham na resposta e não
+                      apareciam em lugar nenhum desta tela: o chip dizia que
+                      estava pago, e a única forma de saber quando era abrir
+                      o modal. Some sozinha enquanto não houver pagamento —
+                      não é dado faltando, é pagamento que não aconteceu, e
+                      o chip acima já diz isso (ver `infoPagamento`,
+                      derive/pagamento.ts). Entradas não têm vencimento, então
+                      a situação exibida é o `pago` gravado, sem derivação. */}
+                  {infoPagamento(e.pago, e.forma_pag, e.data_pag) && (
+                    <div className="entradas-pag-info">
+                      {infoPagamento(e.pago, e.forma_pag, e.data_pag)}
+                    </div>
+                  )}
                 </div>
                 <div className="entradas-col-num">
                   <button

@@ -5,6 +5,7 @@ import {
   rotuloOpcaoPendente,
   valorEmAbertoCliente,
   avisoLimiteCredito,
+  infoPagamento,
   type SaidaParaLimite,
 } from './pagamento'
 
@@ -176,5 +177,51 @@ describe('avisoLimiteCredito', () => {
     // emAberto so conta 'outra' (20) — 'editando' fica de fora porque seu
     // valor atualizado ja esta em estaVenda (100). 20 + 100 = 120, excedente 20.
     expect(aviso).toEqual({ limite: 100, emAberto: 20, estaVenda: 100, excedente: 20 })
+  })
+})
+
+describe('infoPagamento — a sub-linha "forma · data" sob o chip', () => {
+  it('pago com forma e data: "PIX · 10/06"', () => {
+    expect(infoPagamento('Pago', 'PIX', '2026-06-10')).toBe('PIX · 10/06')
+    expect(infoPagamento('Pago', 'Boleto', '2026-06-15')).toBe('Boleto · 15/06')
+  })
+
+  it('nao pago nao tem sub-linha nenhuma — nem travessao', () => {
+    // Ausencia de forma/data num pedido pendente nao e dado faltando: e o
+    // pagamento que ainda nao aconteceu, e o chip logo acima ja diz isso.
+    expect(infoPagamento('Pendente', 'PIX', '2026-06-10')).toBeNull()
+    expect(infoPagamento('Atrasado', 'PIX', '2026-06-10')).toBeNull()
+    expect(infoPagamento('—', 'PIX', '2026-06-10')).toBeNull()
+  })
+
+  it('pago so com forma, sem data: mostra a forma sozinha, sem separador solto', () => {
+    // O prototipo montava "PIX · " aqui (2517) — um separador no fim da
+    // linha, resto de concatenacao, nao informacao.
+    expect(infoPagamento('Pago', 'PIX', null)).toBe('PIX')
+    expect(infoPagamento('Pago', 'PIX', '')).toBe('PIX')
+  })
+
+  it('pago so com data, sem forma: mostra a data sozinha', () => {
+    expect(infoPagamento('Pago', '', '2026-06-10')).toBe('10/06')
+    expect(infoPagamento('Pago', null, '2026-06-10')).toBe('10/06')
+    expect(infoPagamento('Pago', '   ', '2026-06-10')).toBe('10/06')
+  })
+
+  it('pago sem forma nem data: null — nao ha o que dizer sobre o pagamento', () => {
+    expect(infoPagamento('Pago', null, null)).toBeNull()
+    expect(infoPagamento('Pago', '', '')).toBeNull()
+  })
+
+  it('data fora do formato nao vaza crua nem vira data inventada', () => {
+    expect(infoPagamento('Pago', 'PIX', 'ontem')).toBe('PIX')
+    expect(infoPagamento('Pago', null, 'ontem')).toBeNull()
+  })
+
+  it('data com hora (timestamp da API) usa so o dia', () => {
+    expect(infoPagamento('Pago', 'PIX', '2026-06-10T00:00:00Z')).toBe('PIX · 10/06')
+  })
+
+  it('mes/dia de um digito saem com zero a esquerda', () => {
+    expect(infoPagamento('Pago', 'PIX', '2026-6-1')).toBe('PIX · 01/06')
   })
 })

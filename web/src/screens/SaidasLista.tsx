@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { api, ErroApi } from '../api/client'
 import type { Cliente } from '../derive/clientes'
 import { diasRecebimentoSaida } from '../derive/financeiro'
-import { situacaoExibidaSaida, type SituacaoPagamentoEscolhivel } from '../derive/pagamento'
+import { infoPagamento, situacaoExibidaSaida, type SituacaoPagamentoEscolhivel } from '../derive/pagamento'
 import type { SaidaResumo } from '../derive/relatorios'
 import { derivarResumoSaidas, type ResumoSaidas } from '../derive/resumoOperacional'
 import { filtrarPorPeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
@@ -487,7 +487,27 @@ export function SaidasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Saida
                     rotulo={`Pagamento do pedido ${s.numero}`}
                   />
                 )}
+                {/* Duas sub-linhas com papéis opostos, e por isso as duas
+                    existem: o vencimento é a PROMESSA (quando deveria
+                    entrar), a info de pagamento é o FATO (como e quando
+                    entrou). Antes só a promessa aparecia — achado S-3;
+                    protótipo markup 425, montagem 2414. `forma_pag` e
+                    `data_pag` já vinham de GET /api/saidas e não eram
+                    exibidos em lugar nenhum desta tela.
+
+                    A situação vem DERIVADA (`situacao`, com Atrasado
+                    calculado do vencimento), nunca o `pag` gravado: a
+                    sub-linha não pode dizer "pago" sob um chip que diz
+                    "Atrasado". Ausência de forma/data num pedido não pago
+                    não desenha nada — não é dado faltando, é pagamento que
+                    não aconteceu, e o chip acima já diz isso (ver
+                    `infoPagamento`, derive/pagamento.ts). */}
                 {s.venc && <div className="saidas-venc">venc. {dataBr(s.venc)}</div>}
+                {infoPagamento(situacao, s.forma_pag, s.data_pag) && (
+                  <div className="saidas-pag-info">
+                    {infoPagamento(situacao, s.forma_pag, s.data_pag)}
+                  </div>
+                )}
               </div>
               <div className="saidas-col-num saidas-mono" style={{ color: corReceb(receb, situacao) }}>
                 {receb === null ? TRACO : `${receb} d`}

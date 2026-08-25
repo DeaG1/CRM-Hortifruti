@@ -672,3 +672,65 @@ describe('SaidasLista — periodo global', () => {
     expect(screen.getByText(/os filtros abaixo/i)).toHaveTextContent('Agosto/2026')
   })
 })
+
+/**
+ * Achado S-3: `forma_pag` e `data_pag` ja vinham de GET /api/saidas e a tela
+ * so mostrava o VENCIMENTO — a promessa, nunca o fato. Quem quisesse saber
+ * como e quando o cliente pagou tinha de abrir o modal.
+ */
+describe('SaidasLista — sub-linha "forma · data" do pagamento (achado S-3)', () => {
+  function blocoPagamento(): HTMLElement {
+    const linha = screen.getByText('S-0001').closest('.saidas-linha--dados') as HTMLElement
+    // Ordem: PEDIDO, CLIENTE, ENTREGA, PESO, VALOR, STATUS, PAGAMENTO, RECEB.
+    return linha.children[6] as HTMLElement
+  }
+
+  it('com dado: pedido pago mostra "PIX · 07/08" sob o chip', async () => {
+    mockGetPadrao([saida({ status: 'Entregue', pag: 'Pago', forma_pag: 'PIX', data_pag: '2026-08-07' })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+    expect(within(blocoPagamento()).getByText('PIX · 07/08')).toBeInTheDocument()
+  })
+
+  it('a promessa e o fato convivem: vencimento e info de pagamento sao sub-linhas diferentes', async () => {
+    mockGetPadrao([saida({
+      status: 'Entregue', pag: 'Pago', venc: '2026-08-20', forma_pag: 'Boleto', data_pag: '2026-08-07',
+    })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+    expect(within(blocoPagamento()).getByText('venc. 20/08')).toBeInTheDocument()
+    expect(within(blocoPagamento()).getByText('Boleto · 07/08')).toBeInTheDocument()
+  })
+
+  it('sem dado: pedido pendente nao desenha sub-linha de pagamento — nem travessao', async () => {
+    mockGetPadrao([saida({ pag: 'Pendente', forma_pag: 'PIX', data_pag: null })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+    expect(blocoPagamento().querySelector('.saidas-pag-info')).toBeNull()
+  })
+
+  it('usa a situacao DERIVADA: pendente vencido e Atrasado, e Atrasado nao tem info de pagamento', async () => {
+    // `pag` gravado 'Pendente' + vencimento no passado -> chip mostra
+    // Atrasado. A sub-linha nao pode contradizer o chip que acompanha.
+    mockGetPadrao([saida({ pag: 'Pendente', venc: '2020-01-01', forma_pag: 'PIX', data_pag: '2026-08-07' })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+    expect(blocoPagamento().querySelector('.saidas-pag-info')).toBeNull()
+  })
+
+  it('pago sem forma registrada mostra so a data, sem separador solto', async () => {
+    mockGetPadrao([saida({ status: 'Entregue', pag: 'Pago', forma_pag: '', data_pag: '2026-08-07' })])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+    expect(within(blocoPagamento()).getByText('07/08')).toBeInTheDocument()
+    expect(blocoPagamento().textContent).not.toContain('· ')
+  })
+
+  it('falha de carregamento: nenhuma linha, nenhuma sub-linha, so o alerta', async () => {
+    mockGet.mockRejectedValue(new Error('falha de rede'))
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível carregar as saídas.')
+    expect(document.querySelector('.saidas-pag-info')).toBeNull()
+  })
+})
+

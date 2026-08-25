@@ -20,10 +20,24 @@
   margin-bottom: 16px;
 }
 
-.perdas-topo-legenda {
+/* Título + explicação da seção (achado ES-1). O bloco de texto é que cresce;
+   o botão fica colado à direita, como no protótipo (641-644). */
+.perdas-topo-texto {
   flex: 1;
+}
+
+.perdas-topo-titulo {
+  margin: 0;
+  font-family: 'Archivo', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  color: #21331f;
+}
+
+.perdas-topo-legenda {
   font-size: 12.5px;
   color: #6a685c;
+  line-height: 1.45;
 }
 
 .perdas-botao-novo {

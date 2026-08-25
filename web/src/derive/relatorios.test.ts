@@ -1391,3 +1391,97 @@ describe('derivarRelatorioLedger', () => {
     expect(linhas).toHaveLength(0)
   })
 })
+
+// ---- margem por quilo e perda media ponderada (achados P-2 e P-1)
+
+describe('derivarRelatorioProdutos — margem por quilo (P-2)', () => {
+  it('margemUnit e venda media menos compra media; margemPct e quanto isso e da venda', () => {
+    // compra 200/100 = 2,00 · venda 160/50 = 3,20 -> 1,20, que e 37,5% de 3,20
+    const [linha] = derivarRelatorioProdutos([produtoAgregado({
+      compra_qtd: 100, compra_valor: 200, venda_qtd: 50, venda_valor: 160,
+    })], 1).linhas
+    expect(linha.margemUnit).toBeCloseTo(1.2, 10)
+    expect(linha.margemPct).toBeCloseTo(37.5, 10)
+  })
+
+  it('e uma pergunta DIFERENTE da margem total do periodo', () => {
+    const [linha] = derivarRelatorioProdutos([produtoAgregado({
+      compra_qtd: 10, compra_valor: 50, venda_qtd: 10, venda_valor: 80,
+    })], 1).linhas
+    // total do periodo: 80 - 10*5 = 30. Por quilo: 8 - 5 = 3.
+    expect(linha.margem).toBe(30)
+    expect(linha.margemUnit).toBe(3)
+  })
+
+  it('margem sobre a venda nao e o markup sobre a compra', () => {
+    const [linha] = derivarRelatorioProdutos([produtoAgregado({
+      compra_qtd: 10, compra_valor: 50, venda_qtd: 10, venda_valor: 80,
+    })], 1).linhas
+    expect(linha.markupPct).toBeCloseTo(60, 10)
+    expect(linha.margemPct).toBeCloseTo(37.5, 10)
+  })
+
+  it('margem negativa e um numero real, nao um caso de null', () => {
+    const [linha] = derivarRelatorioProdutos([produtoAgregado({
+      compra_qtd: 10, compra_valor: 30, venda_qtd: 10, venda_valor: 20,
+    })], 1).linhas
+    expect(linha.margemUnit).toBe(-1)
+    expect(linha.margemPct).toBe(-50)
+  })
+
+  it('null quando falta compra OU venda no periodo — o mesmo criterio do markup', () => {
+    const semVenda = derivarRelatorioProdutos([produtoAgregado({ compra_qtd: 10, compra_valor: 30 })], 1).linhas[0]
+    const semCompra = derivarRelatorioProdutos([produtoAgregado({ venda_qtd: 10, venda_valor: 80 })], 1).linhas[0]
+    expect(semVenda.margemUnit).toBeNull()
+    expect(semVenda.margemPct).toBeNull()
+    expect(semVenda.markupPct).toBeNull()
+    expect(semCompra.margemUnit).toBeNull()
+    expect(semCompra.margemPct).toBeNull()
+  })
+})
+
+describe('derivarRelatorioProdutos — perda media realizada (P-1)', () => {
+  it('e a media PONDERADA pelo volume, nao a media das perdas de cada linha', () => {
+    // 20/100 (20%) e 0/900 (0%): media simples 10%, ponderada 2%.
+    const { totais } = derivarRelatorioProdutos([
+      produtoAgregado({ produto_id: 'p1', compra_qtd: 100, perda_coleta_qtd: 20 }),
+      produtoAgregado({ produto_id: 'p2', compra_qtd: 900 }),
+    ], 2)
+    expect(totais.perdaMediaPct).toBeCloseTo(2, 10)
+  })
+
+  it('soma perda de coleta E de deposito', () => {
+    const { totais } = derivarRelatorioProdutos([
+      produtoAgregado({ compra_qtd: 500, perda_coleta_qtd: 10, perda_deposito_qtd: 15 }),
+    ], 1)
+    expect(totais.perdaMediaPct).toBeCloseTo(5, 10)
+  })
+
+  it('comprou e nao perdeu nada: zero MEDIDO, nao null', () => {
+    const { totais } = derivarRelatorioProdutos([produtoAgregado({ compra_qtd: 200 })], 1)
+    expect(totais.perdaMediaPct).toBe(0)
+  })
+
+  it('sem compra no periodo: null (travessao), nunca 0 — ausencia de operacao nao e perda zero', () => {
+    const { totais } = derivarRelatorioProdutos([
+      produtoAgregado({ compra_qtd: 0, venda_qtd: 10, venda_valor: 80, perda_deposito_qtd: 5 }),
+    ], 1)
+    expect(totais.perdaMediaPct).toBeNull()
+  })
+
+  it('agregado vazio (nada carregado, ou periodo sem movimento) devolve null', () => {
+    expect(derivarRelatorioProdutos([], 3).totais.perdaMediaPct).toBeNull()
+  })
+
+  it('produto sem compra nao zera a media de quem comprou — entra so no numerador dele', () => {
+    // p2 tem perda de deposito mas nenhuma compra no periodo: a perda dele
+    // conta no numerador (foi perdida de verdade) e nao ha kg dele no
+    // denominador. O total continua sendo perda/comprado, nao uma media de
+    // percentuais em que p2 valeria como zero.
+    const { totais } = derivarRelatorioProdutos([
+      produtoAgregado({ produto_id: 'p1', compra_qtd: 100, perda_coleta_qtd: 10 }),
+      produtoAgregado({ produto_id: 'p2', compra_qtd: 0, perda_deposito_qtd: 5 }),
+    ], 2)
+    expect(totais.perdaMediaPct).toBeCloseTo(15, 10)
+  })
+})

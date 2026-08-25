@@ -194,7 +194,9 @@
 .modal-entrada-item-linha,
 .modal-entrada-item-totais {
   display: grid;
-  grid-template-columns: 1.6fr 0.65fr 0.7fr 0.8fr 0.7fr 0.9fr 0.35fr;
+  /* Oito colunas desde o achado E-5 (PERDA % entre PERDA e SUBTOTAL) —
+     mesma sequência do protótipo (cabeçalho 1441). */
+  grid-template-columns: 1.6fr 0.65fr 0.7fr 0.8fr 0.7fr 0.6fr 0.9fr 0.35fr;
   gap: 8px;
   align-items: center;
 }
@@ -244,6 +246,23 @@
 
 .modal-entrada-item-col-num {
   text-align: right;
+}
+
+/* PERDA % por item: número derivado, não campo — mesma família visual do
+   subtotal ao lado, com peso para o semáforo aparecer. */
+.modal-entrada-item-perda-pct {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #6a685c;
+}
+
+/* Marca de quantidade incompleta — mesmo tracejado âmbar de
+   `.entradas-incompleto` (EntradasLista.css), que marca este mesmo tipo de
+   número na tabela. */
+.modal-entrada-incompleto {
+  border-bottom: 1px dotted #c79320;
+  cursor: help;
 }
 
 .modal-entrada-item-subtotal {

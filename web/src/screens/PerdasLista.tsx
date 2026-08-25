@@ -109,9 +109,22 @@ export function PerdasLista({ onSessaoExpirada }: PerdasListaProps) {
 
   return (
     <div className="perdas-lista">
+      {/* Título e explicação da seção (achado ES-1; protótipo 641-644). A
+          legenda anterior dizia só ONDE a perda acontece; o que sumia era o
+          que o usuário mais precisa saber nesta tela: que este lançamento tem
+          DOIS efeitos (desconta do estoque E entra no índice de perdas) e que
+          ele não é o mesmo evento da perda de coleta — a confusão mais
+          provável aqui, já que a mesma palavra nomeia as duas. Sem título, a
+          seção também não tinha cabeçalho para leitor de tela ancorar dentro
+          da tela de Estoque, que embute esta lista. */}
       <div className="perdas-topo">
-        <div className="perdas-topo-legenda">
-          Perdas do depósito, depois que a mercadoria já entrou · clique numa perda para editar
+        <div className="perdas-topo-texto">
+          <h3 className="perdas-topo-titulo">Perdas no depósito</h3>
+          <div className="perdas-topo-legenda">
+            Mercadoria que estragou depois da compra — <strong>desconta do estoque e entra no índice
+            de perdas</strong>. A perda da coleta não entra aqui: ela vai na própria entrada. Clique
+            numa perda para editar.
+          </div>
         </div>
         <button type="button" className="perdas-botao-novo" onClick={() => setModal({ modo: 'novo' })}>
           <span className="perdas-botao-novo-icone">＋</span> Nova perda
@@ -157,9 +170,14 @@ export function PerdasLista({ onSessaoExpirada }: PerdasListaProps) {
         ? (
           <div className="estado-vazio perdas-vazio">
             <div className="perdas-vazio-titulo">Nenhuma perda registrada</div>
+            {/* O estado vazio repete a distinção (protótipo 662) de
+                propósito: quem chega aqui sem nenhuma perda lançada é
+                exatamente quem ainda não sabe onde cada tipo de perda se
+                lança, e a resposta não pode estar só no topo da seção. */}
             <div className="perdas-vazio-sub">
-              Registre aqui o que estraga ou some no depósito depois que a mercadoria já entrou — vencimento,
-              armazenagem, manuseio ou transporte.
+              Registre aqui o que estraga ou some no depósito <strong>depois</strong> que a mercadoria já
+              entrou — vencimento, armazenagem, manuseio ou transporte. A perda da <strong>coleta</strong>{' '}
+              vai na própria entrada, não aqui.
             </div>
             <button type="button" className="perdas-botao-novo" onClick={() => setModal({ modo: 'novo' })}>
               <span className="perdas-botao-novo-icone">＋</span> Registrar primeira perda

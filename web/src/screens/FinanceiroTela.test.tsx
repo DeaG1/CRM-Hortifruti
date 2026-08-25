@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { FinanceiroTela } from './FinanceiroTela'
 import { api, ErroApi } from '../api/client'
 import type { SaidaFin, EntradaFin } from '../derive/financeiro'
@@ -247,5 +247,88 @@ describe('FinanceiroTela — periodo global', () => {
     await screen.findByText('Resultado — Junho/2026')
     expect((await screen.findByLabelText('De')) as HTMLInputElement).toHaveValue('2026-06')
     expect((screen.getByLabelText('Até')) as HTMLInputElement).toHaveValue('2026-06')
+  })
+})
+
+// ============ sub-linha da receita e cabecalho dos lancamentos (FI-1, FI-2)
+
+describe('FinanceiroTela — sub-linha da receita bruta (FI-1)', () => {
+  /** A sub-linha logo abaixo de "Receita bruta". */
+  function sub(): HTMLElement {
+    return document.querySelector('.financeiro-receita-sub') as HTMLElement
+  }
+
+  it('diz de quantas entregas a receita veio', async () => {
+    mockCarga({ saidas: [
+      saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+      saida({ id: 's2', entrega: '2026-06-20', valor: 500 }),
+    ] })
+    render(<FinanceiroTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Receita bruta')
+    expect(sub()).toHaveTextContent('2 pedidos entregues no período')
+    // Visivel de verdade, nao so presente no DOM: a rastreabilidade que
+    // ninguem le nao rastreia nada.
+    expect(sub()).toBeVisible()
+  })
+
+  it('singular com um pedido so', async () => {
+    mockCarga({ saidas: [saida({ entrega: '2026-06-10', valor: 1000 })] })
+    render(<FinanceiroTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Receita bruta')
+    expect(sub()).toHaveTextContent('1 pedido entregue no período')
+  })
+
+  it('conta so o que entrou na receita: nao-entregue fica de fora dos dois numeros', async () => {
+    mockCarga({ saidas: [
+      saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+      saida({ id: 's2', entrega: '2026-06-11', valor: 700, status: 'Em rota' }),
+      saida({ id: 's3', entrega: '2026-06-12', valor: 900, status: 'Cancelado' }),
+    ] })
+    render(<FinanceiroTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Receita bruta')
+    expect(sub()).toHaveTextContent('1 pedido entregue no período')
+    // O valor da PROPRIA linha de receita (sem custo nenhum, o lucro liquido
+    // exibe o mesmo numero mais abaixo — daí o escopo).
+    const linhaReceita = screen.getByText('Receita bruta').closest('.financeiro-linha') as HTMLElement
+    expect(within(linhaReceita).getByText('R$ 1.000')).toBeInTheDocument()
+  })
+
+  it('segue o periodo, como a receita acima dela', async () => {
+    mockCarga({ saidas: [
+      saida({ id: 's1', entrega: '2026-06-10', valor: 1000 }),
+      saida({ id: 's2', entrega: '2026-07-10', valor: 500 }),
+    ] })
+    render(<FinanceiroTela periodo="2026-07" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Receita bruta')
+    expect(sub()).toHaveTextContent('1 pedido entregue no período')
+  })
+
+  it('periodo sem entrega: "0 pedidos" MEDIDO ao lado de R$ 0 — nao travessao', async () => {
+    // A tela so aparece porque ha lancamento no periodo; a receita e zero de
+    // verdade, e "0 pedidos" e a explicacao correta dela.
+    mockCarga({
+      saidas: [saida({ entrega: '2026-06-10', valor: 1000 })],
+      lancamentos: [lancamento({ data: '2026-08-05' })],
+    })
+    render(<FinanceiroTela periodo="2026-08" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Receita bruta')
+    expect(sub()).toHaveTextContent('0 pedidos entregues no período')
+    expect(sub()).not.toHaveTextContent('—')
+  })
+
+  it('erro de carga nao deixa a sub-linha para tras: a tela inteira vira alerta', async () => {
+    mockGet.mockRejectedValue(new Error('falha de rede'))
+    render(<FinanceiroTela onSessaoExpirada={() => {}} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/não foi possível carregar os dados financeiros/i)
+    expect(document.querySelector('.financeiro-receita-sub')).toBeNull()
+  })
+})
+
+describe('FinanceiroTela — cabecalho da secao de lancamentos (FI-2)', () => {
+  it('o titulo diz "do periodo" e a dica diz que da pra clicar', async () => {
+    mockCarga({ lancamentos: [lancamento()] })
+    render(<FinanceiroTela periodo="2026-06" onSessaoExpirada={() => {}} />)
+    expect(await screen.findByText('Lançamentos do período')).toBeInTheDocument()
+    expect(screen.getByText('clique num lançamento para editar')).toBeInTheDocument()
   })
 })

@@ -403,3 +403,175 @@ describe('ModalEntrada — fechar', () => {
     expect(onFechar).toHaveBeenCalledOnce()
   })
 })
+
+/**
+ * Achado E-5: a coluna PERDA % por item e no rodape (prototipo: cabecalho
+ * 1441, celula 1459, total 1473). O modal so mostrava a perda em quilos
+ * absolutos — lancar 8 kg de perda nao dizia se era muito ou pouco para
+ * aquela caixa.
+ *
+ * A conta NAO e a do prototipo: la era `it.perdaKg / it.kg`, com `kg` na
+ * unidade da linha — 8 kg de perda sobre "4" caixas dava 200%. Aqui a
+ * quantidade converte pelo peso medio (derive/coleta.ts), a mesma regra da
+ * API, e o que nao converte vira travessao em vez de percentual inventado.
+ */
+describe('ModalEntrada — coluna PERDA % (achado E-5)', () => {
+  const VERDE = 'rgb(63, 143, 91)'
+  const VERMELHO = 'rgb(194, 80, 47)'
+
+  /** Produtos com peso medio de verdade — o default do arquivo tem tudo 0,
+   * que e justamente o caso "nao convertivel". */
+  function mockComPesoMedio() {
+    mockGet.mockImplementation((url: string) => {
+      if (url === '/api/produtos') {
+        return Promise.resolve([
+          { id: 'p-batata', nome: 'Batata', un: 'KG', peso_medio: 0 },
+          { id: 'p-alface', nome: 'Alface', un: 'CX', peso_medio: 8 },
+          { id: 'p-sem-peso', nome: 'Maca', un: 'CX', peso_medio: 0 },
+        ])
+      }
+      if (url === '/api/fornecedores') return Promise.resolve(FORNECEDORES)
+      return Promise.reject(new Error('rota nao mockada: ' + url))
+    })
+  }
+
+  const celulaPct = (idx: number) =>
+    screen.getByLabelText(new RegExp('perda percentual do item ' + idx, 'i'))
+  const totais = () => document.querySelector('.modal-entrada-item-totais') as HTMLElement
+
+  it('a coluna existe no cabecalho e no rodape de totais', async () => {
+    mockComPesoMedio()
+    render(<ModalEntrada entrada={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await aguardarOpcoesCarregadas()
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    expect(await screen.findByText('Perda %')).toBeInTheDocument()
+    expect(totais()).toBeInTheDocument()
+  })
+
+  it('com dado, item em KG: 8 kg de perda em 100 kg sai 8,0% em verde', async () => {
+    mockComPesoMedio()
+    render(<ModalEntrada entrada={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await aguardarOpcoesCarregadas()
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    fireEvent.change(screen.getByLabelText(/quantidade do item 1/i), { target: { value: '100' } })
+    fireEvent.change(screen.getByLabelText(/perda do item 1/i), { target: { value: '8' } })
+    expect(celulaPct(1)).toHaveTextContent('8,0%')
+    expect(celulaPct(1).parentElement).toHaveStyle({ color: VERDE })
+  })
+
+  it('item em CX converte pelo peso medio — nao divide quilos por caixas', async () => {
+    mockComPesoMedio()
+    render(<ModalEntrada entrada={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await aguardarOpcoesCarregadas()
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    fireEvent.change(screen.getByLabelText(/produto do item 1/i), { target: { value: 'p-alface' } })
+    fireEvent.change(screen.getByLabelText(/unidade do item 1/i), { target: { value: 'CX' } })
+    fireEvent.change(screen.getByLabelText(/quantidade do item 1/i), { target: { value: '4' } })
+    fireEvent.change(screen.getByLabelText(/perda do item 1/i), { target: { value: '8' } })
+    // 4 CX de 8 kg = 32 kg. 8/32 = 25%. A conta do prototipo (8/4) daria 200%.
+    expect(celulaPct(1)).toHaveTextContent('25,0%')
+    expect(celulaPct(1).parentElement).toHaveStyle({ color: VERMELHO })
+  })
+
+  it('sem dado: item sem quantidade fica em travessao, nunca 0,0%', async () => {
+    mockComPesoMedio()
+    render(<ModalEntrada entrada={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await aguardarOpcoesCarregadas()
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    expect(celulaPct(1)).toHaveTextContent('—')
+    expect(celulaPct(1).getAttribute('title')).toContain('Sem quantidade')
+  })
+
+  it('zero MEDIDO e 0,0%: houve quantidade e nao houve perda', async () => {
+    mockComPesoMedio()
+    render(<ModalEntrada entrada={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await aguardarOpcoesCarregadas()
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    fireEvent.change(screen.getByLabelText(/quantidade do item 1/i), { target: { value: '100' } })
+    expect(celulaPct(1)).toHaveTextContent('0,0%')
+  })
+
+  it('CX sem peso medio cadastrado: travessao e o motivo no title, nunca um % inventado', async () => {
+    mockComPesoMedio()
+    render(<ModalEntrada entrada={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await aguardarOpcoesCarregadas()
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    fireEvent.change(screen.getByLabelText(/produto do item 1/i), { target: { value: 'p-sem-peso' } })
+    fireEvent.change(screen.getByLabelText(/unidade do item 1/i), { target: { value: 'CX' } })
+    fireEvent.change(screen.getByLabelText(/quantidade do item 1/i), { target: { value: '4' } })
+    fireEvent.change(screen.getByLabelText(/perda do item 1/i), { target: { value: '8' } })
+    expect(celulaPct(1)).toHaveTextContent('—')
+    expect(celulaPct(1).getAttribute('title')).toContain('peso')
+  })
+
+  it('o total divide pelos QUILOS somados, nao pela soma crua de qtd', async () => {
+    mockComPesoMedio()
+    render(<ModalEntrada entrada={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await aguardarOpcoesCarregadas()
+    const addBtn = screen.getByRole('button', { name: /adicionar produto/i })
+    fireEvent.click(addBtn)
+    fireEvent.click(addBtn)
+    // item 1: 100 KG, perda 5. item 2: 4 CX de 8 kg = 32 kg, perda 3.
+    fireEvent.change(screen.getByLabelText(/quantidade do item 1/i), { target: { value: '100' } })
+    fireEvent.change(screen.getByLabelText(/perda do item 1/i), { target: { value: '5' } })
+    fireEvent.change(screen.getByLabelText(/produto do item 2/i), { target: { value: 'p-alface' } })
+    fireEvent.change(screen.getByLabelText(/unidade do item 2/i), { target: { value: 'CX' } })
+    fireEvent.change(screen.getByLabelText(/quantidade do item 2/i), { target: { value: '4' } })
+    fireEvent.change(screen.getByLabelText(/perda do item 2/i), { target: { value: '3' } })
+    // 8 kg de perda em 132 kg = 6,1%. Dividir pela soma crua (104) daria 7,7%.
+    expect(totais()).toHaveTextContent('6,1%')
+    expect(totais()).not.toHaveTextContent('7,7%')
+  })
+
+  it('item nao convertivel deixa o total marcado com * e explicado', async () => {
+    mockComPesoMedio()
+    render(<ModalEntrada entrada={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await aguardarOpcoesCarregadas()
+    const addBtn = screen.getByRole('button', { name: /adicionar produto/i })
+    fireEvent.click(addBtn)
+    fireEvent.click(addBtn)
+    fireEvent.change(screen.getByLabelText(/quantidade do item 1/i), { target: { value: '100' } })
+    fireEvent.change(screen.getByLabelText(/perda do item 1/i), { target: { value: '10' } })
+    fireEvent.change(screen.getByLabelText(/produto do item 2/i), { target: { value: 'p-sem-peso' } })
+    fireEvent.change(screen.getByLabelText(/unidade do item 2/i), { target: { value: 'CX' } })
+    fireEvent.change(screen.getByLabelText(/quantidade do item 2/i), { target: { value: '4' } })
+    const marcado = within(totais()).getByText('10,0%*')
+    expect(marcado.getAttribute('title')).toContain('1 item')
+    expect(marcado.getAttribute('title')).toContain('peso incompleto')
+  })
+
+  it('total sem quantidade nenhuma fica em travessao, nunca 0,0%', async () => {
+    mockComPesoMedio()
+    render(<ModalEntrada entrada={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await aguardarOpcoesCarregadas()
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    fireEvent.change(screen.getByLabelText(/perda do item 1/i), { target: { value: '3' } })
+    expect(totais()).toHaveTextContent('—')
+    expect(totais()).not.toHaveTextContent('%')
+  })
+
+  it('falha de carregamento de produtos: sem peso medio nao ha % inventada', async () => {
+    // GET /api/produtos falha (403 do colaborador, rede): o modal degrada e
+    // avisa. A coluna nao pode preencher a lacuna com um fator suposto — o
+    // item em CX fica em travessao, e o item em KG continua correto (a
+    // quantidade dele ja e quilo, nao depende de produto nenhum).
+    mockGet.mockImplementation((url: string) => {
+      if (url === '/api/produtos') return Promise.reject(new Error('falha de rede'))
+      if (url === '/api/fornecedores') return Promise.resolve(FORNECEDORES)
+      return Promise.reject(new Error('rota nao mockada: ' + url))
+    })
+    render(<ModalEntrada entrada={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await screen.findByText('Não foi possível carregar a lista de produtos.')
+    const addBtn = screen.getByRole('button', { name: /adicionar produto/i })
+    fireEvent.click(addBtn)
+    fireEvent.click(addBtn)
+    fireEvent.change(screen.getByLabelText(/quantidade do item 1/i), { target: { value: '100' } })
+    fireEvent.change(screen.getByLabelText(/perda do item 1/i), { target: { value: '5' } })
+    expect(celulaPct(1)).toHaveTextContent('5,0%')
+
+    fireEvent.change(screen.getByLabelText(/unidade do item 2/i), { target: { value: 'CX' } })
+    fireEvent.change(screen.getByLabelText(/quantidade do item 2/i), { target: { value: '4' } })
+    fireEvent.change(screen.getByLabelText(/perda do item 2/i), { target: { value: '8' } })
+    expect(celulaPct(2)).toHaveTextContent('—')
+  })
+})

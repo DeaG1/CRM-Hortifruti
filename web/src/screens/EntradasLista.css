@@ -330,6 +330,15 @@
    cadastrado, então o total em quilos ignora esse item (a API nunca inventa
    o fator — ver itens_sem_conversao em api/src/routes/entradas.ts). O
    asterisco sinaliza e o `title` explica. */
+/* Sub-linha "PIX · 10/06" sob o chip de pagamento (achado E-4) — mesma
+   discrição da sub-linha de vencimento de Saídas: acompanha o chip sem
+   competir com ele. */
+.entradas-pag-info {
+  font-size: 10.5px;
+  color: #9a9784;
+  margin-top: 2px;
+}
+
 .entradas-incompleto {
   border-bottom: 1px dotted #c79320;
   cursor: help;

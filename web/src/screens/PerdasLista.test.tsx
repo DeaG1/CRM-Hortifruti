@@ -150,3 +150,58 @@ describe('PerdasLista — confirmação antes de excluir', () => {
     expect(await screen.findByText(/n[aã]o foi poss[ií]vel excluir/i)).toBeInTheDocument()
   })
 })
+
+/**
+ * Achado ES-1: a secao de perdas do deposito (embutida na tela de Estoque)
+ * tinha so uma legenda dizendo ONDE a perda acontece. Sumiram o titulo, o
+ * fato de o lancamento ter DOIS efeitos (desconta do estoque E entra no
+ * indice de perdas) e a distincao entre perda de coleta e perda de deposito
+ * — a confusao mais provavel do usuario nesta tela, ja que a mesma palavra
+ * nomeia as duas coisas. Prototipo 641-644 (topo) e 662 (estado vazio).
+ */
+describe('PerdasLista — titulo e explicacao da secao (achado ES-1)', () => {
+  it('com dado: titulo "Perdas no deposito" e os dois efeitos do lancamento', async () => {
+    mockRotasPadrao()
+    render(<PerdasLista />)
+    await screen.findByText('Tomate')
+    expect(screen.getByRole('heading', { name: 'Perdas no depósito' })).toBeInTheDocument()
+    const legenda = screen.getByText(/mercadoria que estragou depois da compra/i)
+    expect(legenda).toHaveTextContent('desconta do estoque e entra no índice de perdas')
+  })
+
+  it('a legenda distingue perda de deposito de perda de coleta', async () => {
+    mockRotasPadrao()
+    render(<PerdasLista />)
+    await screen.findByText('Tomate')
+    expect(screen.getByText(/mercadoria que estragou depois da compra/i))
+      .toHaveTextContent('A perda da coleta não entra aqui: ela vai na própria entrada')
+  })
+
+  it('a legenda nao perdeu a instrucao de clique que ja existia', async () => {
+    mockRotasPadrao()
+    render(<PerdasLista />)
+    await screen.findByText('Tomate')
+    expect(screen.getByText(/clique numa perda para editar/i)).toBeInTheDocument()
+  })
+
+  it('sem dado: o estado vazio repete a distincao — e quem chega aqui que precisa dela', async () => {
+    mockRotasPadrao([])
+    render(<PerdasLista />)
+    expect(await screen.findByText(/nenhuma perda registrada/i)).toBeInTheDocument()
+    // O titulo continua: a secao existe mesmo sem lancamento nenhum.
+    expect(screen.getByRole('heading', { name: 'Perdas no depósito' })).toBeInTheDocument()
+    expect(screen.getByText(/registre aqui o que estraga/i))
+      .toHaveTextContent('A perda da coleta vai na própria entrada, não aqui')
+  })
+
+  it('falha de carregamento: so o alerta, sem titulo nem legenda pela metade', async () => {
+    mockGet.mockImplementation((url: string) => (
+      url === '/api/perdas'
+        ? Promise.reject(new Error('falha de rede'))
+        : Promise.resolve(PRODUTOS)
+    ))
+    render(<PerdasLista />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível carregar as perdas.')
+    expect(screen.queryByRole('heading', { name: 'Perdas no depósito' })).not.toBeInTheDocument()
+  })
+})

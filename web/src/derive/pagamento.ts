@@ -86,6 +86,59 @@ export function rotuloOpcaoPendente(situacaoExibida: string): string {
   return situacaoExibida === 'Atrasado' ? 'Atrasado' : 'Pendente'
 }
 
+/**
+ * A sub-linha sob o chip de pagamento — "PIX · 10/06": COMO e QUANDO o
+ * dinheiro se moveu de fato. Portada de `pagInfo` do protótipo, montada duas
+ * vezes lá (entradas em design/CRM Hortifruti.dc.html:2517, saídas em 2414)
+ * e uma vez só aqui: a regra é a mesma nas duas telas, e duas cópias de uma
+ * regra igual é como as duas telas passam a discordar.
+ *
+ * `null` (a tela não desenha nada) enquanto não houver pagamento registrado.
+ * Isso NÃO é o travessão de "não sei": um pedido pendente não tem forma nem
+ * data de pagamento porque ainda não foi pago — a ausência já está dita pelo
+ * chip logo acima, e repeti-la com um "—" fingiria que falta um dado que
+ * ainda não existe.
+ *
+ * A situação vem DERIVADA (`situacaoExibidaSaida` nas saídas, o `pago`
+ * gravado nas entradas, que não têm vencimento) para esta sub-linha nunca
+ * contradizer o chip que ela acompanha.
+ *
+ * Diferença deliberada em relação ao protótipo: lá, uma entrada paga sem
+ * data virava `"PIX · "` — um separador solto no fim da linha, resto de
+ * concatenação, não informação. Aqui cada metade só entra se existir, e o
+ * separador só aparece entre duas metades de verdade. Se as duas faltarem
+ * (pago sem forma nem data registradas), o resultado é `null`: não há o que
+ * dizer sobre um pagamento do qual não se registrou nada.
+ */
+export function infoPagamento(
+  situacaoExibida: string,
+  formaPag: string | null | undefined,
+  dataPagIso: string | null | undefined,
+): string | null {
+  if (situacaoExibida !== 'Pago') return null
+  const partes: string[] = []
+  const forma = (formaPag ?? '').trim()
+  if (forma) partes.push(forma)
+  const data = dataBrCurta(dataPagIso)
+  if (data) partes.push(data)
+  return partes.length > 0 ? partes.join(' · ') : null
+}
+
+/**
+ * 'AAAA-MM-DD' -> 'DD/MM'. `null` para data ausente ou fora do formato —
+ * nunca uma data inventada nem a string crua vazando para a tela.
+ *
+ * Vive aqui, e não numa tela, porque é metade de `infoPagamento`: uma função
+ * que devolvesse os pedaços e deixasse a junção para cada tela empurraria de
+ * volta às duas cópias da regra que esta unificação evita. O ano fica de
+ * fora igual ao protótipo (`_fmtDate`) — a sub-linha acompanha um pedido do
+ * período em vista, onde o ano é redundante.
+ */
+function dataBrCurta(iso: string | null | undefined): string | null {
+  const m = String(iso ?? '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  return m ? `${m[3].padStart(2, '0')}/${m[2].padStart(2, '0')}` : null
+}
+
 /** Formato raso de uma saida (venda) usado só pelas duas funções abaixo —
  * mesmo padrão de tipo "por consumidor" que `SaidaBruta`
  * (screens/ClientesLista.tsx) e `SaidaFin` (derive/financeiro.ts): só os

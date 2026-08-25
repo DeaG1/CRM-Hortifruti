@@ -787,6 +787,26 @@ export interface LinhaRelatorioProduto {
    * valor cru, sem filtrar — reproduz o `sort((a,b)=>b._margem-a._margem)`
    * do original, que não exclui produtos sem venda no período. */
   margem: number
+  /**
+   * Margem POR QUILO (venda média − compra média), em R$ — pergunta
+   * diferente de `margem`, que é o total do período. Esta responde "quanto
+   * sobra em cada quilo que eu vendo", que é o número com que se decide
+   * preço de venda; `margem` responde "quanto este produto me deu no mês".
+   * Achado P-2 da auditoria: a tela de Produtos mostrava só o total, e o
+   * protótipo (`mgR`, ~2482) mostra este.
+   *
+   * `null` pelo MESMO critério de `markupPct` (sem preço de compra E venda
+   * no período não há comparação a fazer) — as duas colunas caem em
+   * travessão juntas, nunca uma delas em zero.
+   */
+  margemUnit: number | null
+  /**
+   * Quanto `margemUnit` representa do preço de VENDA, em % (protótipo `mgP`,
+   * ~2483). É margem sobre a venda, não markup sobre a compra — os dois
+   * números coexistem nesta tela e são diferentes de propósito: 42% de
+   * margem é o mesmo preço que 72% de markup. `null` junto com `margemUnit`.
+   */
+  margemPct: number | null
   /** null quando não há preço de compra E venda no período (sem base de comparação). */
   markupPct: number | null
   /** null quando compradoQtd===0 (sem base para a %; vira '—' na tela). */
@@ -799,6 +819,32 @@ export interface RelatorioProdutosTotais {
   maisFatura: { nome: string; faturamento: number } | null
   maiorMargem: { nome: string; margem: number } | null
   maiorPerda: { nome: string; perdaPct: number } | null
+  /**
+   * Perda média REALIZADA de todos os produtos juntos, em %: perda (coleta +
+   * depósito) sobre o total comprado, tudo em kg. É uma média PONDERADA pelo
+   * volume — a soma dos numeradores sobre a soma dos denominadores, não a
+   * média das `perdaPct` de cada linha (que daria o mesmo peso a um produto
+   * de 3 t e a um de 20 kg). Portado de `produtoPerdaMedia` do protótipo
+   * (~2474-2476), achado P-1 da auditoria: a linha de rodapé da tela de
+   * Produtos exibia `—` fixo com um comentário dizendo que "nenhum relatório
+   * expõe uma perda média ponderada", quando as duas somas saem do agregado
+   * que a própria tela já tinha em mãos.
+   *
+   * É a MESMA grandeza que `indiceDePerdas` (derive/dashboard.ts, KPI do
+   * painel) e que `RelatorioPerdasTotais.indicePerdaPct` — as três respondem
+   * "quanto do que entrou se perdeu". Elas não foram unificadas numa função
+   * só porque partem de FONTES diferentes: o painel e a aba Perdas somam os
+   * cabeçalhos de GET /api/entradas mais GET /api/perdas; esta soma o
+   * agregado por produto de GET /api/relatorios/produtos, que é o único dado
+   * que a tela de Produtos busca. Devem bater; se divergirem, é sinal de que
+   * algum lançamento não tem produto ou não converteu — e é `itensSemConversao`
+   * quem sinaliza isso.
+   *
+   * `null` quando não há kg comprado no período (nada a dividir): travessão,
+   * nunca "0,0%", que afirmaria não ter havido perda. Zero comprado e zero
+   * perdido não é "perda zero", é ausência de operação.
+   */
+  perdaMediaPct: number | null
   /** Total de lançamentos do período que ficaram fora das quantidades (soma
    * do `itensSemConversao` de todas as linhas) — 0 quando o relatório inteiro
    * está completo. É o que decide se a nota de rodapé aparece. */
@@ -832,8 +878,16 @@ export function derivarRelatorioProdutos(
     const perda = o.perda_coleta_qtd + o.perda_deposito_qtd
     const cm = o.compra_qtd > 0 ? o.compra_valor / o.compra_qtd : 0
     const vm = o.venda_qtd > 0 ? o.venda_valor / o.venda_qtd : 0
-    const markupPct = (cm > 0 && vm > 0) ? ((vm - cm) / cm) * 100 : null
+    const temComparacao = cm > 0 && vm > 0
+    const markupPct = temComparacao ? ((vm - cm) / cm) * 100 : null
     const margem = o.venda_valor - o.venda_qtd * cm
+    // Margem por quilo e o quanto ela representa do preço de venda (achado
+    // P-2). Mesmo guard de `markupPct`: sem os dois preços não há comparação.
+    // `vm > 0` já está garantido por `temComparacao`, então a divisão nunca
+    // cai em 0/0 — o `mgP = vm ? ... : 0` do protótipo era proteção para um
+    // ramo que ele mesmo nunca exibia.
+    const margemUnit = temComparacao ? vm - cm : null
+    const margemPct = temComparacao ? ((vm - cm) / vm) * 100 : null
     const perdaPct = o.compra_qtd > 0 ? (perda / o.compra_qtd) * 100 : null
     return {
       produtoId: o.produto_id,
@@ -843,10 +897,20 @@ export function derivarRelatorioProdutos(
       faturamento: o.venda_valor,
       itensSemConversao: o.itens_sem_conversao || 0,
       margem,
+      margemUnit,
+      margemPct,
       markupPct,
       perdaPct,
     }
   }).sort((a, b) => b.faturamento - a.faturamento)
+
+  // Perda média ponderada (achado P-1): soma dos numeradores sobre soma dos
+  // denominadores, direto do agregado — não a média das `perdaPct` das
+  // linhas. Percorre `agregados` (e não `linhas`) porque a perda em kg de
+  // cada produto não sobrevive em `LinhaRelatorioProduto`, que guarda só a
+  // `perdaPct` já dividida.
+  const kgComprado = agregados.reduce((s, o) => s + o.compra_qtd, 0)
+  const kgPerdido = agregados.reduce((s, o) => s + o.perda_coleta_qtd + o.perda_deposito_qtd, 0)
 
   const maisVend = linhas[0] ?? null
   const maiorMargem = linhas.length
@@ -865,6 +929,7 @@ export function derivarRelatorioProdutos(
       maisFatura: maisVend ? { nome: maisVend.nome, faturamento: maisVend.faturamento } : null,
       maiorMargem: maiorMargem ? { nome: maiorMargem.nome, margem: maiorMargem.margem } : null,
       maiorPerda: maiorPerda ? { nome: maiorPerda.nome, perdaPct: maiorPerda.perdaPct as number } : null,
+      perdaMediaPct: kgComprado > 0 ? (kgPerdido / kgComprado) * 100 : null,
       itensSemConversao: linhas.reduce((s, l) => s + l.itensSemConversao, 0),
     },
   }

@@ -120,7 +120,15 @@ export function FinanceiroTela({ periodo = PERIODO_TODOS, onSessaoExpirada }: Fi
       </div>
 
       <div className="financeiro-lancamentos">
-        <h3 className="financeiro-secao-titulo">Lançamentos</h3>
+        {/* Título e dica do protótipo (852-853), achado FI-2. "do período"
+            sem o nome do mês de propósito: o De/Até da lista embutida abre no
+            período global mas o usuário pode alargá-lo ali mesmo, e um título
+            fixo em "Junho/2026" passaria a mentir no instante seguinte. A
+            linha é clicável desde sempre e nada dizia isso. */}
+        <div className="financeiro-secao-cabecalho">
+          <h3 className="financeiro-secao-titulo">Lançamentos do período</h3>
+          <span className="financeiro-secao-dica">clique num lançamento para editar</span>
+        </div>
         {/* O período global ALIMENTA o De/Até da lista embutida: ela abre no
             mesmo mês do resultado acima, e o De/Até continua lá para quem
             quiser um intervalo mais largo ou mais estreito (ver
@@ -144,6 +152,17 @@ function ResultadoCard({ resultado, label }: { resultado: Resultado; label: stri
       <div className="financeiro-linha financeiro-linha--receita">
         <span className="financeiro-linha-rotulo financeiro-linha-rotulo--forte">Receita bruta</span>
         <span className="financeiro-mono financeiro-valor-forte">{money(resultado.receitaBruta)}</span>
+      </div>
+      {/* De quantas entregas essa receita veio (achado FI-1, protótipo
+          `finReceitaSub` ~2896). A contagem sai da MESMA lista filtrada que
+          somou o valor (derive/financeiro.ts, `saidasDaReceita`), não de um
+          segundo filtro escrito aqui. Zero é medido: mês sem entrega tem
+          receita R$ 0 e 0 pedidos, e as duas coisas são verdade — não é caso
+          de travessão. */}
+      <div className="financeiro-receita-sub">
+        {resultado.entregasNaReceita === 1
+          ? '1 pedido entregue no período'
+          : `${resultado.entregasNaReceita.toLocaleString('pt-BR')} pedidos entregues no período`}
       </div>
 
       {resultado.custos.map(c => (

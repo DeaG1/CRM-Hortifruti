@@ -161,6 +161,16 @@
 
 .shell-sair-container {
   padding: 0 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* Mesma forma do "Sair da conta", com a borda acesa: e o botao que a pessoa
+   que chega procura, num computador que troca de mao varias vezes por dia. */
+.shell-trocar {
+  border-color: rgba(255, 255, 255, 0.32);
+  color: #e8ecdf;
 }
 
 .shell-sair {

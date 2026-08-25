@@ -90,8 +90,36 @@ app.post('/api/login', async (c) => {
     }
 
     const token = await criarSessao(sql, usuario.id, tenant.id)
+    /**
+     * SEM `maxAge` — E DE PROPOSITO. NAO E ESQUECIMENTO. NAO "CONSERTE".
+     *
+     * Cookie sem maxAge (e sem expires) e um COOKIE DE SESSAO: o navegador o
+     * guarda so na memoria e o descarta quando fecha. Fechar o Chrome passa a
+     * exigir login de novo.
+     *
+     * O que havia aqui era `maxAge: 7 * 86400`. Isso grava o cookie EM DISCO
+     * e ele sobrevive a fechar o navegador e a reiniciar a maquina.
+     *
+     * O motivo de tirar nao e teorico: admin e funcionarios usam o MESMO
+     * COMPUTADOR neste hortifruti. Com cookie persistente, o funcionario
+     * abre o Chrome de manha e cai dentro da sessao do dono — Financeiro,
+     * salarios, margem, tudo. Nao ha tela de troca de usuario que resolva
+     * isso, porque ninguem chega a ver tela de login.
+     *
+     * Contrapartida aceita: quem fechar o navegador sem querer digita a senha
+     * de novo. Barato perto do que o cookie de 7 dias entregava.
+     *
+     * A outra metade da politica esta no servidor: 30 minutos de inatividade
+     * derrubam a sessao mesmo com o navegador aberto (MINUTOS_DE_INATIVIDADE
+     * em src/auth.ts). Esta metade sozinha nao bastaria — o navegador do
+     * balcao fica aberto o dia inteiro.
+     *
+     * httpOnly/secure/sameSite/path continuam: o cookie some ao fechar o
+     * navegador, mas enquanto existe segue invisivel ao JavaScript, so
+     * viajando por HTTPS e so em navegacao do proprio site.
+     */
     setCookie(c, COOKIE_SESSAO, token, {
-      httpOnly: true, secure: true, sameSite: 'Lax', path: '/', maxAge: 7 * 86400,
+      httpOnly: true, secure: true, sameSite: 'Lax', path: '/',
     })
     return c.json({ ok: true })
   } finally {

@@ -1,8 +1,10 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { api, ErroApi } from './api/client'
 import { instalarGuardaDeScrollNumerico } from './campoNumerico'
+import { instalarSinalDePresenca } from './presenca'
 import { Login } from './screens/Login'
 import { Shell } from './components/Shell'
+import { SessaoExpirada } from './components/SessaoExpirada'
 import { ClientesLista } from './screens/ClientesLista'
 import { ClienteFicha } from './screens/ClienteFicha'
 import { ModalCliente } from './components/ModalCliente'
@@ -160,6 +162,13 @@ function App() {
    * inteiro passa dados assim (`papel`, `onSessaoExpirada`).
    */
   const [periodo, setPeriodo] = useState<Periodo>(PERIODO_TODOS)
+  /**
+   * A sessao venceu com o app aberto (algum 401 chegou). NAO desmonta nada:
+   * a arvore inteira — Shell, tela, modal com formulario preenchido —
+   * continua montada, e o `SessaoExpirada` entra por cima pedindo a senha de
+   * novo. Ver o comentario grande em components/SessaoExpirada.tsx.
+   */
+  const [sessaoExpirada, setSessaoExpirada] = useState(false)
 
   // Ao carregar a pagina (inclui F5), pergunta pra API se o cookie de
   // sessao ainda e valido antes de decidir entre tela de login e app.
@@ -173,6 +182,37 @@ function App() {
       .catch(() => setEstado('deslogado'))
   }, [])
 
+  /** Identidade estavel: e prop de dezenas de telas, varias delas com
+   * `useEffect` que a lista nas dependencias (SaidasLista, EntradasLista...).
+   * Uma funcao nova a cada render refaria aqueles fetches sem motivo. */
+  const aoExpirar = useCallback(() => setSessaoExpirada(true), [])
+
+  /**
+   * SINAL DE PRESENCA (a armadilha do timeout de 30 minutos).
+   *
+   * A sessao morre por falta de REQUISICAO, e digitar um pedido de vinte
+   * itens nao produz requisicao nenhuma. Sem isto, quarenta minutos digitando
+   * terminariam num 401 no clique de salvar. Tecla, clique e toque passam a
+   * empurrar o vencimento — presenca real, agrupada em no maximo um sinal a
+   * cada tres minutos, e ZERO sinais com a pagina parada. Ver presenca.ts.
+   *
+   * O sinal e o proprio `GET /api/eu`: e a requisicao autenticada mais barata
+   * que existe aqui (uma linha, nenhuma juncao) e a renovacao mora no
+   * middleware, valendo para qualquer rota — nao ha nada a inventar.
+   *
+   * So instala com a sessao viva. Deslogado nao ha o que renovar; com o aviso
+   * de expiracao na tela, cada tecla digitada no campo de senha viraria uma
+   * requisicao que ja se sabe que vai voltar 401.
+   */
+  useEffect(() => {
+    if (estado !== 'logado' || sessaoExpirada) return
+    return instalarSinalDePresenca(() => {
+      api.get<Eu>('/api/eu').catch(err => {
+        if (err instanceof ErroApi && err.status === 401) aoExpirar()
+      })
+    })
+  }, [estado, sessaoExpirada, aoExpirar])
+
   async function aoEntrar() {
     // POST /api/login so confirma { ok: true } e grava o cookie; usuarioId
     // e papel vem de uma segunda chamada a /api/eu, ja autenticada por ele.
@@ -185,6 +225,33 @@ function App() {
     }
   }
 
+  /**
+   * Encerra a sessao e volta a tela de login LIMPA. Serve tanto ao "Sair da
+   * conta" quanto ao "Trocar de usuario" — os dois botoes do Shell fazem
+   * exatamente isto, e e de proposito que facam: o que muda entre eles e a
+   * palavra que o usuario le, nao o efeito. Num computador compartilhado,
+   * "Trocar de usuario" e o rotulo que o funcionario procura; "Sair da conta"
+   * e o que o dono procura no fim do dia. O caminho seguro tem que estar
+   * escrito com as duas palavras, senao quem nao achou a sua simplesmente
+   * deixa a sessao aberta.
+   *
+   * "LIMPA" e a parte que exige cuidado, e nao e o cookie — e o estado desta
+   * funcao. TUDO que veio da sessao anterior e zerado aqui: quem era (`eu`),
+   * onde estava (`tela`), o recorte de periodo que ele escolheu (`periodo`) e
+   * o aviso de expiracao. Sem zerar `periodo`, o proximo a entrar veria as
+   * metricas dele recortadas em "Junho/2026" porque o anterior escolheu
+   * junho — um numero errado que ninguem sabe de onde veio. E, como `estado`
+   * vira 'deslogado', o `Shell` e as telas DESMONTAM: aqui o descarte da
+   * memoria e o objetivo, ao contrario do que acontece no aviso de sessao
+   * expirada. O `Login` que aparece e uma montagem nova, com e-mail e senha
+   * vazios; o unico campo herdado e o slug da empresa, que vem da URL e e o
+   * mesmo para todo mundo daquele hortifruti.
+   *
+   * `api.post` PRIMEIRO, estado depois: o cookie sozinho nao basta. Apagar o
+   * cookie do navegador deixaria o token valido no banco por ate 30 minutos —
+   * quem o tivesse copiado continuaria dentro. Quem apaga a sessao de verdade
+   * e o DELETE do servidor (POST /api/logout, api/src/index.ts).
+   */
   async function sair() {
     try {
       await api.post('/api/logout')
@@ -196,7 +263,41 @@ function App() {
     } finally {
       setEu(null)
       setTela(null)
+      setPeriodo(PERIODO_TODOS)
+      setSessaoExpirada(false)
       setEstado('deslogado')
+    }
+  }
+
+  /**
+   * Autenticou de novo por cima do aviso de sessao expirada.
+   *
+   * A pergunta que decide tudo aqui e QUEM entrou. Se for a mesma pessoa, o
+   * ponto do aviso e justamente nao ter desmontado nada: fecha a camada e a
+   * tela volta como estava, com o formulario preenchido intacto.
+   *
+   * Se for OUTRA pessoa — e este e o cenario da maquina compartilhada: a
+   * sessao do dono vence, o funcionario esta ali e entra com a conta dele —
+   * nada do anterior pode sobreviver. Zera tela e periodo, e a `key` do
+   * `Shell` (usuarioId, no return) muda, o que desmonta e remonta a arvore
+   * inteira. Sem isso o funcionario herdaria a tela aberta do dono, que pode
+   * ser Financeiro com salarios na tela — o mesmo vazamento que a politica de
+   * sessao existe para fechar, entrando pela porta do lado.
+   */
+  async function aoReautenticar() {
+    try {
+      const dados = await api.get<Eu>('/api/eu')
+      if (dados.usuarioId !== eu?.usuarioId) {
+        setTela(null)
+        setPeriodo(PERIODO_TODOS)
+      }
+      setEu(dados)
+      setSessaoExpirada(false)
+    } catch {
+      // Entrou, mas o /api/eu seguinte falhou: nao da para afirmar quem esta
+      // logado, entao vai para o caminho seguro (login limpo) em vez de
+      // reexibir a tela do usuario anterior.
+      await sair()
     }
   }
 
@@ -212,23 +313,34 @@ function App() {
     tela && !(ADMIN_ONLY_SCREENS.includes(tela) && eu.papel !== 'admin') ? tela : telaPadrao
 
   return (
-    <Shell
-      papel={eu.papel}
-      telaAtual={telaEfetiva}
-      periodo={periodo}
-      onPeriodo={setPeriodo}
-      onNavegar={setTela}
-      onSair={sair}
-      onSessaoExpirada={sair}
-    >
-      <Conteudo
-        tela={telaEfetiva}
+    <>
+      {/* `key={eu.usuarioId}`: a arvore e de UM usuario. Trocar de pessoa sem
+          recarregar a pagina (o que o aviso de sessao expirada permite) tem
+          que jogar fora tudo que estava montado — lista carregada, modal
+          aberto, saldo em caixa no cabecalho. Enquanto for a MESMA pessoa a
+          chave nao muda e nada desmonta, que e o que preserva o formulario
+          preenchido durante a reautenticacao. */}
+      <Shell
+        key={eu.usuarioId}
         papel={eu.papel}
+        telaAtual={telaEfetiva}
         periodo={periodo}
+        onPeriodo={setPeriodo}
         onNavegar={setTela}
-        onSessaoExpirada={sair}
-      />
-    </Shell>
+        onSair={sair}
+        onTrocarUsuario={sair}
+        onSessaoExpirada={aoExpirar}
+      >
+        <Conteudo
+          tela={telaEfetiva}
+          papel={eu.papel}
+          periodo={periodo}
+          onNavegar={setTela}
+          onSessaoExpirada={aoExpirar}
+        />
+      </Shell>
+      {sessaoExpirada && <SessaoExpirada onEntrar={aoReautenticar} onSair={sair} />}
+    </>
   )
 }
 

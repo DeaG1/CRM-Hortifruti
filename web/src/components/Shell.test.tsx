@@ -92,6 +92,50 @@ describe('Shell — menu por papel', () => {
     expect(onSair).toHaveBeenCalledOnce()
   })
 
+  // ---------------------------------------- trocar de usuario (computador
+  // compartilhado): o funcionario assume a maquina sem fechar o navegador.
+
+  it('oferece "Trocar de usuário" junto do "Sair da conta"', () => {
+    render(
+      <Shell
+        papel="admin" telaAtual="clientes" {...PERIODO_PADRAO}
+        onNavegar={() => {}} onSair={() => {}} onTrocarUsuario={() => {}}
+      >
+        <p>conteudo</p>
+      </Shell>,
+    )
+    expect(screen.getByRole('button', { name: 'Trocar de usuário' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sair da conta' })).toBeInTheDocument()
+  })
+
+  it('clicar em "Trocar de usuário" chama onTrocarUsuario, e nao onSair', () => {
+    const onTrocarUsuario = vi.fn()
+    const onSair = vi.fn()
+    render(
+      <Shell
+        papel="admin" telaAtual="clientes" {...PERIODO_PADRAO}
+        onNavegar={() => {}} onSair={onSair} onTrocarUsuario={onTrocarUsuario}
+      >
+        <p>conteudo</p>
+      </Shell>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Trocar de usuário' }))
+    expect(onTrocarUsuario).toHaveBeenCalledOnce()
+    expect(onSair).not.toHaveBeenCalled()
+  })
+
+  it('o colaborador tambem tem o botao — e ele quem mais troca de turno', () => {
+    render(
+      <Shell
+        papel="colaborador" telaAtual="entradas" {...PERIODO_PADRAO}
+        onNavegar={() => {}} onSair={() => {}} onTrocarUsuario={() => {}}
+      >
+        <p>conteudo</p>
+      </Shell>,
+    )
+    expect(screen.getByRole('button', { name: 'Trocar de usuário' })).toBeInTheDocument()
+  })
+
   it('renderiza o titulo da tela atual no cabecalho', () => {
     render(
       <Shell papel="admin" telaAtual="clientes" {...PERIODO_PADRAO} onNavegar={() => {}} onSair={() => {}}>

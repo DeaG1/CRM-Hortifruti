@@ -57,6 +57,19 @@ interface ShellProps {
   onPeriodo: (periodo: Periodo) => void
   onNavegar: (tela: Tela) => void
   onSair: () => void
+  /**
+   * Trocar de usuario sem fechar o navegador: encerra a sessao e leva a tela
+   * de login limpa, para o funcionario assumir a maquina que o dono estava
+   * usando. Opcional so para nao quebrar os testes que montam o Shell
+   * isolado; o App sempre passa.
+   *
+   * O efeito e o mesmo de `onSair` (ver `sair()` em App.tsx). Sao dois botoes
+   * porque sao duas PERGUNTAS diferentes na cabeca de quem esta na frente da
+   * tela: "vou embora" e "agora sou eu quem vai usar". Quem chega para
+   * trabalhar e nao encontra a segunda escrita em algum lugar nao clica na
+   * primeira — continua na sessao do outro, que e o problema inteiro.
+   */
+  onTrocarUsuario?: () => void
   /** Sessao expirou (401) — repassado ao badge de saldo, a unica parte do
    * Shell que fala com a API. */
   onSessaoExpirada?: () => void
@@ -64,7 +77,8 @@ interface ShellProps {
 }
 
 export function Shell({
-  papel, telaAtual, periodo, onPeriodo, onNavegar, onSair, onSessaoExpirada, children,
+  papel, telaAtual, periodo, onPeriodo, onNavegar, onSair, onTrocarUsuario,
+  onSessaoExpirada, children,
 }: ShellProps) {
   const isAdmin = papel === 'admin'
   const itens = NAV_DEFS.filter(n => isAdmin || !ADMIN_ONLY_SCREENS.includes(n.key))
@@ -114,6 +128,18 @@ export function Shell({
           </div>
         </div>
         <div className="shell-sair-container">
+          {/* "Trocar de usuario" vem PRIMEIRO e com destaque maior porque e o
+              caminho mais usado nesta operacao: a mesma maquina passa de mao
+              em mao varias vezes por dia, e sair de vez acontece uma. */}
+          {onTrocarUsuario && (
+            <button
+              type="button"
+              className="shell-sair shell-trocar"
+              onClick={onTrocarUsuario}
+            >
+              Trocar de usuário
+            </button>
+          )}
           <button type="button" className="shell-sair" onClick={onSair}>Sair da conta</button>
         </div>
       </aside>

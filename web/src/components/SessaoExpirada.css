@@ -1,0 +1,70 @@
+/* Camada por cima da aplicacao inteira. O fundo opaco nao e so estetica:
+   enquanto a sessao esta vencida, os numeros atras (saldo em caixa, margem)
+   sao dado do usuario anterior e nao devem ficar legiveis para quem estiver
+   na frente da maquina. A arvore continua MONTADA atras — o que se esconde e
+   o pixel, nao o estado (ver o comentario em SessaoExpirada.tsx). */
+.sessao-expirada-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: #21331f;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 0;
+  box-sizing: border-box;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.sessao-expirada-aviso {
+  width: 400px;
+  max-width: calc(100% - 48px);
+  background: #fff8e6;
+  border: 1px solid #e0c98a;
+  border-radius: 13px;
+  padding: 16px 18px;
+  margin-bottom: -8px;
+}
+
+.sessao-expirada-titulo {
+  font-size: 14px;
+  font-weight: 700;
+  color: #6b5518;
+  margin-bottom: 6px;
+}
+
+.sessao-expirada-texto {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #6b5518;
+}
+
+.sessao-expirada-desistir {
+  width: 100%;
+  border: 1px solid #d6bd79;
+  background: transparent;
+  color: #6b5518;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  transition: background 0.12s;
+}
+
+.sessao-expirada-desistir:hover {
+  background: rgba(214, 189, 121, 0.22);
+}
+
+/* O `Login` traz `min-height: 100vh` (ele nasceu como pagina inteira). Dentro
+   do overlay isso empurraria o aviso para fora da area visivel; aqui ele volta
+   a ser um cartao. */
+.sessao-expirada-overlay .login-pagina {
+  min-height: 0;
+  background: transparent;
+  padding-top: 16px;
+}

@@ -83,24 +83,129 @@ function comparaConstante(a: Uint8Array, b: Uint8Array): boolean {
 const b64 = (u: Uint8Array) => btoa(String.fromCharCode(...u))
 const deB64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0))
 
-const DIAS_SESSAO = 7
+/**
+ * JANELA DE INATIVIDADE — 30 minutos, deslizante.
+ *
+ * A constante anterior se chamava DIAS_SESSAO e valia 7. Nao foi so o numero
+ * que mudou: mudou a UNIDADE e mudou o significado. `DIAS_SESSAO = 7` era um
+ * prazo FIXO contado do login ("esta sessao morre daqui a uma semana, faca o
+ * usuario o que fizer"). Isto aqui e uma janela de INATIVIDADE que anda para
+ * frente a cada requisicao autenticada: enquanto houver uso, a sessao nao
+ * vence; parou de haver uso, ela vence em 30 minutos.
+ *
+ * O nome carrega a unidade de proposito. Uma constante chamada DIAS_SESSAO
+ * valendo 30 minutos e como se reintroduz bug de unidade — e este projeto
+ * acabou de sair de uma familia inteira deles (perda em KG x perda em itens,
+ * ver 7a16a20 e e2ce7d5). Quem ler `MINUTOS_DE_INATIVIDADE * 60_000` sabe na
+ * hora se a conta esta certa; quem lia `DIAS_SESSAO * 86400_000` tinha que
+ * confiar no nome.
+ *
+ * POR QUE 30 MINUTOS: admin e funcionarios usam o MESMO computador. O risco
+ * concreto nao e um atacante remoto, e o funcionario que senta na maquina
+ * que o dono deixou aberta e ve Financeiro, salarios e margem.
+ */
+export const MINUTOS_DE_INATIVIDADE = 30
+
+/**
+ * LIMIAR DE RENOVACAO — renova a sessao so quando restarem menos de 25 dos
+ * 30 minutos, ou seja, no maximo UMA escrita a cada 5 minutos por sessao.
+ *
+ * Sem limiar, "janela deslizante" viraria um UPDATE por requisicao. Uma tela
+ * do CRM dispara varias chamadas ao abrir (a lista, o badge de saldo, o
+ * detalhe), e cada clique repete isso: o custo seria dezenas de escritas por
+ * minuto por usuario, todas gravando praticamente o mesmo `expira_em`.
+ *
+ * Isso pesa mais aqui do que pesaria num servidor comum. Este projeto roda em
+ * Cloudflare Workers, onde cada ida ao banco e uma subrequisicao contada
+ * contra um teto por invocacao — o mesmo teto que ja matou o acesso direto ao
+ * Supabase e obrigou a usar Hyperdrive (ver criarPoolDoEnv em db.ts). Escrita
+ * por requisicao seria gastar orcamento de subrequisicao para reescrever um
+ * timestamp que ninguem leu.
+ *
+ * O PRECO DA ECONOMIA, dito sem maquiagem: entre duas renovacoes a sessao
+ * "envelhece" sem que o uso conte. No pior caso a sessao morre ~25 minutos
+ * depois da ultima interacao real, nao 30 — a ultima atividade pode cair logo
+ * depois de uma renovacao que nao aconteceu porque ainda faltava muito. Para
+ * o objetivo (a maquina compartilhada nao ficar aberta no almoco) 25 ou 30 da
+ * no mesmo; para o funcionario digitando um pedido longo, quem segura a
+ * sessao viva e o sinal de presenca do front (web/src/presenca.ts), nao a
+ * folga deste limiar.
+ */
+export const MINUTOS_RESTANTES_PARA_RENOVAR = 25
+
+/**
+ * Vale a pena renovar agora? Funcao pura, exportada, testada sem banco —
+ * a regra do limiar e a unica parte desta politica que da para provar em
+ * Node, e ela e justamente a que decide se havera escrita.
+ */
+export function precisaRenovar(segundosRestantes: number): boolean {
+  return segundosRestantes < MINUTOS_RESTANTES_PARA_RENOVAR * 60
+}
 
 export async function criarSessao(sql: Sql, usuarioId: string, tenantId: string) {
   const token = b64(crypto.getRandomValues(new Uint8Array(32)))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
-  const expira = new Date(Date.now() + DIAS_SESSAO * 86400_000)
+  // `now()` do BANCO, nao `Date.now()` do Worker. Quem decide se a sessao
+  // venceu e o `expira_em > now()` dentro de resolver_sessao, e quem a renova
+  // e renovar_sessao — os dois no relogio do Postgres. Misturar os relogios
+  // (gravar com um, comparar com o outro) faria a janela de 30 minutos valer
+  // 30 minutos mais ou menos a diferenca entre as duas maquinas.
   await withTenant(sql, tenantId, tx => tx`
     insert into sessoes (token, usuario_id, tenant_id, expira_em)
-    values (${token}, ${usuarioId}, ${tenantId}, ${expira})`)
+    values (${token}, ${usuarioId}, ${tenantId},
+            now() + make_interval(mins => ${MINUTOS_DE_INATIVIDADE}::int))`)
   return token
 }
 
 export async function lerSessao(sql: Sql, token: string) {
   // Sem tenant ainda — por isso passa pela funcao SECURITY DEFINER
-  // resolver_sessao() (migration 003), que recebe so o token e devolve
-  // no maximo uma linha, em vez de abrir a policy de sessoes.
-  const [linha] = await sql<{ usuario_id: string; tenant_id: string; papel: string }[]>`
+  // resolver_sessao() (migration 003, corrigida na 006 e ampliada na 012),
+  // que recebe so o token e devolve no maximo uma linha, em vez de abrir a
+  // policy de sessoes.
+  //
+  // `segundos_restantes` vem junto na MESMA linha de proposito: e o que o
+  // middleware usa para decidir se renova, e pedir isso numa segunda consulta
+  // custaria uma ida ao banco por requisicao — exatamente o que o limiar
+  // existe para evitar.
+  const [linha] = await sql<{
+    usuario_id: string; tenant_id: string; papel: string; segundos_restantes: number
+  }[]>`
     select * from resolver_sessao(${token})`
   if (!linha) return null
-  return { usuarioId: linha.usuario_id, tenantId: linha.tenant_id, papel: linha.papel }
+  return {
+    usuarioId: linha.usuario_id,
+    tenantId: linha.tenant_id,
+    papel: linha.papel,
+    // A funcao devolve double precision (float8) justamente para chegar aqui
+    // como number. Se fosse `numeric`, o postgres.js entregaria uma STRING e
+    // `'1500' < 1500` compararia lexicograficamente — o tipo de comparacao
+    // que passa despercebida ate a sessao renovar na hora errada.
+    segundosRestantes: linha.segundos_restantes,
+  }
+}
+
+/**
+ * Empurra o vencimento da sessao para agora + a janela inteira.
+ *
+ * Chama uma funcao SECURITY DEFINER (migration 012) em vez de fazer o UPDATE
+ * por withTenant. Dois motivos, nesta ordem:
+ *
+ *   1. CUSTO. withTenant abre transacao: BEGIN, set_config, UPDATE, COMMIT —
+ *      quatro idas ao banco (~116ms cada em producao, ver a nota no fim de
+ *      db.ts) e quatro subrequisicoes do Worker. A funcao e uma so.
+ *   2. RLS. `sessoes` tem FORCE ROW LEVEL SECURITY. Um UPDATE que esqueca o
+ *      withTenant nao explode: ele afeta zero linhas EM SILENCIO, a rota
+ *      responde 200 e a sessao expira no meio do expediente sem nada nos
+ *      logs. Este projeto ja teve esse tipo de bloqueio silencioso duas vezes
+ *      (a busca de usuarios no login e a policy de tenants da migration 007,
+ *      esta ultima confirmada em producao). SECURITY DEFINER tira a
+ *      renovacao dessa classe de erro.
+ *
+ * `${MINUTOS_DE_INATIVIDADE}` viaja como parametro em vez de estar fixo no
+ * SQL: a janela tem UM dono, a constante acima. Fixar 30 dentro da funcao
+ * criaria um segundo lugar para mudar, e o segundo lugar e sempre o que
+ * alguem esquece.
+ */
+export async function renovarSessao(sql: Sql, token: string) {
+  await sql`select renovar_sessao(${token}, ${MINUTOS_DE_INATIVIDADE}::int)`
 }

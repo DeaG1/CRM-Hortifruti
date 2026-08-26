@@ -121,9 +121,14 @@
   overflow: hidden;
 }
 
+/* Seis colunas desde que VEÍCULO entrou ao lado de FUNCIONÁRIO: o vínculo de
+   veículo existe no dado (migration 013) e precisa ser visível aqui, senão
+   quem etiqueta vinte gasolinas por carro não vê nada mudar no razão e
+   conclui que não salvou. A descrição cedeu a largura (1.7fr -> 1.4fr) por
+   ser o único campo de texto livre — encolhe sem perder legibilidade. */
 .lancamentos-linha {
   display: grid;
-  grid-template-columns: 0.7fr 1.2fr 1.7fr 1fr 0.9fr;
+  grid-template-columns: 0.7fr 1.2fr 1.4fr 1fr 1fr 0.9fr;
   gap: 8px;
   align-items: center;
 }

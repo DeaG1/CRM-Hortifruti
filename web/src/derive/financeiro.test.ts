@@ -27,7 +27,7 @@ const entrada = (over: Partial<EntradaFin> = {}): EntradaFin => ({
 
 const lancamento = (over: Partial<Lancamento> = {}): Lancamento => ({
   id: 'l1', data: '2026-06-05', categoria: 'Frete', descricao: '', valor: 100,
-  funcionario_id: null, ...over,
+  funcionario_id: null, veiculo_id: null, ...over,
 })
 
 describe('periodoDe', () => {

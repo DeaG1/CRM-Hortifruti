@@ -4,6 +4,7 @@ import { LancamentosLista } from './LancamentosLista'
 import { api, ErroApi } from '../api/client'
 import type { Lancamento } from '../derive/lancamentos'
 import type { Funcionario } from '../derive/funcionarios'
+import type { Veiculo } from '../derive/veiculos'
 
 // Mock so de `api.get/post/put/del` — mantem a classe ErroApi real (o
 // componente e o ModalLancamento fazem `err instanceof ErroApi`, precisa
@@ -30,14 +31,25 @@ const funcionario = (over: Partial<Funcionario> = {}): Funcionario => ({
 
 const lancamento = (over: Partial<Lancamento> = {}): Lancamento => ({
   id: 'l-1', data: '2026-06-08', categoria: 'Frete', descricao: 'Coleta Norte',
-  valor: 1280, funcionario_id: null, ...over,
+  valor: 1280, funcionario_id: null, veiculo_id: null, ...over,
 })
 
-/** Resolve GET /api/lancamentos, /api/funcionarios e /api/lancamentos/categorias, na ordem em que a tela chama. */
-function mockCarga(lancamentos: Lancamento[], funcionarios: Funcionario[] = [], categorias: string[] = CATEGORIAS) {
+/** Resolve as quatro rotas do Promise.all da tela: /api/lancamentos,
+ * /api/funcionarios, /api/veiculos e /api/lancamentos/categorias.
+ *
+ * /api/veiculos entrou junto com a coluna VEICULO e com o `<select>` de
+ * veiculo do ModalLancamento — sem ela, editar uma Gasolina aqui abriria o
+ * seletor vazio e o salvar apagaria o vinculo em silencio. */
+function mockCarga(
+  lancamentos: Lancamento[],
+  funcionarios: Funcionario[] = [],
+  categorias: string[] = CATEGORIAS,
+  veiculos: Veiculo[] = [],
+) {
   mockGet.mockImplementation((rota: string) => {
     if (rota === '/api/lancamentos') return Promise.resolve(lancamentos)
     if (rota === '/api/funcionarios') return Promise.resolve(funcionarios)
+    if (rota === '/api/veiculos') return Promise.resolve(veiculos)
     if (rota === '/api/lancamentos/categorias') return Promise.resolve(categorias)
     return Promise.reject(new Error('rota inesperada: ' + rota))
   })
@@ -105,11 +117,25 @@ describe('LancamentosLista — dados exibidos', () => {
     expect(screen.getByText('(R$ 1.100,00)')).toBeInTheDocument()
   })
 
-  it('lancamento sem funcionario vinculado mostra travessao', async () => {
-    mockCarga([lancamento({ funcionario_id: null })])
+  it('lancamento sem funcionario nem veiculo vinculado mostra travessao nas duas colunas', async () => {
+    mockCarga([lancamento({ funcionario_id: null, veiculo_id: null })])
     render(<LancamentosLista />)
     await screen.findByText('Coleta Norte')
-    expect(screen.getByText('—')).toBeInTheDocument()
+    // Duas colunas de vinculo, dois travessoes — antes da coluna VEICULO
+    // existir esta busca achava um so.
+    expect(screen.getAllByText('—').length).toBe(2)
+  })
+
+  it('lancamento COM veiculo mostra o nome do carro na coluna VEICULO', async () => {
+    mockCarga(
+      [lancamento({ categoria: 'Gasolina', veiculo_id: 'v-1' })],
+      [],
+      CATEGORIAS,
+      [{ id: 'v-1', placa: 'ABC-1234', modelo: 'Fiorino', marca: 'Fiat', ano: 2020, ativo: true, obs: '' }],
+    )
+    render(<LancamentosLista />)
+    await screen.findByText('Coleta Norte')
+    expect(screen.getByText('Fiat Fiorino')).toBeInTheDocument()
   })
 })
 
@@ -177,7 +203,7 @@ describe('LancamentosLista — criar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     await waitFor(() => expect(screen.getByText('Recém-criado')).toBeInTheDocument())
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(mockGet).toHaveBeenCalledTimes(3) // so a carga inicial, nenhum refetch
+    expect(mockGet).toHaveBeenCalledTimes(4) // so a carga inicial (4 rotas), nenhum refetch
   })
 })
 

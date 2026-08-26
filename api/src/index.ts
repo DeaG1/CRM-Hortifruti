@@ -160,8 +160,10 @@ app.route('/api/estoque', estoque)
 // Relatorios tambem e agregado: so o de produtos precisa somar itens de
 // entrada e saida, e faz isso em SQL para nao virar N+1 no navegador.
 app.route('/api/relatorios', relatorios)
-// Veiculos: cadastro + check-in/check-out (quem pegou qual carro). Visivel
-// pro colaborador (nao esta em ADMIN_ONLY_SCREENS) — ver permissoes em
+// Veiculos: cadastro da frota. O gasto de cada carro NAO e servido daqui —
+// vem de /api/lancamentos pelo `veiculo_id` (migration 013), derivado no
+// front. Admin em tudo, inclusive na leitura (a tela mostra dinheiro, e
+// 'veiculos' esta em ADMIN_ONLY_SCREENS) — ver permissoes em
 // src/routes/veiculos.ts.
 app.route('/api/veiculos', veiculos)
 

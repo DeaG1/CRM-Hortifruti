@@ -1,13 +1,22 @@
-/** Uso em aberto de um veículo, agregado pela própria API (GET /api/veiculos
- * — ver api/src/routes/veiculos.ts, paraJsonComUso) para a tela não precisar
- * de uma requisição por carro só pra saber quem está com ele. */
-export interface UsoAberto {
-  id: string
-  funcionario_id: string
-  funcionario_nome: string
-  /** timestamptz ISO — desde quando o carro está fora. */
-  desde: string
-}
+import { periodoDe } from './periodo'
+import { CATEGORIAS_COM_VEICULO_ORDEM, type Lancamento } from './lancamentos'
+
+// ESTE MÓDULO TROCOU DE ASSUNTO. Ele derivava o uso do carro — horas em
+// aberto, "há quanto tempo alguém está com ele", o limite de 12h que
+// destacava um check-in esquecido. O dono do negócio usou o check-in/check-out
+// e concluiu que não serve: o que ele quer ver no carro é quanto ele custa.
+//
+// Saíram junto com a funcionalidade (não ficaram "por precaução"):
+// `UsoAberto`, `UsoHistorico`, `FuncionarioOpcao`, `HORAS_LIMITE_ABERTO`,
+// `horasEmAberto`, `usoAntigo`, `formatarHora` e `formatarDataHora` — todas
+// existiam só para a lista de uso, e nenhuma tem chamador na tela nova.
+// Mesma razão de `periodosComFolha` em derive/funcionarios.ts: código que
+// descreve uma tela que não existe mais engana quem lê depois.
+//
+// O molde do que entrou é derive/funcionarios.ts (saldo + histórico +
+// estatísticas do período, com `null` quando os lançamentos não puderam ser
+// carregados). É a mesma pergunta — "quanto saiu por causa DESTE aqui, no
+// período" — com outro sujeito.
 
 /** Veículo como a API devolve (api/src/routes/veiculos.ts). */
 export interface Veiculo {
@@ -18,8 +27,6 @@ export interface Veiculo {
   ano: number | null
   ativo: boolean
   obs: string
-  /** null = disponível; presente = em uso, com quem pegou e desde quando. */
-  uso_aberto: UsoAberto | null
 }
 
 /**
@@ -33,56 +40,139 @@ export const VEICULO_NOVO = {
   placa: '', modelo: '', marca: '', ano: '' as number | string, ativo: true, obs: '',
 }
 
-/** Nome + horário de quem pegou o carro (só o funcionário, sem a lista de
- * opções) — pro seletor de "Pegar" em ModalPegarVeiculo. */
-export interface FuncionarioOpcao {
-  id: string
-  nome: string
+/** "Fiat Fiorino", ou a placa quando não há marca nem modelo — um nome só
+ * para o veículo, usado na lista, no seletor do modal e no rótulo dos botões
+ * (duas grafias do mesmo carro em telas vizinhas confundem). */
+export function nomeVeiculo(v: Pick<Veiculo, 'placa' | 'marca' | 'modelo'>): string {
+  const nome = [v.marca, v.modelo].filter(Boolean).join(' ').trim()
+  return nome || v.placa
 }
 
-/** Um item do histórico de uso de um veículo (GET /api/veiculos/:id/historico). */
-export interface UsoHistorico {
-  id: string
-  veiculo_id: string
-  funcionario_id: string
-  funcionario_nome: string
-  saida_em: string
-  volta_em: string | null
-  obs: string
+/**
+ * Lançamentos de um veículo dentro do período, do mais recente pro mais
+ * antigo — a mesma lista que alimenta o gasto e o histórico da linha
+ * expandida. Espelha `lancamentosDoFuncionario` (derive/funcionarios.ts),
+ * inclusive na convenção de `periodo` ('AAAA-MM' ou 'all', derive/periodo.ts).
+ *
+ * Filtra por `veiculo_id`, NÃO por categoria: a API já garante que só as
+ * categorias de CATEGORIAS_COM_VEICULO chegam com veículo preenchido (fora
+ * delas o campo é zerado no servidor), e filtrar de novo por categoria aqui
+ * esconderia do histórico um lançamento que o banco de fato atribui a este
+ * carro — o usuário veria um gasto que não bate com nenhuma linha listada.
+ */
+export function lancamentosDoVeiculo(
+  lancamentos: Lancamento[],
+  veiculoId: string,
+  periodo: string = 'all',
+): Lancamento[] {
+  return lancamentos
+    .filter(l => String(l.veiculo_id ?? '') === String(veiculoId))
+    .filter(l => periodo === 'all' || periodoDe(l.data) === periodo)
+    .slice()
+    .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
 }
 
-/** Limite (em horas) a partir do qual um uso em aberto é destacado na lista
- * — decisão do dono do negócio: a tela avisa, mas não fecha sozinha (ver
- * comentário grande em VeiculosLista.tsx). */
-export const HORAS_LIMITE_ABERTO = 12
-
-/** Horas decorridas desde `desde` (uma data ISO) até `agora`. */
-export function horasEmAberto(desde: string, agora: Date = new Date()): number {
-  const inicio = new Date(desde).getTime()
-  return (agora.getTime() - inicio) / (1000 * 60 * 60)
+/** Soma o `valor` de uma lista já filtrada (ver `lancamentosDoVeiculo`).
+ * Zero é um resultado legítimo: o período foi olhado e não houve gasto. */
+export function gastoDoVeiculo(lancamentosDoPeriodo: Lancamento[]): number {
+  return lancamentosDoPeriodo.reduce((soma, l) => soma + (Number(l.valor) || 0), 0)
 }
 
-/** true quando um uso em aberto já passou do limite de destaque. */
-export function usoAntigo(desde: string, agora: Date = new Date()): boolean {
-  return horasEmAberto(desde, agora) > HORAS_LIMITE_ABERTO
+/**
+ * O mesmo total, aberto por categoria. As chaves são exatamente as de
+ * `CATEGORIAS_COM_VEICULO_ORDEM`, sempre todas presentes (zero quando não
+ * houve gasto naquela categoria) — quem renderiza não precisa saber se a
+ * chave existe, e um cartão ausente e um cartão zerado dizem coisas
+ * diferentes.
+ *
+ * Categoria fora da lista, se algum dia chegar uma com veículo preenchido,
+ * NÃO é descartada: entra na chave dela. Assim o total continua sendo a soma
+ * das partes, em vez de o rodapé não bater com a conta de cima.
+ */
+export function gastoPorCategoria(lancamentosDoPeriodo: Lancamento[]): Record<string, number> {
+  const saida: Record<string, number> = {}
+  for (const categoria of CATEGORIAS_COM_VEICULO_ORDEM) saida[categoria] = 0
+  for (const l of lancamentosDoPeriodo) {
+    saida[l.categoria] = (saida[l.categoria] ?? 0) + (Number(l.valor) || 0)
+  }
+  return saida
 }
 
-/** "07:40" a partir de um timestamptz ISO — hora local do navegador. */
-export function formatarHora(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+export interface VeiculoDerivado extends Veiculo {
+  /**
+   * Gasto do período. `null` quando os lançamentos não puderam ser carregados
+   * — diferente de `0`, que é um zero MEDIDO (o carro existe, o período foi
+   * olhado, não houve gasto). A tela mostra travessão num caso e R$ 0,00 no
+   * outro, e travessão nunca vira zero.
+   */
+  gasto: number | null
+  /** Lançamentos do período, mais recente primeiro. `null` = indisponíveis. */
+  historico: Lancamento[] | null
 }
 
-/** "23/08 07:40" — usado no histórico, onde a data importa (pode ser de
- * outro dia), diferente da lista principal (que só mostra "desde HH:MM",
- * porque um uso em aberto na lista é sempre recente o bastante pro dia não
- * precisar aparecer — e quando não é, o destaque de "há muito tempo" já
- * avisa isso de outra forma). */
-export function formatarDataHora(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  const data = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
-  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  return `${data} ${hora}`
+/**
+ * Combina tudo acima para o conjunto de veículos da tela.
+ *
+ * `lancamentos: null` significa "GET /api/lancamentos falhou" (ou ainda não
+ * voltou). O CADASTRO continua saindo inteiro — placa, marca, modelo, ano,
+ * ativo — e só o que depende de lançamento vira `null`. `[]` é outra coisa:
+ * carregou e não havia nada, então o gasto é zero de verdade.
+ *
+ * O mesmo vale para um período sem movimento: o carro continua listado. Um
+ * carro não deixa de existir porque não abasteceu em julho.
+ */
+export function derivarVeiculos(
+  veiculos: Veiculo[],
+  lancamentos: Lancamento[] | null,
+  periodo: string = 'all',
+): VeiculoDerivado[] {
+  return veiculos.map(v => {
+    const historico = lancamentos === null ? null : lancamentosDoVeiculo(lancamentos, v.id, periodo)
+    return { ...v, historico, gasto: historico === null ? null : gastoDoVeiculo(historico) }
+  })
+}
+
+/**
+ * Os números dos cartões do topo. `null` em vez de 0 nos que dependem de
+ * lançamento quando a lista não pôde ser carregada — zero ali seria um dado
+ * inventado. Espelha `estatisticasFuncionarios`.
+ */
+export interface EstatisticasVeiculos {
+  /** Quantos veículos cadastrados. Não depende de lançamento nem de período:
+   * é contagem de cadastro, igual a "Funcionários" no cartão de lá. */
+  quantidade: number
+  /** Quantos estão ativos — o cadastro inteiro continua listado, mas
+   * aposentar um carro (`ativo = false`) é o caminho para tirá-lo de vista
+   * sem apagar a despesa dele. */
+  ativos: number
+  /** Gasto de TODOS os veículos no período. `null` = lançamentos indisponíveis. */
+  gastoPeriodo: number | null
+  /** O mesmo, aberto por categoria (chaves de CATEGORIAS_COM_VEICULO_ORDEM).
+   * `null` = indisponível — e não um objeto com zeros, que fingiria medição. */
+  porCategoria: Record<string, number> | null
+}
+
+export function estatisticasVeiculos(
+  veiculos: Veiculo[],
+  lancamentos: Lancamento[] | null,
+  periodo: string = 'all',
+): EstatisticasVeiculos {
+  const quantidade = veiculos.length
+  const ativos = veiculos.filter(v => v.ativo).length
+  if (lancamentos === null) {
+    return { quantidade, ativos, gastoPeriodo: null, porCategoria: null }
+  }
+  // Só lançamento COM veículo entra — o total dos cartões tem de ser a soma
+  // do que aparece nas linhas, e uma gasolina sem carro atribuído não aparece
+  // em linha nenhuma. Ela continua contando no Financeiro, que é onde o custo
+  // total do período mora.
+  const doPeriodo = lancamentos
+    .filter(l => String(l.veiculo_id ?? '') !== '')
+    .filter(l => periodo === 'all' || periodoDe(l.data) === periodo)
+  return {
+    quantidade,
+    ativos,
+    gastoPeriodo: gastoDoVeiculo(doPeriodo),
+    porCategoria: gastoPorCategoria(doPeriodo),
+  }
 }

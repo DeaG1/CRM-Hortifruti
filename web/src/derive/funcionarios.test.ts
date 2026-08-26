@@ -14,7 +14,8 @@ import {
 } from './funcionarios'
 
 const lanc = (over: Partial<LancamentoParaFuncionario> = {}): LancamentoParaFuncionario => ({
-  id: 'l1', data: '2026-06-15', categoria: 'Salário', descricao: '', valor: 0, funcionario_id: '1', ...over,
+  id: 'l1', data: '2026-06-15', categoria: 'Salário', descricao: '', valor: 0,
+  funcionario_id: '1', veiculo_id: null, ...over,
 })
 
 const funcionario = (over: Partial<Funcionario> = {}): Funcionario => ({

@@ -16,8 +16,9 @@ const mockPost = api.post as unknown as ReturnType<typeof vi.fn>
 const mockPut = api.put as unknown as ReturnType<typeof vi.fn>
 const mockDel = api.del as unknown as ReturnType<typeof vi.fn>
 
+// Mesma lista da API (api/src/routes/lancamentos.ts), 'Multa' inclusa.
 const CATEGORIAS = [
-  'Frete', 'Gasolina', 'Manutenção dos Carros', 'Salário', 'Adiantamento de salário',
+  'Frete', 'Gasolina', 'Manutenção dos Carros', 'Multa', 'Salário', 'Adiantamento de salário',
   'Vale-alimentação', 'Vale-transporte', 'FGTS', 'INSS', 'Simples Nacional',
   'Parcelamento Impostos', 'Pagamento de conta de sócio', 'Outros',
 ]
@@ -27,6 +28,11 @@ const FUNCIONARIOS = [
   { id: 'f-2', nome: 'Maria Souza' },
 ]
 
+const VEICULOS = [
+  { id: 'v-1', placa: 'ABC-1234', marca: 'Fiat', modelo: 'Fiorino' },
+  { id: 'v-2', placa: 'XYZ-9876', marca: 'Volkswagen', modelo: 'Kombi' },
+]
+
 const lancamentoExistente: Lancamento = {
   id: 'l-1',
   data: '2026-06-18',
@@ -34,6 +40,7 @@ const lancamentoExistente: Lancamento = {
   descricao: 'Troca de óleo e filtro do caminhão',
   valor: 480,
   funcionario_id: null,
+  veiculo_id: null,
 }
 
 function renderModal(props: Partial<ComponentProps<typeof ModalLancamento>> = {}) {
@@ -42,6 +49,7 @@ function renderModal(props: Partial<ComponentProps<typeof ModalLancamento>> = {}
       lancamento={null}
       categorias={CATEGORIAS}
       funcionarios={FUNCIONARIOS}
+      veiculos={VEICULOS}
       onSalvo={() => {}}
       onExcluido={() => {}}
       onFechar={() => {}}
@@ -145,6 +153,67 @@ describe('ModalLancamento — campo funcionário só nas categorias certas', () 
     await waitFor(() => expect(mockPost).toHaveBeenCalled())
     const corpo = mockPost.mock.calls[0][1] as { funcionario_id: unknown }
     expect(corpo.funcionario_id).toBeNull()
+  })
+})
+
+describe('ModalLancamento — campo veículo só nas categorias de despesa de carro', () => {
+  it('categoria default (Frete) NAO mostra o campo veiculo — frete e servico de terceiro', () => {
+    renderModal({ categorias: ['Frete', 'Gasolina'] })
+    expect(screen.queryByLabelText(/^veículo$/i)).not.toBeInTheDocument()
+  })
+
+  it('Gasolina, Manutenção dos Carros e Multa mostram o campo veiculo', () => {
+    renderModal({ categorias: ['Frete', 'Gasolina', 'Manutenção dos Carros', 'Multa'] })
+    for (const cat of ['Gasolina', 'Manutenção dos Carros', 'Multa']) {
+      fireEvent.change(screen.getByLabelText(/^categoria$/i), { target: { value: cat } })
+      expect(screen.getByLabelText(/^veículo$/i), cat).toBeInTheDocument()
+    }
+  })
+
+  it('categorias de folha e as demais NAO mostram o campo veiculo', () => {
+    renderModal({ categorias: ['Gasolina', 'Salário', 'Adiantamento de salário', 'FGTS', 'Outros'] })
+    for (const cat of ['Salário', 'Adiantamento de salário', 'FGTS', 'Outros']) {
+      fireEvent.change(screen.getByLabelText(/^categoria$/i), { target: { value: cat } })
+      expect(screen.queryByLabelText(/^veículo$/i), cat).not.toBeInTheDocument()
+    }
+  })
+
+  it('nunca mostra os dois campos ao mesmo tempo (as duas listas sao disjuntas)', () => {
+    renderModal({ categorias: ['Gasolina', 'Salário'] })
+    expect(screen.getByLabelText(/^veículo$/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^funcionário$/i)).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/^categoria$/i), { target: { value: 'Salário' } })
+    expect(screen.getByLabelText(/^funcionário$/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^veículo$/i)).not.toBeInTheDocument()
+  })
+
+  it('select de veiculo lista os veiculos recebidos via prop, com placa', () => {
+    renderModal({ categorias: ['Gasolina'] })
+    const select = screen.getByLabelText(/^veículo$/i) as HTMLSelectElement
+    const opcoes = Array.from(select.options).map(o => o.textContent)
+    expect(opcoes).toEqual(['—', 'Fiat Fiorino · ABC-1234', 'Volkswagen Kombi · XYZ-9876'])
+  })
+
+  it('voltar pra categoria sem veiculo nao envia o veiculo selecionado antes', async () => {
+    mockPost.mockResolvedValue({ ...lancamentoExistente, id: 'novo' })
+    renderModal({ categorias: ['Gasolina', 'Frete'] })
+    fireEvent.change(screen.getByLabelText(/^veículo$/i), { target: { value: 'v-1' } })
+    fireEvent.change(screen.getByLabelText(/^categoria$/i), { target: { value: 'Frete' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    const corpo = mockPost.mock.calls[0][1] as { veiculo_id: unknown }
+    expect(corpo.veiculo_id).toBeNull()
+  })
+
+  it('editar um lancamento com veiculo abre com o veiculo selecionado e o mantem ao salvar', async () => {
+    mockPut.mockResolvedValue({ ...lancamentoExistente, veiculo_id: 'v-2' })
+    renderModal({ lancamento: { ...lancamentoExistente, categoria: 'Gasolina', veiculo_id: 'v-2' } })
+    expect(screen.getByLabelText(/^veículo$/i)).toHaveValue('v-2')
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPut).toHaveBeenCalled())
+    const corpo = mockPut.mock.calls[0][1] as { veiculo_id: unknown }
+    expect(corpo.veiculo_id).toBe('v-2')
   })
 })
 

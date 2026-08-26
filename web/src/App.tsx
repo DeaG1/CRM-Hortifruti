@@ -23,7 +23,10 @@ import { FinanceiroTela } from './screens/FinanceiroTela'
 import { RelatoriosTela } from './screens/RelatoriosTela'
 import type { Cliente } from './derive/clientes'
 import { PERIODO_TODOS, type Periodo } from './derive/periodo'
-import { ADMIN_ONLY_SCREENS, type Papel, type Tela } from './telas'
+// `Papel` deixou de ser importado aqui junto com a prop `papel` de
+// `Conteudo`: nenhuma tela recebe mais o papel (ver o comentario de
+// `Conteudo`). Quem decide por papel e o Shell, que importa o tipo por conta.
+import { ADMIN_ONLY_SCREENS, type Tela } from './telas'
 
 /** Espelha o corpo de GET /api/eu (api/src/index.ts). */
 interface Eu {
@@ -387,7 +390,6 @@ function App() {
       >
         <Conteudo
           tela={telaEfetiva}
-          papel={eu.papel}
           periodo={periodo}
           onNavegar={setTela}
           onSessaoExpirada={aoExpirar}
@@ -408,15 +410,18 @@ function App() {
  * comentario; Estoque agrega entradas, perdas e saidas em SQL num endpoint
  * proprio (GET /api/estoque, ver src/screens/EstoqueLista.tsx).
  *
- * `papel` so e repassado adiante pra VeiculosLista: e a unica tela onde
- * admin e colaborador veem a MESMA tela com acoes diferentes (cadastrar e
- * admin, pegar/devolver e qualquer sessao) — as demais telas admin-only
- * simplesmente nao aparecem pro colaborador (ADMIN_ONLY_SCREENS), entao nao
- * precisam saber o papel de quem esta olhando.
+ * `papel` NAO e mais repassado a nenhuma tela. VeiculosLista era a unica que
+ * o recebia — era a unica em que admin e colaborador viam a MESMA tela com
+ * acoes diferentes (cadastrar era admin, pegar/devolver era qualquer sessao).
+ * Com o check-in/check-out fora e a tela mostrando dinheiro, ela virou
+ * admin-only como as outras (ADMIN_ONLY_SCREENS em telas.ts) e nao precisa
+ * mais saber quem esta olhando: quem nao pode ver nem chega aqui, porque o
+ * item some do menu. O `papel` continua sendo usado onde sempre foi decidido
+ * — no Shell, que monta o menu.
  */
 function Conteudo(
-  { tela, papel, periodo, onNavegar, onSessaoExpirada }:
-  { tela: Tela; papel: Papel; periodo: Periodo; onNavegar: (tela: Tela) => void; onSessaoExpirada: () => void },
+  { tela, periodo, onNavegar, onSessaoExpirada }:
+  { tela: Tela; periodo: Periodo; onNavegar: (tela: Tela) => void; onSessaoExpirada: () => void },
 ) {
   switch (tela) {
     // `onNavegar` e o MESMO `setTela` do menu lateral: o botao do guia de
@@ -429,11 +434,13 @@ function Conteudo(
     case 'produtos':      return <ProdutosLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
     case 'fornecedores':  return <FornecedoresLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
     case 'funcionarios':  return <FuncionariosLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
-    // Veiculos nao recebe periodo: a tela e o cadastro da frota mais o
-    // estado ATUAL de cada carro (quem esta com ele agora). Nao ha metrica
-    // de fluxo para recortar — "quem pegou o carro em junho" seria um
-    // relatorio de uso que a tela nao tem.
-    case 'veiculos':      return <VeiculosLista papel={papel} onSessaoExpirada={onSessaoExpirada} />
+    // Veiculos PASSOU A RECEBER periodo. Ela ficou de fora do filtro global
+    // em eae52e0 porque era cadastro da frota mais estado atual, sem metrica
+    // de fluxo para recortar. Passou a haver uma: o gasto de cada carro no
+    // periodo. Sem o recorte, "gasolina" somaria todos os meses da historia
+    // sob um cabecalho que diz um mes. O cadastro continua inteiro na tela
+    // num periodo sem lancamento — ver o comentario da prop em VeiculosLista.
+    case 'veiculos':      return <VeiculosLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
     case 'entradas':      return <EntradasLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
     case 'pedidos':       return <SaidasLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
     // Lancamentos e a parte de Financeiro que ja existe: a tela completa

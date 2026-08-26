@@ -23,7 +23,6 @@ const veiculoExistente: Veiculo = {
   ano: 2020,
   ativo: true,
   obs: 'Chave reserva com o admin',
-  uso_aberto: null,
 }
 
 beforeEach(() => {

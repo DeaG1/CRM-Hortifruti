@@ -10,6 +10,12 @@ import { veiculos } from '../src/routes/veiculos'
 // status dos handlers. veiculos.test.ts cobre isolamento/RLS/constraints
 // direto via withTenant. A rota e montada num Hono local, igual ao molde
 // (index.ts nao e tocado por este arquivo de teste).
+//
+// ENCOLHEU JUNTO COM A ROTA: os describes de pegar, devolver, check-in
+// duplicado, "mesmo funcionario com dois carros" e GET /:id/historico sairam
+// — as rotas que eles exercitavam nao existem mais. Entraram no lugar: a
+// leitura agora exigindo admin, e os dois destinos possiveis de um DELETE
+// (lancamento nao barra, historico de uso legado barra).
 const app = new Hono<{ Bindings: EnvBanco; Variables: Vars }>()
 app.route('/api/veiculos', veiculos)
 app.onError((err, c) => {
@@ -29,7 +35,6 @@ let outroTenantId: string
 let tokenAdmin: string
 let tokenColab: string
 let funcionarioId: string
-let funcionarioId2: string
 
 beforeAll(async () => {
   admin = criarPool(ADMIN)
@@ -44,6 +49,7 @@ beforeAll(async () => {
   tenantId = t.id
   outroTenantId = t2.id
 
+  await admin`delete from lancamentos where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from veiculo_usos where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from veiculos where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from funcionarios where tenant_id in (${tenantId}, ${outroTenantId})`
@@ -60,12 +66,11 @@ beforeAll(async () => {
   tokenAdmin = await criarSessao(sql, uAdmin.id, tenantId)
   tokenColab = await criarSessao(sql, uColab.id, tenantId)
 
+  // So o `veiculo_usos` legado ainda precisa de funcionario (a coluna e NOT
+  // NULL na tabela orfa) — nenhuma rota deste arquivo cria funcionario.
   const [f] = await admin`
     insert into funcionarios (tenant_id, nome) values (${tenantId}, 'João Motorista') returning id`
-  const [f2] = await admin`
-    insert into funcionarios (tenant_id, nome) values (${tenantId}, 'Maria Motorista') returning id`
   funcionarioId = f.id
-  funcionarioId2 = f2.id
 })
 
 afterAll(async () => {
@@ -109,15 +114,32 @@ const post = (corpo?: unknown): RequestInit => ({
   body: corpo === undefined ? undefined : JSON.stringify(corpo),
 })
 
-describe('autorizacao — cadastro (admin) vs leitura (qualquer sessao)', () => {
+// A tela de Veiculos passou a mostrar dinheiro (quanto cada carro custou no
+// periodo, de GET /api/lancamentos, admin-only) e perdeu a acao operacional
+// que justificava o colaborador ver a tela. Estes testes sao o lado da API
+// do 'veiculos' que entrou em ADMIN_ONLY_SCREENS: se um dia alguem reabrir a
+// rota sem reabrir a tela (ou o contrario), um dos dois lados quebra aqui.
+describe('autorizacao — a rota inteira e admin (mudou: a leitura era aberta)', () => {
   it('sem cookie -> 401', async () => {
     const res = await pedir('/api/veiculos')
     expect(res.status).toBe(401)
     expect(await res.json()).toEqual({ erro: 'nao autenticado' })
   })
 
-  it('colaborador LE veiculos', async () => {
+  it('colaborador NAO LE a lista de veiculos', async () => {
     const res = await pedir('/api/veiculos', comoColab())
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ erro: 'sem permissao' })
+  })
+
+  it('colaborador NAO LE a ficha de um veiculo', async () => {
+    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'FIC-0001' })))).json()
+    const res = await pedir(`/api/veiculos/${criado.id}`, comoColab())
+    expect(res.status).toBe(403)
+  })
+
+  it('admin LE a lista', async () => {
+    const res = await pedir('/api/veiculos', comoAdmin())
     expect(res.status).toBe(200)
   })
 
@@ -153,34 +175,33 @@ describe('autorizacao — cadastro (admin) vs leitura (qualquer sessao)', () => 
   })
 })
 
-describe('autorizacao — pegar/devolver (colaborador tambem faz)', () => {
-  it('colaborador PEGA um veiculo (POST /:id/pegar) -> 201', async () => {
-    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'PEG-0001' })))).json()
-    const res = await pedir(`/api/veiculos/${criado.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId })))
-    expect(res.status).toBe(201)
+// As rotas de uso sairam de src/routes/veiculos.ts. Este describe existe pra
+// a remocao ser um FATO verificado e nao uma ausencia de teste: se alguem
+// reintroduzir os endpoints sem discutir, estes tres falham.
+describe('as rotas de check-in/check-out nao existem mais', () => {
+  it('POST /:id/pegar -> 404 (rota inexistente, nao 201)', async () => {
+    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'GON-0001' })))).json()
+    const res = await pedir(`/api/veiculos/${criado.id}/pegar`, comoAdmin(post({ funcionario_id: funcionarioId })))
+    expect(res.status).toBe(404)
   })
 
-  it('colaborador DEVOLVE um veiculo (POST /:id/devolver) -> 200', async () => {
-    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'DEV-0001' })))).json()
-    await pedir(`/api/veiculos/${criado.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId })))
-    const res = await pedir(`/api/veiculos/${criado.id}/devolver`, comoColab(post()))
-    expect(res.status).toBe(200)
+  it('POST /:id/devolver -> 404 (rota inexistente, nao 200)', async () => {
+    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'GON-0002' })))).json()
+    const res = await pedir(`/api/veiculos/${criado.id}/devolver`, comoAdmin(post()))
+    expect(res.status).toBe(404)
   })
 
-  it('admin tambem pega e devolve (sem exigencia de ser colaborador)', async () => {
-    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'ADM-0002' })))).json()
-    const resPegar = await pedir(`/api/veiculos/${criado.id}/pegar`, comoAdmin(post({ funcionario_id: funcionarioId })))
-    expect(resPegar.status).toBe(201)
-    const resDevolver = await pedir(`/api/veiculos/${criado.id}/devolver`, comoAdmin(post()))
-    expect(resDevolver.status).toBe(200)
+  it('GET /:id/historico -> 404 (rota inexistente, nao 200)', async () => {
+    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'GON-0003' })))).json()
+    const res = await pedir(`/api/veiculos/${criado.id}/historico`, comoAdmin())
+    expect(res.status).toBe(404)
   })
 
-  it('sem cookie -> 401 tambem em pegar/devolver', async () => {
-    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'SEM-0001' })))).json()
-    const resPegar = await pedir(`/api/veiculos/${criado.id}/pegar`, post({ funcionario_id: funcionarioId }))
-    expect(resPegar.status).toBe(401)
-    const resDevolver = await pedir(`/api/veiculos/${criado.id}/devolver`, post())
-    expect(resDevolver.status).toBe(401)
+  it('GET / nao devolve mais `uso_aberto` em nenhuma linha', async () => {
+    await pedir('/api/veiculos', comoAdmin(post({ placa: 'GON-0004' })))
+    const lista = await (await pedir('/api/veiculos', comoAdmin())).json()
+    expect(lista.length).toBeGreaterThan(0)
+    for (const v of lista) expect(v).not.toHaveProperty('uso_aberto')
   })
 })
 
@@ -301,157 +322,64 @@ describe('codigos de status dos handlers', () => {
       expect(await res.json()).toEqual({ erro: 'id invalido' })
     }
   })
-
-  it('POST /:id/pegar com funcionario_id ausente -> 400', async () => {
-    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'PEG-0002' })))).json()
-    const res = await pedir(`/api/veiculos/${criado.id}/pegar`, comoColab(post({})))
-    expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ erro: 'funcionario_id invalido' })
-  })
-
-  it('POST /:id/pegar com funcionario_id malformado -> 400', async () => {
-    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'PEG-0003' })))).json()
-    const res = await pedir(`/api/veiculos/${criado.id}/pegar`, comoColab(post({ funcionario_id: 'nao-e-uuid' })))
-    expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ erro: 'funcionario_id invalido' })
-  })
-
-  it('POST /:id/pegar com funcionario_id inexistente -> 400 (FK)', async () => {
-    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'PEG-0004' })))).json()
-    const res = await pedir(`/api/veiculos/${criado.id}/pegar`, comoColab(post({
-      funcionario_id: '00000000-0000-0000-0000-000000000000',
-    })))
-    expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ erro: 'funcionario nao encontrado' })
-  })
-
-  it('POST /:id/pegar em veiculo inexistente -> 404', async () => {
-    const res = await pedir('/api/veiculos/00000000-0000-0000-0000-000000000000/pegar', comoColab(post({
-      funcionario_id: funcionarioId,
-    })))
-    expect(res.status).toBe(404)
-    expect(await res.json()).toEqual({ erro: 'veiculo nao encontrado' })
-  })
-
-  it('POST /:id/devolver sem uso em aberto -> 404', async () => {
-    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'DEV-0002' })))).json()
-    const res = await pedir(`/api/veiculos/${criado.id}/devolver`, comoColab(post()))
-    expect(res.status).toBe(404)
-    expect(await res.json()).toEqual({ erro: 'nao ha uso em aberto para este veiculo' })
-  })
 })
 
-describe('check-in duplicado via HTTP — 409 (a mesma regra do banco, vista pela API)', () => {
-  it('duas tentativas concorrentes de pegar o MESMO carro: uma 201, a outra 409', async () => {
-    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'CCR-0001' })))).json()
+/**
+ * OS DOIS DESTINOS DE UM DELETE, e a diferenca entre eles e a decisao
+ * documentada em 013_lancamentos_veiculo.sql:
+ *
+ *  - com LANCAMENTO: passa. `lancamentos_veiculo_fk` e `on delete set null`
+ *    — a despesa aconteceu e continua valendo; o que se perde e a etiqueta
+ *    "de qual carro". O valor do lancamento nao pode mudar porque alguem
+ *    arrumou o cadastro da frota.
+ *  - com HISTORICO DE USO legado: barra. `veiculo_usos_veiculo_fk` e
+ *    `on delete restrict` (011) e a tabela nao foi removida. E o residuo
+ *    visivel da tabela orfa, e a mensagem tem que dizer isso.
+ */
+describe('DELETE — lancamento nao barra (set null), historico de uso legado barra (restrict)', () => {
+  it('excluir veiculo COM lancamento devolve 200 e zera veiculo_id, preservando o valor', async () => {
+    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'LAN-0001' })))).json()
+    const [lanc] = await admin`
+      insert into lancamentos (tenant_id, data, categoria, valor, veiculo_id)
+      values (${tenantId}, current_date, 'Gasolina', 250.00, ${criado.id}) returning id`
 
-    const [r1, r2] = await Promise.all([
-      pedir(`/api/veiculos/${criado.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId }))),
-      pedir(`/api/veiculos/${criado.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId2 }))),
-    ])
-    const statuses = [r1.status, r2.status].sort()
-    expect(statuses).toEqual([201, 409])
-
-    const respostaConflito = r1.status === 409 ? r1 : r2
-    expect(await respostaConflito.json()).toEqual({ erro: 'este veiculo ja esta em uso' })
-
-    // so um uso aberto sobrevive, nunca dois
-    const abertos = await admin`
-      select id from veiculo_usos where veiculo_id = ${criado.id} and volta_em is null`
-    expect(abertos.length).toBe(1)
-  })
-
-  it('sequencial (nao concorrente): pegar o mesmo carro duas vezes -> segunda 409', async () => {
-    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'CCR-0002' })))).json()
-    const r1 = await pedir(`/api/veiculos/${criado.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId })))
-    expect(r1.status).toBe(201)
-    const r2 = await pedir(`/api/veiculos/${criado.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId2 })))
-    expect(r2.status).toBe(409)
-    expect(await r2.json()).toEqual({ erro: 'este veiculo ja esta em uso' })
-  })
-})
-
-describe('devolver fecha o uso certo', () => {
-  it('devolver fecha o uso em aberto (volta_em preenchido) e GET / deixa de mostrar uso_aberto', async () => {
-    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'FEC-0001' })))).json()
-    await pedir(`/api/veiculos/${criado.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId })))
-
-    const listaAntes = await (await pedir('/api/veiculos', comoAdmin())).json()
-    const linhaAntes = listaAntes.find((v: { id: string }) => v.id === criado.id)
-    expect(linhaAntes.uso_aberto).not.toBeNull()
-    expect(linhaAntes.uso_aberto.funcionario_nome).toBe('João Motorista')
-
-    const resDevolver = await pedir(`/api/veiculos/${criado.id}/devolver`, comoColab(post()))
-    expect(resDevolver.status).toBe(200)
-    const usoFechado = await resDevolver.json()
-    expect(usoFechado.volta_em).not.toBeNull()
-    expect(usoFechado.funcionario_id).toBe(funcionarioId)
-
-    const listaDepois = await (await pedir('/api/veiculos', comoAdmin())).json()
-    const linhaDepois = listaDepois.find((v: { id: string }) => v.id === criado.id)
-    expect(linhaDepois.uso_aberto).toBeNull()
-  })
-
-  it('devolver nao mexe no uso aberto de OUTRO carro', async () => {
-    const carroA = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'FEC-0002' })))).json()
-    const carroB = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'FEC-0003' })))).json()
-    await pedir(`/api/veiculos/${carroA.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId })))
-    await pedir(`/api/veiculos/${carroB.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId2 })))
-
-    await pedir(`/api/veiculos/${carroA.id}/devolver`, comoColab(post()))
-
-    const lista = await (await pedir('/api/veiculos', comoAdmin())).json()
-    const linhaA = lista.find((v: { id: string }) => v.id === carroA.id)
-    const linhaB = lista.find((v: { id: string }) => v.id === carroB.id)
-    expect(linhaA.uso_aberto).toBeNull()
-    expect(linhaB.uso_aberto).not.toBeNull()
-    expect(linhaB.uso_aberto.funcionario_id).toBe(funcionarioId2)
-  })
-})
-
-describe('o mesmo funcionario com dois carros abertos (permitido)', () => {
-  it('funcionario pega dois carros diferentes -> ambos 201, ambos aparecem abertos', async () => {
-    const carro1 = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'MFC-0001' })))).json()
-    const carro2 = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'MFC-0002' })))).json()
-
-    const r1 = await pedir(`/api/veiculos/${carro1.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId })))
-    const r2 = await pedir(`/api/veiculos/${carro2.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId })))
-    expect(r1.status).toBe(201)
-    expect(r2.status).toBe(201)
-
-    const lista = await (await pedir('/api/veiculos', comoAdmin())).json()
-    const linha1 = lista.find((v: { id: string }) => v.id === carro1.id)
-    const linha2 = lista.find((v: { id: string }) => v.id === carro2.id)
-    expect(linha1.uso_aberto.funcionario_id).toBe(funcionarioId)
-    expect(linha2.uso_aberto.funcionario_id).toBe(funcionarioId)
-  })
-})
-
-describe('GET /:id/historico', () => {
-  it('lista os usos do veiculo, do mais recente pro mais antigo, com o nome do funcionario', async () => {
-    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'HIS-0001' })))).json()
-    await pedir(`/api/veiculos/${criado.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId })))
-    await pedir(`/api/veiculos/${criado.id}/devolver`, comoColab(post()))
-    await pedir(`/api/veiculos/${criado.id}/pegar`, comoColab(post({ funcionario_id: funcionarioId2 })))
-
-    const res = await pedir(`/api/veiculos/${criado.id}/historico`, comoColab())
+    const res = await pedir(`/api/veiculos/${criado.id}`, comoAdmin({ method: 'DELETE' }))
     expect(res.status).toBe(200)
-    const historico = await res.json()
-    expect(historico.length).toBe(2)
-    expect(historico[0].funcionario_nome).toBe('Maria Motorista')
-    expect(historico[0].volta_em).toBeNull()
-    expect(historico[1].funcionario_nome).toBe('João Motorista')
-    expect(historico[1].volta_em).not.toBeNull()
-    for (const u of historico) expect(u).not.toHaveProperty('tenant_id')
+    expect(await res.json()).toEqual({ ok: true })
+
+    const [depois] = await admin`select veiculo_id, valor from lancamentos where id = ${lanc.id}`
+    expect(depois).toBeDefined()
+    expect(depois.veiculo_id).toBeNull()
+    expect(Number(depois.valor)).toBe(250)
   })
 
-  it('historico de veiculo inexistente -> 404', async () => {
-    const res = await pedir('/api/veiculos/00000000-0000-0000-0000-000000000000/historico', comoColab())
+  it('excluir veiculo COM historico de uso legado -> 409 com mensagem que diz o motivo', async () => {
+    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'USO-0001' })))).json()
+    // Inserido direto: nao ha mais rota que escreva em veiculo_usos. E
+    // exatamente o cenario de dado legado que a tabela orfa deixa para tras.
+    await admin`
+      insert into veiculo_usos (tenant_id, veiculo_id, funcionario_id, volta_em)
+      values (${tenantId}, ${criado.id}, ${funcionarioId}, now())`
+
+    const res = await pedir(`/api/veiculos/${criado.id}`, comoAdmin({ method: 'DELETE' }))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({
+      erro: 'este veiculo tem historico de uso registrado e nao pode ser excluido',
+    })
+
+    const [ainda] = await admin`select id from veiculos where id = ${criado.id}`
+    expect(ainda).toBeDefined()
+  })
+
+  it('excluir veiculo sem nada -> 200', async () => {
+    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'SEM-0002' })))).json()
+    const res = await pedir(`/api/veiculos/${criado.id}`, comoAdmin({ method: 'DELETE' }))
+    expect(res.status).toBe(200)
+  })
+
+  it('DELETE de id inexistente -> 404', async () => {
+    const res = await pedir('/api/veiculos/00000000-0000-0000-0000-000000000000', comoAdmin({ method: 'DELETE' }))
     expect(res.status).toBe(404)
-  })
-
-  it('historico com id malformado -> 400', async () => {
-    const res = await pedir('/api/veiculos/nao-e-um-uuid/historico', comoColab())
-    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'nao encontrado' })
   })
 })

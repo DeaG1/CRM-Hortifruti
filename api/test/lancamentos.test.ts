@@ -26,6 +26,8 @@ beforeAll(async () => {
     on conflict (slug) do update set nome = excluded.nome returning id`
   tenantA = a.id; tenantB = b.id
   await admin`delete from lancamentos where tenant_id in (${tenantA}, ${tenantB})`
+  await admin`delete from veiculo_usos where tenant_id in (${tenantA}, ${tenantB})`
+  await admin`delete from veiculos where tenant_id in (${tenantA}, ${tenantB})`
   await admin`delete from funcionarios where tenant_id in (${tenantA}, ${tenantB})`
 })
 
@@ -114,12 +116,108 @@ describe('lancamentos', () => {
     },
   )
 
-  it('CATEGORIAS bate com o prototipo (design/CRM Hortifruti.dc.html, LANC_CATS)', () => {
+  it('CATEGORIAS e a lista do prototipo (LANC_CATS) mais Multa, nesta ordem', () => {
+    // A ordem e verificada, nao so o conteudo: ela e a ordem do `<select>` do
+    // front (GET /categorias devolve este array como esta) e `categorias[0]`
+    // e a categoria inicial de um lancamento novo. 'Multa' entra ao lado das
+    // outras duas despesas de carro — foi pedida pelo dono do negocio junto
+    // com a despesa por veiculo e nao existe no prototipo.
     expect(CATEGORIAS).toEqual([
-      'Frete', 'Gasolina', 'Manutenção dos Carros', 'Salário', 'Adiantamento de salário',
+      'Frete', 'Gasolina', 'Manutenção dos Carros', 'Multa', 'Salário', 'Adiantamento de salário',
       'Vale-alimentação', 'Vale-transporte', 'FGTS', 'INSS', 'Simples Nacional',
       'Parcelamento Impostos', 'Pagamento de conta de sócio', 'Outros',
     ])
+  })
+
+  it('Frete continua na lista de categorias — o que ele nao aceita e veiculo, nao e existir', () => {
+    expect(CATEGORIAS).toContain('Frete')
+  })
+})
+
+/**
+ * A FK COMPOSTA DE VEICULO, do lado do banco e com DOIS TENANTS DE VERDADE.
+ *
+ * Este e o ponto inteiro da migration 010 aplicado a coluna nova de 013. A
+ * verificacao de chave estrangeira do PostgreSQL roda com os privilegios do
+ * dono da tabela referenciada e IGNORA row level security — com uma FK
+ * simples `veiculo_id -> veiculos(id)`, o insert abaixo seria aceito em
+ * silencio e um lancamento da empresa A apontaria para o carro da empresa B,
+ * fazendo a despesa aparecer no "gasto do veiculo" da empresa errada.
+ *
+ * Os dois tenants sao reais (linhas em `tenants`, veiculos proprios em cada
+ * um), e os inserts passam por `withTenant` — a mesma porta que a API usa.
+ * Nao ha mock: se a constraint composta for trocada por uma simples, este
+ * teste passa a NAO lancar e falha.
+ */
+describe('lancamentos.veiculo_id — FK composta com tenant_id (isolamento entre empresas)', () => {
+  it('o banco REJEITA lancamento do tenant A apontando veiculo do tenant B', async () => {
+    const [veiculoB] = await withTenant(sql, tenantB, tx => tx`
+      insert into veiculos (tenant_id, placa) values (${tenantB}, 'FKL-0001') returning id`)
+
+    await expect(
+      withTenant(sql, tenantA, tx => tx`
+        insert into lancamentos (tenant_id, data, categoria, valor, veiculo_id)
+        values (${tenantA}, current_date, 'Gasolina', 200, ${veiculoB.id})`),
+    ).rejects.toThrow()
+  })
+
+  it('o banco ACEITA o mesmo lancamento quando o veiculo e do proprio tenant (prova que nao rejeita tudo)', async () => {
+    const [veiculoA] = await withTenant(sql, tenantA, tx => tx`
+      insert into veiculos (tenant_id, placa) values (${tenantA}, 'FKL-0002') returning id`)
+
+    await withTenant(sql, tenantA, tx => tx`
+      insert into lancamentos (tenant_id, data, categoria, valor, veiculo_id)
+      values (${tenantA}, current_date, 'Gasolina', 200, ${veiculoA.id})`)
+
+    const [linha] = await withTenant(sql, tenantA, tx => tx`
+      select veiculo_id from lancamentos where veiculo_id = ${veiculoA.id}`)
+    expect(linha.veiculo_id).toBe(veiculoA.id)
+  })
+
+  it('o mesmo pelo lado do UPDATE: apontar para o veiculo de outro tenant e recusado', async () => {
+    const [veiculoB] = await withTenant(sql, tenantB, tx => tx`
+      insert into veiculos (tenant_id, placa) values (${tenantB}, 'FKL-0003') returning id`)
+    const [lanc] = await withTenant(sql, tenantA, tx => tx`
+      insert into lancamentos (tenant_id, data, categoria, valor)
+      values (${tenantA}, current_date, 'Multa', 130) returning id`)
+
+    await expect(
+      withTenant(sql, tenantA, tx => tx`
+        update lancamentos set veiculo_id = ${veiculoB.id} where id = ${lanc.id}`),
+    ).rejects.toThrow()
+  })
+
+  it('lancamento sem veiculo continua valido (MATCH SIMPLE dispensa a checagem quando ha NULL)', async () => {
+    await withTenant(sql, tenantA, tx => tx`
+      insert into lancamentos (tenant_id, data, categoria, valor, veiculo_id)
+      values (${tenantA}, current_date, 'Simples Nacional', 90, null)`)
+    const [linha] = await withTenant(sql, tenantA, tx => tx`
+      select veiculo_id from lancamentos where categoria = 'Simples Nacional'`)
+    expect(linha.veiculo_id).toBeNull()
+  })
+})
+
+/**
+ * `on delete set null` (013) — a decisao de o que acontece com a despesa
+ * quando o carro sai do cadastro. A despesa aconteceu: o dinheiro saiu, e o
+ * total de custos do periodo nao pode mudar porque alguem arrumou a frota.
+ * O que se perde e a ATRIBUICAO.
+ */
+describe('lancamentos.veiculo_id — excluir o veiculo nao apaga nem barra a despesa', () => {
+  it('excluir o veiculo zera veiculo_id e preserva o lancamento e o valor', async () => {
+    const [veiculo] = await withTenant(sql, tenantA, tx => tx`
+      insert into veiculos (tenant_id, placa) values (${tenantA}, 'SNL-0001') returning id`)
+    const [lanc] = await withTenant(sql, tenantA, tx => tx`
+      insert into lancamentos (tenant_id, data, categoria, valor, veiculo_id)
+      values (${tenantA}, current_date, 'Manutenção dos Carros', 480, ${veiculo.id}) returning id`)
+
+    await withTenant(sql, tenantA, tx => tx`delete from veiculos where id = ${veiculo.id}`)
+
+    const [depois] = await withTenant(sql, tenantA, tx => tx`
+      select veiculo_id, valor from lancamentos where id = ${lanc.id}`)
+    expect(depois).toBeDefined()
+    expect(depois.veiculo_id).toBeNull()
+    expect(Number(depois.valor)).toBe(480)
   })
 })
 

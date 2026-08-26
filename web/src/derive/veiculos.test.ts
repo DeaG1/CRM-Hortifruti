@@ -1,67 +1,224 @@
 import { describe, it, expect } from 'vitest'
-import { horasEmAberto, usoAntigo, formatarHora, formatarDataHora, HORAS_LIMITE_ABERTO } from './veiculos'
+import {
+  nomeVeiculo,
+  lancamentosDoVeiculo,
+  gastoDoVeiculo,
+  gastoPorCategoria,
+  derivarVeiculos,
+  estatisticasVeiculos,
+  type Veiculo,
+} from './veiculos'
+import type { Lancamento } from './lancamentos'
 
-describe('horasEmAberto', () => {
-  it('calcula as horas decorridas entre desde e agora', () => {
-    const agora = new Date('2026-08-23T12:00:00Z')
-    const desde = new Date('2026-08-23T07:00:00Z').toISOString()
-    expect(horasEmAberto(desde, agora)).toBe(5)
+// Este arquivo testava horas em aberto e o limite de 12h do check-in/check-out.
+// A funcionalidade saiu (o dono do negócio usou e recusou), as funções saíram
+// junto, e os testes delas com elas. O que entra é a aritmética da despesa por
+// veículo — molde de derive/funcionarios.test.ts.
+
+const veiculo = (over: Partial<Veiculo> = {}): Veiculo => ({
+  id: 'v-1', placa: 'ABC-1234', modelo: 'Fiorino', marca: 'Fiat', ano: 2020,
+  ativo: true, obs: '', ...over,
+})
+
+const lanc = (over: Partial<Lancamento> = {}): Lancamento => ({
+  id: 'l-1', data: '2026-06-10', categoria: 'Gasolina', descricao: '', valor: 0,
+  funcionario_id: null, veiculo_id: 'v-1', ...over,
+})
+
+describe('nomeVeiculo', () => {
+  it('junta marca e modelo', () => {
+    expect(nomeVeiculo({ placa: 'ABC-1234', marca: 'Fiat', modelo: 'Fiorino' })).toBe('Fiat Fiorino')
   })
 
-  it('zero quando desde e agora sao o mesmo instante', () => {
-    const agora = new Date('2026-08-23T12:00:00Z')
-    expect(horasEmAberto(agora.toISOString(), agora)).toBe(0)
+  it('usa só o que existe quando falta marca ou modelo', () => {
+    expect(nomeVeiculo({ placa: 'ABC-1234', marca: '', modelo: 'Kombi' })).toBe('Kombi')
+    expect(nomeVeiculo({ placa: 'ABC-1234', marca: 'Fiat', modelo: '' })).toBe('Fiat')
+  })
+
+  it('cai para a placa quando não há marca nem modelo — nunca vazio', () => {
+    expect(nomeVeiculo({ placa: 'ABC-1234', marca: '', modelo: '' })).toBe('ABC-1234')
   })
 })
 
-describe('usoAntigo — limite de 12h (decisao do dono do negocio: destaca, nao fecha sozinho)', () => {
-  it('constante de limite e 12 horas', () => {
-    expect(HORAS_LIMITE_ABERTO).toBe(12)
+describe('lancamentosDoVeiculo', () => {
+  it('traz só os lançamentos deste veículo', () => {
+    const lista = [
+      lanc({ id: 'a', veiculo_id: 'v-1' }),
+      lanc({ id: 'b', veiculo_id: 'v-2' }),
+      lanc({ id: 'c', veiculo_id: null }),
+    ]
+    expect(lancamentosDoVeiculo(lista, 'v-1').map(l => l.id)).toEqual(['a'])
   })
 
-  it('uso ha menos de 12h nao e antigo', () => {
-    const agora = new Date('2026-08-23T12:00:00Z')
-    const desde = new Date('2026-08-23T07:40:00Z').toISOString() // ~4h20
-    expect(usoAntigo(desde, agora)).toBe(false)
+  it('recorta pelo período e devolve do mais recente pro mais antigo', () => {
+    const lista = [
+      lanc({ id: 'maio', data: '2026-05-20' }),
+      lanc({ id: 'junho-1', data: '2026-06-02' }),
+      lanc({ id: 'junho-2', data: '2026-06-28' }),
+    ]
+    expect(lancamentosDoVeiculo(lista, 'v-1', '2026-06').map(l => l.id)).toEqual(['junho-2', 'junho-1'])
   })
 
-  it('uso ha exatamente 12h nao e antigo (estrito, so passa de 12h)', () => {
-    const agora = new Date('2026-08-23T12:00:00Z')
-    const desde = new Date('2026-08-23T00:00:00Z').toISOString() // exatas 12h
-    expect(usoAntigo(desde, agora)).toBe(false)
+  it("'all' não recorta nada", () => {
+    const lista = [
+      lanc({ id: 'maio', data: '2026-05-20' }),
+      lanc({ id: 'junho', data: '2026-06-02' }),
+    ]
+    expect(lancamentosDoVeiculo(lista, 'v-1', 'all').map(l => l.id)).toEqual(['junho', 'maio'])
   })
 
-  it('uso ha mais de 12h e antigo', () => {
-    const agora = new Date('2026-08-23T12:00:00Z')
-    const desde = new Date('2026-08-22T23:59:00Z').toISOString() // 12h01
-    expect(usoAntigo(desde, agora)).toBe(true)
+  it('não filtra por categoria: o histórico mostra tudo que o banco atribui a este carro', () => {
+    // A API já garante que só as categorias de veículo chegam com veiculo_id
+    // preenchido. Filtrar de novo aqui esconderia uma linha que o gasto conta
+    // — e o total não bateria com o que está listado.
+    const lista = [lanc({ id: 'estranho', categoria: 'Outros', valor: 40 })]
+    expect(lancamentosDoVeiculo(lista, 'v-1').map(l => l.id)).toEqual(['estranho'])
   })
 
-  it('uso de ontem (bem mais de 12h) e antigo', () => {
-    const agora = new Date('2026-08-23T12:00:00Z')
-    const desde = new Date('2026-08-22T08:00:00Z').toISOString() // 28h
-    expect(usoAntigo(desde, agora)).toBe(true)
+  it('não muta a lista recebida', () => {
+    const lista = [lanc({ id: 'a', data: '2026-06-01' }), lanc({ id: 'b', data: '2026-06-20' })]
+    lancamentosDoVeiculo(lista, 'v-1')
+    expect(lista.map(l => l.id)).toEqual(['a', 'b'])
   })
 })
 
-describe('formatarHora', () => {
-  it('formata um timestamptz ISO como HH:MM', () => {
-    const iso = new Date('2026-08-23T07:40:00').toISOString()
-    expect(formatarHora(iso)).toMatch(/^\d{2}:\d{2}$/)
+describe('gastoDoVeiculo', () => {
+  it('soma os valores', () => {
+    expect(gastoDoVeiculo([lanc({ valor: 250 }), lanc({ valor: 130.5 })])).toBe(380.5)
   })
 
-  it('data invalida vira travessao, nao quebra', () => {
-    expect(formatarHora('nao-e-uma-data')).toBe('—')
+  it('lista vazia é zero MEDIDO, não travessão — quem decide isso é a tela', () => {
+    expect(gastoDoVeiculo([])).toBe(0)
+  })
+
+  it('valor não numérico conta como zero em vez de virar NaN', () => {
+    expect(gastoDoVeiculo([lanc({ valor: 100 }), lanc({ valor: undefined as never })])).toBe(100)
   })
 })
 
-describe('formatarDataHora', () => {
-  it('formata como DD/MM HH:MM', () => {
-    const iso = new Date('2026-08-23T07:40:00').toISOString()
-    expect(formatarDataHora(iso)).toMatch(/^\d{2}\/\d{2} \d{2}:\d{2}$/)
+describe('gastoPorCategoria', () => {
+  it('abre o total nas três categorias de despesa de carro', () => {
+    const lista = [
+      lanc({ categoria: 'Gasolina', valor: 300 }),
+      lanc({ categoria: 'Gasolina', valor: 200 }),
+      lanc({ categoria: 'Manutenção dos Carros', valor: 480 }),
+      lanc({ categoria: 'Multa', valor: 130 }),
+    ]
+    expect(gastoPorCategoria(lista)).toEqual({
+      'Gasolina': 500,
+      'Manutenção dos Carros': 480,
+      'Multa': 130,
+    })
   })
 
-  it('data invalida vira travessao, nao quebra', () => {
-    expect(formatarDataHora('nao-e-uma-data')).toBe('—')
+  it('categoria sem gasto vem com zero, não ausente', () => {
+    expect(gastoPorCategoria([lanc({ categoria: 'Multa', valor: 130 })])).toEqual({
+      'Gasolina': 0,
+      'Manutenção dos Carros': 0,
+      'Multa': 130,
+    })
+  })
+
+  it('categoria inesperada ganha chave própria — o total continua sendo a soma das partes', () => {
+    const saida = gastoPorCategoria([lanc({ categoria: 'Frete', valor: 90 })])
+    expect(saida['Frete']).toBe(90)
+    expect(Object.values(saida).reduce((a, b) => a + b, 0)).toBe(90)
+  })
+})
+
+describe('derivarVeiculos', () => {
+  it('calcula o gasto e o histórico de cada veículo no período', () => {
+    const veiculos = [veiculo({ id: 'v-1' }), veiculo({ id: 'v-2', placa: 'XYZ-9876' })]
+    const lancamentos = [
+      lanc({ id: 'a', veiculo_id: 'v-1', valor: 300, data: '2026-06-02' }),
+      lanc({ id: 'b', veiculo_id: 'v-1', valor: 200, data: '2026-05-02' }),
+      lanc({ id: 'c', veiculo_id: 'v-2', valor: 90, data: '2026-06-15' }),
+    ]
+    const [v1, v2] = derivarVeiculos(veiculos, lancamentos, '2026-06')
+    expect(v1.gasto).toBe(300)
+    expect(v1.historico?.map(l => l.id)).toEqual(['a'])
+    expect(v2.gasto).toBe(90)
+  })
+
+  it('veículo SEM gasto no período fica com R$ 0 medido e histórico vazio — e continua na lista', () => {
+    const derivados = derivarVeiculos([veiculo({ id: 'v-1' })], [], '2026-07')
+    expect(derivados.length).toBe(1)
+    expect(derivados[0].gasto).toBe(0)
+    expect(derivados[0].historico).toEqual([])
+  })
+
+  it('período sem nenhum lançamento não some com o CADASTRO', () => {
+    const veiculos = [veiculo({ id: 'v-1' }), veiculo({ id: 'v-2', placa: 'XYZ-9876' })]
+    const lancamentos = [lanc({ veiculo_id: 'v-1', valor: 300, data: '2026-06-02' })]
+    const derivados = derivarVeiculos(veiculos, lancamentos, '2026-12')
+    expect(derivados.map(v => v.placa)).toEqual(['ABC-1234', 'XYZ-9876'])
+    expect(derivados.every(v => v.gasto === 0)).toBe(true)
+  })
+
+  it('lançamentos INDISPONÍVEIS (null) dão gasto null e histórico null, nunca zero', () => {
+    const derivados = derivarVeiculos([veiculo()], null, '2026-06')
+    expect(derivados[0].gasto).toBeNull()
+    expect(derivados[0].historico).toBeNull()
+    // O cadastro sai inteiro mesmo assim.
+    expect(derivados[0].placa).toBe('ABC-1234')
+    expect(derivados[0].ativo).toBe(true)
+  })
+
+  it('null (indisponível) e [] (carregou vazio) são resultados DIFERENTES', () => {
+    expect(derivarVeiculos([veiculo()], null)[0].gasto).toBeNull()
+    expect(derivarVeiculos([veiculo()], [])[0].gasto).toBe(0)
+  })
+})
+
+describe('estatisticasVeiculos', () => {
+  it('conta o cadastro e os ativos sem depender de lançamento nem de período', () => {
+    const stats = estatisticasVeiculos(
+      [veiculo({ id: 'v-1' }), veiculo({ id: 'v-2', ativo: false })], null, '2026-06',
+    )
+    expect(stats.quantidade).toBe(2)
+    expect(stats.ativos).toBe(1)
+  })
+
+  it('soma o gasto de TODOS os veículos no período, aberto por categoria', () => {
+    const lancamentos = [
+      lanc({ veiculo_id: 'v-1', categoria: 'Gasolina', valor: 300, data: '2026-06-02' }),
+      lanc({ veiculo_id: 'v-2', categoria: 'Multa', valor: 130, data: '2026-06-09' }),
+      lanc({ veiculo_id: 'v-1', categoria: 'Gasolina', valor: 999, data: '2026-05-02' }),
+    ]
+    const stats = estatisticasVeiculos([veiculo()], lancamentos, '2026-06')
+    expect(stats.gastoPeriodo).toBe(430)
+    expect(stats.porCategoria).toEqual({ 'Gasolina': 300, 'Manutenção dos Carros': 0, 'Multa': 130 })
+  })
+
+  it('lançamento SEM veículo não entra: o total dos cartões é o que aparece nas linhas', () => {
+    const lancamentos = [
+      lanc({ veiculo_id: 'v-1', valor: 300 }),
+      lanc({ veiculo_id: null, categoria: 'Gasolina', valor: 5000 }),
+    ]
+    expect(estatisticasVeiculos([veiculo()], lancamentos, 'all').gastoPeriodo).toBe(300)
+  })
+
+  it('lançamentos indisponíveis dão null nos dois — nunca zero nem objeto zerado', () => {
+    const stats = estatisticasVeiculos([veiculo()], null, '2026-06')
+    expect(stats.gastoPeriodo).toBeNull()
+    expect(stats.porCategoria).toBeNull()
+  })
+
+  it('período sem movimento dá zero MEDIDO, não null', () => {
+    const stats = estatisticasVeiculos([veiculo()], [lanc({ valor: 300, data: '2026-06-01' })], '2026-07')
+    expect(stats.gastoPeriodo).toBe(0)
+    expect(stats.porCategoria).toEqual({ 'Gasolina': 0, 'Manutenção dos Carros': 0, 'Multa': 0 })
+  })
+
+  it('o total do período é a soma das categorias', () => {
+    const lancamentos = [
+      lanc({ categoria: 'Gasolina', valor: 300 }),
+      lanc({ categoria: 'Manutenção dos Carros', valor: 480 }),
+      lanc({ categoria: 'Multa', valor: 130 }),
+    ]
+    const stats = estatisticasVeiculos([veiculo()], lancamentos, 'all')
+    const somaDasPartes = Object.values(stats.porCategoria!).reduce((a, b) => a + b, 0)
+    expect(stats.gastoPeriodo).toBe(somaDasPartes)
+    expect(stats.gastoPeriodo).toBe(910)
   })
 })

@@ -28,11 +28,15 @@ const ITENS_ADMIN = [
   'Fornecedores', 'Produtos', 'Funcionários', 'Veículos', 'Financeiro', 'Relatórios',
 ]
 const ITENS_ADMIN_ONLY = [
-  'Saúde do Negócio', 'Clientes', 'Fornecedores', 'Produtos', 'Funcionários', 'Financeiro', 'Relatórios',
+  'Saúde do Negócio', 'Clientes', 'Fornecedores', 'Produtos', 'Funcionários', 'Financeiro',
+  'Relatórios', 'Veículos',
 ]
-// Veiculos e visivel pro colaborador (nao esta em ADMIN_ONLY_SCREENS): quem
-// de fato pega/devolve o carro no dia a dia precisa ver a tela.
-const ITENS_COLABORADOR = ['Entradas (Compras)', 'Saídas (Vendas)', 'Estoque', 'Veículos']
+// Veiculos PASSOU a ser admin-only. Enquanto a tela era check-in/check-out ela
+// ficava de fora: quem pega o carro no dia a dia e o colaborador. Com o
+// check-in/check-out removido, o que a tela mostra e quanto cada carro custou
+// no periodo — dado que vem de GET /api/lancamentos, admin-only. Ver o
+// comentario de ADMIN_ONLY_SCREENS em telas.ts.
+const ITENS_COLABORADOR = ['Entradas (Compras)', 'Saídas (Vendas)', 'Estoque']
 
 describe('Shell — menu por papel', () => {
   it('admin ve as 11 entradas do menu', () => {

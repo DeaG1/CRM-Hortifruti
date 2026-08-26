@@ -10,7 +10,8 @@ import type { EnvBanco } from '../src/db'
 // Molde: test/clientes.http.test.ts. Cobre a camada HTTP das rotas em
 // src/routes/lancamentos.ts — sanear() (mass assignment), paraJson()
 // (conversao numerica e de data), autorizacao (exigirSessao/exigirAdmin),
-// validacao de categoria e a regra de negocio de funcionario_id.
+// validacao de categoria e as regras de negocio de funcionario_id e de
+// veiculo_id (que sao a mesma regra com sujeitos diferentes).
 //
 // index.ts nao pode ser modificado por este agente (montagem e feita por
 // outro), entao aqui a rota e montada num app minimo local so para o
@@ -30,6 +31,8 @@ let tokenAdmin: string
 let tokenColab: string
 let funcionarioId: string
 let funcionarioOutroTenantId: string
+let veiculoId: string
+let veiculoOutroTenantId: string
 
 const app = new Hono<{ Bindings: EnvBanco; Variables: Vars }>()
 app.route('/api/lancamentos', lancamentos)
@@ -52,6 +55,8 @@ beforeAll(async () => {
   outroTenantId = t2.id
 
   await admin`delete from lancamentos where tenant_id in (${tenantId}, ${outroTenantId})`
+  await admin`delete from veiculo_usos where tenant_id in (${tenantId}, ${outroTenantId})`
+  await admin`delete from veiculos where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from funcionarios where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from usuarios where tenant_id in (${tenantId}, ${outroTenantId})`
 
@@ -72,6 +77,15 @@ beforeAll(async () => {
   const [funcOutro] = await admin`
     insert into funcionarios (tenant_id, nome) values (${outroTenantId}, 'Funcionario De Outro Tenant') returning id`
   funcionarioOutroTenantId = funcOutro.id
+
+  // Dois tenants DE VERDADE, cada um com o seu carro: e com estes dois que a
+  // FK composta de 013 e exercitada mais abaixo.
+  const [veic] = await admin`
+    insert into veiculos (tenant_id, placa) values (${tenantId}, 'LHT-0001') returning id`
+  veiculoId = veic.id
+  const [veicOutro] = await admin`
+    insert into veiculos (tenant_id, placa) values (${outroTenantId}, 'LHT-9999') returning id`
+  veiculoOutroTenantId = veicOutro.id
 })
 
 afterAll(async () => {
@@ -471,5 +485,189 @@ describe('regra de negocio: funcionario_id so em Salario/Adiantamento', () => {
     const resPut = await pedir(`/api/lancamentos/${criado.id}`, comoAdmin(jsonPut({ funcionario_id: funcionarioId })))
     expect(resPut.status).toBe(200)
     expect((await resPut.json()).funcionario_id).toBe(funcionarioId)
+  })
+})
+
+/**
+ * Espelho exato do describe de funcionario_id acima — mesma regra, outro
+ * sujeito (ver CATEGORIAS_COM_VEICULO em src/routes/lancamentos.ts). As
+ * categorias que aceitam veiculo sao as tres despesas do PROPRIO carro:
+ * Gasolina, Manutencao dos Carros e Multa. 'Frete' fica de fora de proposito
+ * — e transporte comprado de terceiro, e atribui-lo a uma placa da frota
+ * afirmaria que aquele carro custou um dinheiro pago a outra empresa.
+ */
+describe('regra de negocio: veiculo_id so em Gasolina/Manutencao/Multa', () => {
+  it('POST categoria Gasolina com veiculo_id do proprio tenant -> grava o vinculo', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Gasolina', valor: 320, veiculo_id: veiculoId,
+    })))
+    expect(res.status).toBe(201)
+    expect((await res.json()).veiculo_id).toBe(veiculoId)
+  })
+
+  it('POST categoria Manutenção dos Carros com veiculo_id -> grava o vinculo', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Manutenção dos Carros', valor: 890, veiculo_id: veiculoId,
+    })))
+    expect(res.status).toBe(201)
+    expect((await res.json()).veiculo_id).toBe(veiculoId)
+  })
+
+  it('POST categoria Multa com veiculo_id -> grava o vinculo (categoria nova, pedida pelo dono)', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Multa', valor: 130.16, veiculo_id: veiculoId,
+    })))
+    expect(res.status).toBe(201)
+    const corpo = await res.json()
+    expect(corpo.veiculo_id).toBe(veiculoId)
+    expect(corpo.categoria).toBe('Multa')
+  })
+
+  it('POST categoria Frete com veiculo_id -> IGNORA (nao rejeita), grava nulo', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Frete', valor: 400, veiculo_id: veiculoId,
+    })))
+    expect(res.status).toBe(201)
+    expect((await res.json()).veiculo_id).toBeNull()
+  })
+
+  it('POST categoria Salário com veiculo_id -> ignora, grava nulo (e o funcionario continua valendo)', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Salário', valor: 1500,
+      veiculo_id: veiculoId, funcionario_id: funcionarioId,
+    })))
+    expect(res.status).toBe(201)
+    const corpo = await res.json()
+    expect(corpo.veiculo_id).toBeNull()
+    expect(corpo.funcionario_id).toBe(funcionarioId)
+  })
+
+  it('POST categoria Outros com veiculo_id -> ignora, grava nulo', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Outros', valor: 25, veiculo_id: veiculoId,
+    })))
+    expect(res.status).toBe(201)
+    expect((await res.json()).veiculo_id).toBeNull()
+  })
+
+  it('POST categoria Gasolina com veiculo_id inexistente -> 400 veiculo invalido', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Gasolina', valor: 300,
+      veiculo_id: '00000000-0000-0000-0000-000000000000',
+    })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'veiculo invalido' })
+  })
+
+  it('POST categoria Gasolina com veiculo_id malformado -> 400 veiculo invalido', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Gasolina', valor: 300, veiculo_id: 'nao-e-um-uuid',
+    })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'veiculo invalido' })
+  })
+
+  it('POST com veiculo_id de OUTRO TENANT -> 400 veiculo invalido (guarda contra FK cross-tenant)', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Gasolina', valor: 300, veiculo_id: veiculoOutroTenantId,
+    })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'veiculo invalido' })
+
+    // E nada foi gravado apontando pro carro alheio — nem com valor zero.
+    const [linha] = await admin`select id from lancamentos where veiculo_id = ${veiculoOutroTenantId}`
+    expect(linha).toBeUndefined()
+  })
+
+  it('PUT trocando categoria de Gasolina para Frete -> zera veiculo_id automaticamente', async () => {
+    const criado = await (await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Gasolina', valor: 300, veiculo_id: veiculoId,
+    })))).json()
+    expect(criado.veiculo_id).toBe(veiculoId)
+
+    const resPut = await pedir(`/api/lancamentos/${criado.id}`, comoAdmin(jsonPut({ categoria: 'Frete' })))
+    expect(resPut.status).toBe(200)
+    expect((await resPut.json()).veiculo_id).toBeNull()
+  })
+
+  it('PUT so enviando veiculo_id numa categoria que nao aceita veiculo -> ignora, mantem nulo', async () => {
+    const criado = await (await pedir('/api/lancamentos', comoAdmin(json({
+      ...LANCAMENTO_BASE, categoria: 'Frete',
+    })))).json()
+    expect(criado.veiculo_id).toBeNull()
+
+    const resPut = await pedir(`/api/lancamentos/${criado.id}`, comoAdmin(jsonPut({ veiculo_id: veiculoId })))
+    expect(resPut.status).toBe(200)
+    expect((await resPut.json()).veiculo_id).toBeNull()
+  })
+
+  it('PUT enviando veiculo_id numa categoria ja existente Gasolina -> grava o vinculo', async () => {
+    const criado = await (await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Gasolina', valor: 300,
+    })))).json()
+    expect(criado.veiculo_id).toBeNull()
+
+    const resPut = await pedir(`/api/lancamentos/${criado.id}`, comoAdmin(jsonPut({ veiculo_id: veiculoId })))
+    expect(resPut.status).toBe(200)
+    expect((await resPut.json()).veiculo_id).toBe(veiculoId)
+  })
+
+  it('PUT enviando veiculo_id de outro tenant numa categoria que aceita -> 400', async () => {
+    const criado = await (await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Multa', valor: 130,
+    })))).json()
+    const resPut = await pedir(`/api/lancamentos/${criado.id}`,
+      comoAdmin(jsonPut({ veiculo_id: veiculoOutroTenantId })))
+    expect(resPut.status).toBe(400)
+    expect(await resPut.json()).toEqual({ erro: 'veiculo invalido' })
+  })
+
+  it('PUT que so mexe no veiculo NAO derruba o funcionario de um lancamento de folha', async () => {
+    // Ramo `else if` do PUT: quando a categoria nao vem no corpo, so o campo
+    // ENVIADO e reavaliado. Zerar o outro apagaria um vinculo que ninguem
+    // pediu para apagar.
+    const criado = await (await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Salário', valor: 1500, funcionario_id: funcionarioId,
+    })))).json()
+    expect(criado.funcionario_id).toBe(funcionarioId)
+
+    const resPut = await pedir(`/api/lancamentos/${criado.id}`, comoAdmin(jsonPut({ veiculo_id: veiculoId })))
+    expect(resPut.status).toBe(200)
+    const depois = await resPut.json()
+    expect(depois.veiculo_id).toBeNull()
+    expect(depois.funcionario_id).toBe(funcionarioId)
+  })
+
+  it('sanear ignora tenant_id forjado sem perder o veiculo_id legitimo', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Gasolina', valor: 50,
+      veiculo_id: veiculoId, tenant_id: outroTenantId,
+    })))
+    expect(res.status).toBe(201)
+    const corpo = await res.json()
+    expect(corpo.veiculo_id).toBe(veiculoId)
+    const [linha] = await admin`select tenant_id from lancamentos where id = ${corpo.id}`
+    expect(linha.tenant_id).toBe(tenantId)
+  })
+})
+
+describe('GET /categorias — a lista e fonte unica, e Multa entrou nela', () => {
+  it("inclui 'Multa' (o front nunca fixa nome de categoria; ele le daqui)", async () => {
+    const res = await pedir('/api/lancamentos/categorias', comoAdmin())
+    const lista = await res.json()
+    expect(lista).toContain('Multa')
+  })
+
+  it('inclui as tres categorias que aceitam veiculo, e Frete continua na lista', async () => {
+    const lista = await (await pedir('/api/lancamentos/categorias', comoAdmin())).json()
+    expect(lista).toEqual(expect.arrayContaining(['Gasolina', 'Manutenção dos Carros', 'Multa', 'Frete']))
+  })
+
+  it('POST aceita Multa como categoria valida (o enum fechado foi mesmo ampliado)', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Multa', valor: 88.5,
+    })))
+    expect(res.status).toBe(201)
+    expect((await res.json()).categoria).toBe('Multa')
   })
 })

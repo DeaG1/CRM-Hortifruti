@@ -1,0 +1,115 @@
+-- DESPESA POR VEICULO: `lancamentos.veiculo_id`.
+--
+-- O controle de uso de veiculos (check-in/check-out, "Pegar"/"Devolver") foi
+-- usado e recusado pelo dono do negocio: o que ele quer registrar no carro
+-- nao e quem esta com ele, e quanto ele CUSTA — gasolina, multa e
+-- manutencao. Esta migration abre esse vinculo.
+--
+-- Molde exato: `lancamentos.funcionario_id` (009_entidades_fase1.sql +
+-- 010_fk_com_tenant.sql). Mesma forma, mesmo tipo, mesmo `on delete`, mesma
+-- classe de indice — o desenho ja existia para "de quem foi esta despesa", e
+-- "de qual carro foi esta despesa" e a mesma pergunta com outro sujeito.
+--
+-- A tabela `veiculo_usos` NAO e removida aqui. Ela guarda historico, e
+-- derrubar tabela e mudanca de esquema destrutiva que merece decisao propria
+-- do dono — mesmo tratamento que `clientes.cobranca` recebeu no commit
+-- 738057b. A funcionalidade que a alimentava saiu do codigo; a tabela fica,
+-- orfa, sem nenhum caminho de escrita. Ver o comentario no fim deste arquivo.
+
+alter table lancamentos add column veiculo_id uuid;
+
+-- FK COMPOSTA COM tenant_id — nao e opcional, e a licao inteira de
+-- 010_fk_com_tenant.sql: a verificacao de chave estrangeira do PostgreSQL
+-- roda com os privilegios do dono da tabela referenciada, e o dono nao esta
+-- sujeito as policies de RLS. Com uma FK simples `references veiculos(id)`,
+-- um lancamento da empresa B referenciando um veiculo da empresa A seria
+-- ACEITO EM SILENCIO — foi exatamente isso que a 010 encontrou (e saneou)
+-- com `lancamentos.funcionario_id`, contra este mesmo banco.
+--
+-- Incluindo o tenant na propria chave, o banco so aceita a referencia se o
+-- veiculo pertencer ao MESMO tenant do lancamento. Deixa de ser uma regra
+-- que cada rota precisa lembrar de aplicar e passa a ser impossivel de
+-- violar — inclusive por acesso direto ao banco ou por uma rota futura
+-- escrita distraidamente. A validacao na aplicacao (rota POST/PUT de
+-- lancamentos) continua existindo por cima: ela devolve 400 com mensagem
+-- util em vez de deixar o banco estourar um 23503.
+--
+-- A chave candidata `veiculos_tenant_id_uk (tenant_id, id)` de que esta FK
+-- depende ja existe — foi criada em 011_veiculos.sql.
+--
+-- MATCH SIMPLE (o padrao) dispensa a verificacao quando qualquer coluna da
+-- chave e NULL, entao lancamento sem veiculo — a maioria deles — segue
+-- valido.
+--
+-- Sem saneamento previo, ao contrario da 010: a coluna nasce agora, todas as
+-- linhas existentes tem `veiculo_id` NULL, e nao ha como haver dado que
+-- viole a constraint.
+--
+-- ON DELETE SET NULL, e nao RESTRICT. Ha dois precedentes no projeto e este
+-- caso e o do primeiro:
+--
+--   - `lancamentos.funcionario_id` usa `set null` (010): a despesa
+--     aconteceu, o dinheiro saiu, o registro financeiro continua valido — o
+--     que se perde ao apagar o cadastro e so a ATRIBUICAO.
+--   - `perdas.produto_id` / `saida_itens.produto_id` usam `restrict`
+--     (mensagem 409 em produtos.ts): ali o vinculo nao e uma etiqueta, e o
+--     que CONSTROI o numero — saldo de estoque e preco medio sao somas sobre
+--     essas linhas, e orfana-las produziria um estoque errado em silencio.
+--
+-- Gasolina, multa e manutencao sao o primeiro caso. Nenhum agregado do
+-- sistema e construido a partir de `veiculo_id`: o total de custos do
+-- Financeiro, o saldo em caixa e o resultado do periodo somam `valor` e
+-- ignoram a coluna. Excluir um carro do cadastro nao pode nem apagar a
+-- despesa (o dinheiro saiu de verdade, e o caixa mudaria de valor porque
+-- alguem arrumou a frota) nem ficar barrado (obrigando a manter no cadastro
+-- um carro que ja foi vendido so porque ele abasteceu uma vez). Perde-se a
+-- etiqueta "de qual carro"; o dinheiro fica.
+--
+-- `SET NULL (veiculo_id)` — COM A LISTA DE COLUNAS, e nao `set null` puro.
+-- Isto nao e detalhe de estilo. Num `SET NULL` sem lista, o PostgreSQL zera
+-- TODAS as colunas da chave estrangeira, e aqui a chave inclui `tenant_id`,
+-- que e `not null`: a exclusao do veiculo morreria com 23502 ("null value in
+-- column tenant_id violates not-null constraint"), virando 500 na API em vez
+-- do 200 que a decisao acima descreve. A forma com lista (PostgreSQL 15+;
+-- este projeto roda 16) zera so a coluna do vinculo e deixa o tenant onde
+-- esta.
+--
+-- Descoberto AQUI, com esta migration ja escrita da forma ingenua: o teste
+-- de exclusao falhou com 500 e a causa apareceu. As tres FKs `set null` que
+-- a 010 criou tem o mesmo defeito e sao corrigidas em
+-- 014_fk_set_null_por_coluna.sql — inclusive `lancamentos_funcionario_fk`,
+-- que e o precedente citado logo acima.
+alter table lancamentos add constraint lancamentos_veiculo_fk
+  foreign key (tenant_id, veiculo_id) references veiculos(tenant_id, id)
+  on delete set null (veiculo_id);
+
+-- Mesmo indice que `funcionario_id` ja tem (009, linha 192): a consulta que
+-- este indice serve e "os lancamentos deste veiculo", feita por id. O par
+-- `(tenant_id)` e `(tenant_id, data)` que a tabela ja tem cobre o recorte por
+-- empresa e por periodo; nada aqui pede um indice composto novo.
+create index on lancamentos (veiculo_id);
+
+-- ------------------------------------------------- `veiculo_usos` ficou orfa
+--
+-- A tabela continua existindo, com RLS ligada e com as linhas que ja tinha,
+-- mas NENHUM codigo escreve ou le nela: as rotas POST /:id/pegar e
+-- POST /:id/devolver e o GET /:id/historico sairam de
+-- api/src/routes/veiculos.ts junto com esta mudanca.
+--
+-- Um resto disso continua VISIVEL pelo produto, e por isso e dito aqui em vez
+-- de ficar so no commit: `veiculo_usos_veiculo_fk` e `on delete restrict`
+-- (011), entao um veiculo que tenha linha de uso antiga continua nao podendo
+-- ser excluido do cadastro. DELETE /api/veiculos/:id devolve 409 com mensagem
+-- explicita nesse caso (ver respostaDeErroPg em api/src/routes/veiculos.ts) —
+-- e `ativo = false` segue sendo o caminho para aposentar o carro.
+--
+-- PARA REMOVER A TABELA DEPOIS (decisao do dono, migration propria):
+--   1. conferir que nao ha nada a extrair do historico
+--      (`select count(*) from veiculo_usos`);
+--   2. `drop table veiculo_usos;` — isso leva junto a policy `tenant_isolation`,
+--      os tres indices, o indice parcial `veiculo_usos_aberto_unico` e as duas
+--      FKs compostas (`veiculo_usos_veiculo_fk`, `veiculo_usos_funcionario_fk`);
+--   3. com a FK `restrict` fora do caminho, a excecao acima deixa de existir e
+--      o mapeamento de 23503 em veiculos.ts pode sair junto.
+-- Nada mais no esquema depende dela: `veiculos_tenant_id_uk` continua sendo
+-- necessaria para a FK criada aqui.

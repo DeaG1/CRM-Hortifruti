@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { VeiculosLista } from './VeiculosLista'
 import { api, ErroApi } from '../api/client'
-import type { Veiculo, FuncionarioOpcao } from '../derive/veiculos'
+import type { Veiculo } from '../derive/veiculos'
+import type { Lancamento } from '../derive/lancamentos'
 
-// Mock so de `api.get/post` — mantem a classe ErroApi real (o componente e
-// o ModalVeiculo fazem `err instanceof ErroApi`, precisa ser o mesmo
-// construtor dos dois lados). Mesmo padrao de FuncionariosLista.test.tsx.
+// Mock so de `api.get/post/put/del` — mantem a classe ErroApi real (o
+// componente, o ModalVeiculo e o ModalLancamento fazem `err instanceof
+// ErroApi`, precisa ser o mesmo construtor dos dois lados). Mesmo padrao de
+// FuncionariosLista.test.tsx.
 vi.mock('../api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client')>()
   return {
@@ -18,20 +20,37 @@ vi.mock('../api/client', async (importOriginal) => {
 const mockGet = api.get as unknown as ReturnType<typeof vi.fn>
 const mockPost = api.post as unknown as ReturnType<typeof vi.fn>
 
+const CATEGORIAS = ['Frete', 'Gasolina', 'Manutenção dos Carros', 'Multa', 'Salário']
+
 const veiculo = (over: Partial<Veiculo> = {}): Veiculo => ({
-  id: '1', placa: 'ABC-1234', modelo: 'Fiorino', marca: 'Fiat', ano: 2020,
-  ativo: true, obs: '', uso_aberto: null, ...over,
+  id: 'v-1', placa: 'ABC-1234', modelo: 'Fiorino', marca: 'Fiat', ano: 2020,
+  ativo: true, obs: '', ...over,
 })
 
-const funcionario = (over: Partial<FuncionarioOpcao> = {}): FuncionarioOpcao => ({
-  id: 'f-1', nome: 'João', ...over,
+const lanc = (over: Partial<Lancamento> = {}): Lancamento => ({
+  id: 'l-1', data: '2026-06-10', categoria: 'Gasolina', descricao: '', valor: 0,
+  funcionario_id: null, veiculo_id: 'v-1', ...over,
 })
 
-/** Resolve GET /api/veiculos e /api/funcionarios/opcoes, na ordem em que a tela chama. */
-function mockCarga(veiculos: Veiculo[], funcionarios: FuncionarioOpcao[] = []) {
+/**
+ * Resolve as tres rotas que a tela busca: /api/veiculos sozinha (cadastro), e
+ * /api/lancamentos + /categorias no Promise.all que falha ISOLADO.
+ * `lancamentos: null` faz a segunda busca rejeitar — e como se simula a falha
+ * que deixa o cadastro de pe e o gasto em travessao.
+ */
+function mockCarga(
+  veiculos: Veiculo[],
+  lancamentos: Lancamento[] | null = [],
+  categorias: string[] = CATEGORIAS,
+) {
   mockGet.mockImplementation((rota: string) => {
     if (rota === '/api/veiculos') return Promise.resolve(veiculos)
-    if (rota === '/api/funcionarios/opcoes') return Promise.resolve(funcionarios)
+    if (rota === '/api/lancamentos') {
+      return lancamentos === null
+        ? Promise.reject(new Error('falha de rede'))
+        : Promise.resolve(lancamentos)
+    }
+    if (rota === '/api/lancamentos/categorias') return Promise.resolve(categorias)
     return Promise.reject(new Error('rota inesperada: ' + rota))
   })
 }
@@ -41,34 +60,54 @@ beforeEach(() => {
   mockPost.mockReset()
 })
 
+/**
+ * O botao que expande/recolhe a linha de um veiculo. Identificado pelo
+ * `aria-expanded` (so o toggle tem), e nao pelo nome acessivel: os botoes de
+ * acao da mesma linha ("Lançar gasolina — Fiat Fiorino") tambem carregam o
+ * nome do carro, e uma busca por nome pegaria varios.
+ */
+function linhaDoVeiculo(nome: string): HTMLElement {
+  const toggle = screen.getAllByRole('button')
+    .find(b => b.hasAttribute('aria-expanded') && (b.textContent ?? '').includes(nome))
+  if (!toggle) throw new Error(`linha do veiculo nao encontrada: ${nome}`)
+  return toggle
+}
+
+/** Valor mostrado NA LINHA daquele veiculo — os cartoes do topo mostram os
+ * mesmos numeros e uma busca global acharia os dois. */
+function gastoNaLinha(nome: string): string {
+  const rotulo = within(linhaDoVeiculo(nome)).getByText('GASTO NO PERÍODO')
+  return rotulo.nextElementSibling?.textContent ?? ''
+}
+
 describe('VeiculosLista — os quatro estados', () => {
   it('carregando: mostra indicador enquanto a chamada esta pendente', () => {
     mockGet.mockReturnValue(new Promise(() => {})) // nunca resolve nesta suite
-    render(<VeiculosLista papel="admin" />)
+    render(<VeiculosLista />)
     expect(screen.getByText('Carregando…')).toBeInTheDocument()
   })
 
-  it('erro: mostra alerta quando a API falha por motivo != sessao expirada', async () => {
+  it('erro: mostra alerta quando /api/veiculos falha por motivo != sessao expirada', async () => {
     mockGet.mockRejectedValue(new Error('falha de rede'))
-    render(<VeiculosLista papel="admin" />)
+    render(<VeiculosLista />)
     const alerta = await screen.findByRole('alert')
     expect(alerta).toHaveTextContent('Não foi possível carregar os veículos.')
   })
 
   it('vazio: mostra "nenhum veiculo cadastrado" quando a API devolve lista vazia', async () => {
     mockCarga([])
-    render(<VeiculosLista papel="admin" />)
+    render(<VeiculosLista />)
     expect(await screen.findByText(/nenhum veículo cadastrado/i)).toBeInTheDocument()
   })
 
   it('com dados: lista os veiculos recebidos', async () => {
     mockCarga([
-      veiculo({ id: '1', placa: 'ABC-1234', modelo: 'Fiorino' }),
-      veiculo({ id: '2', placa: 'XYZ-9876', modelo: 'Kombi' }),
+      veiculo({ id: 'v-1', placa: 'ABC-1234', marca: 'Fiat', modelo: 'Fiorino' }),
+      veiculo({ id: 'v-2', placa: 'XYZ-9876', marca: 'Volkswagen', modelo: 'Kombi' }),
     ])
-    render(<VeiculosLista papel="admin" />)
-    expect(await screen.findByText('ABC-1234')).toBeInTheDocument()
-    expect(screen.getByText('XYZ-9876')).toBeInTheDocument()
+    render(<VeiculosLista />)
+    expect(await screen.findByText('Fiat Fiorino')).toBeInTheDocument()
+    expect(screen.getByText('Volkswagen Kombi')).toBeInTheDocument()
   })
 })
 
@@ -76,187 +115,269 @@ describe('VeiculosLista — sessao expirada (401)', () => {
   it('chama onSessaoExpirada em vez de mostrar a mensagem de erro generica', async () => {
     mockGet.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()
-    render(<VeiculosLista papel="admin" onSessaoExpirada={onSessaoExpirada} />)
-    await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalledOnce())
+    render(<VeiculosLista onSessaoExpirada={onSessaoExpirada} />)
+    await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalled())
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
 
-describe('VeiculosLista — status de cada veiculo', () => {
-  it('veiculo sem uso aberto mostra "Disponível"', async () => {
-    mockCarga([veiculo({ uso_aberto: null })])
-    render(<VeiculosLista papel="admin" />)
-    expect(await screen.findByText('Disponível')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Pegar' })).toBeInTheDocument()
+describe('VeiculosLista — gasto por veiculo no periodo', () => {
+  it('soma os lancamentos DAQUELE veiculo no periodo escolhido', async () => {
+    mockCarga(
+      [veiculo({ id: 'v-1' })],
+      [
+        lanc({ id: 'a', veiculo_id: 'v-1', valor: 300, data: '2026-06-02' }),
+        lanc({ id: 'b', veiculo_id: 'v-1', valor: 130.5, data: '2026-06-20' }),
+        lanc({ id: 'c', veiculo_id: 'v-1', valor: 999, data: '2026-05-02' }),
+      ],
+    )
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+    expect(gastoNaLinha('Fiat Fiorino')).toBe('R$ 430,50')
   })
 
-  it('veiculo com uso aberto recente mostra "Com {nome} desde {hora}" e botao Devolver', async () => {
-    const desde = new Date(Date.now() - 2 * 3600 * 1000).toISOString() // 2h atras
-    mockCarga([veiculo({
-      uso_aberto: { id: 'u1', funcionario_id: 'f-1', funcionario_nome: 'João', desde },
-    })])
-    render(<VeiculosLista papel="admin" />)
-    expect(await screen.findByText(/Com João desde \d{2}:\d{2}/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Devolver' })).toBeInTheDocument()
+  it('nao soma o lancamento de OUTRO veiculo', async () => {
+    mockCarga(
+      [veiculo({ id: 'v-1', marca: 'Fiat', modelo: 'Fiorino' })],
+      [
+        lanc({ id: 'a', veiculo_id: 'v-1', valor: 300 }),
+        lanc({ id: 'b', veiculo_id: 'v-2', valor: 5000 }),
+      ],
+    )
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+    expect(gastoNaLinha('Fiat Fiorino')).toBe('R$ 300,00')
   })
 
-  it('uso aberto ha mais de 12h ganha a classe de destaque (ambar/vermelho)', async () => {
-    const desdeAntigo = new Date(Date.now() - 14 * 3600 * 1000).toISOString() // 14h atras
-    mockCarga([veiculo({
-      uso_aberto: { id: 'u1', funcionario_id: 'f-1', funcionario_nome: 'João', desde: desdeAntigo },
-    })])
-    render(<VeiculosLista papel="admin" />)
-    const status = await screen.findByText(/Com João desde/)
-    expect(status.className).toContain('veiculos-status--antigo')
+  it('trocar o periodo troca o numero (o filtro global chega mesmo na tela)', async () => {
+    const lancamentos = [
+      lanc({ id: 'a', valor: 300, data: '2026-06-02' }),
+      lanc({ id: 'b', valor: 700, data: '2026-07-02' }),
+    ]
+    mockCarga([veiculo()], lancamentos)
+    const { rerender } = render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+    expect(gastoNaLinha('Fiat Fiorino')).toBe('R$ 300,00')
+
+    mockCarga([veiculo()], lancamentos)
+    rerender(<VeiculosLista periodo="2026-07" />)
+    await waitFor(() => expect(gastoNaLinha('Fiat Fiorino')).toBe('R$ 700,00'))
   })
 
-  it('uso aberto ha menos de 12h NAO ganha a classe de destaque', async () => {
-    const desdeRecente = new Date(Date.now() - 2 * 3600 * 1000).toISOString()
-    mockCarga([veiculo({
-      uso_aberto: { id: 'u1', funcionario_id: 'f-1', funcionario_nome: 'João', desde: desdeRecente },
-    })])
-    render(<VeiculosLista papel="admin" />)
-    const status = await screen.findByText(/Com João desde/)
-    expect(status.className).not.toContain('veiculos-status--antigo')
-    expect(status.className).toContain('veiculos-status--em-uso')
+  it('os cartoes abrem o gasto da frota por categoria', async () => {
+    mockCarga(
+      [veiculo({ id: 'v-1' }), veiculo({ id: 'v-2', placa: 'XYZ-9876' })],
+      [
+        lanc({ id: 'a', veiculo_id: 'v-1', categoria: 'Gasolina', valor: 300, data: '2026-06-01' }),
+        lanc({ id: 'b', veiculo_id: 'v-2', categoria: 'Multa', valor: 130, data: '2026-06-05' }),
+      ],
+    )
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Gasto da frota')
+    expect(screen.getByText('R$ 430,00')).toBeInTheDocument() // total da frota
+    expect(screen.getAllByText('R$ 300,00').length).toBeGreaterThan(0) // gasolina
+    expect(screen.getAllByText('R$ 130,00').length).toBeGreaterThan(0) // multa
+  })
+})
+
+describe('VeiculosLista — veiculo SEM gasto no periodo', () => {
+  it('mostra R$ 0,00 (zero MEDIDO), nao travessao', async () => {
+    mockCarga([veiculo()], [])
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+    expect(gastoNaLinha('Fiat Fiorino')).toBe('R$ 0,00')
   })
 
-  it('veiculo inativo mostra selo "Inativo"', async () => {
-    mockCarga([veiculo({ ativo: false })])
-    render(<VeiculosLista papel="admin" />)
-    await screen.findByText('ABC-1234')
+  it('o CADASTRO nao some num periodo sem nenhum lancamento', async () => {
+    mockCarga(
+      [veiculo({ id: 'v-1', marca: 'Fiat', modelo: 'Fiorino' }),
+       veiculo({ id: 'v-2', placa: 'XYZ-9876', marca: 'Volkswagen', modelo: 'Kombi' })],
+      [lanc({ veiculo_id: 'v-1', valor: 300, data: '2026-06-02' })],
+    )
+    render(<VeiculosLista periodo="2026-12" />)
+    // Os dois carros continuam listados, com placa e tudo — um carro nao
+    // deixa de existir porque nao abasteceu em dezembro.
+    expect(await screen.findByText('Fiat Fiorino')).toBeInTheDocument()
+    expect(screen.getByText('Volkswagen Kombi')).toBeInTheDocument()
+    expect(screen.getByText(/ABC-1234/)).toBeInTheDocument()
+    expect(screen.getByText(/XYZ-9876/)).toBeInTheDocument()
+  })
+
+  it('o historico do periodo vazio diz "Nenhum lancamento no periodo", nao "indisponivel"', async () => {
+    mockCarga([veiculo()], [])
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+    fireEvent.click(linhaDoVeiculo('Fiat Fiorino'))
+    expect(screen.getByText(/Nenhum lançamento no período/)).toBeInTheDocument()
+  })
+})
+
+describe('VeiculosLista — falha de carregamento dos lancamentos (isolada)', () => {
+  it('o cadastro continua visivel e o gasto vira travessao com role="status"', async () => {
+    mockCarga([veiculo()], null)
+    render(<VeiculosLista periodo="2026-06" />)
+
+    // O cadastro sobreviveu.
+    expect(await screen.findByText('Fiat Fiorino')).toBeInTheDocument()
+    expect(screen.getByText(/ABC-1234/)).toBeInTheDocument()
+
+    // O aviso e status, nao alert: nao derruba a tela.
+    const aviso = await screen.findByRole('status')
+    expect(aviso).toHaveTextContent('Não foi possível carregar os lançamentos')
+
+    // Travessao, NUNCA R$ 0,00 — zero fingiria uma medicao que nao houve.
+    expect(gastoNaLinha('Fiat Fiorino')).toBe('—')
+    expect(screen.queryByText('R$ 0,00')).not.toBeInTheDocument()
+  })
+
+  it('sem lancamentos carregados, os botoes de lancar somem', async () => {
+    mockCarga([veiculo()], null)
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+    expect(screen.queryByRole('button', { name: /Lançar gasolina/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Lançar multa/ })).not.toBeInTheDocument()
+  })
+
+  it('sem CATEGORIAS (lista vazia) tambem nao oferece lancar — categoria nunca e fixada no front', async () => {
+    mockCarga([veiculo()], [], [])
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+    expect(screen.queryByRole('button', { name: /Lançar gasolina/ })).not.toBeInTheDocument()
+  })
+
+  it('401 na busca de lancamentos tambem chama onSessaoExpirada', async () => {
+    mockGet.mockImplementation((rota: string) => {
+      if (rota === '/api/veiculos') return Promise.resolve([veiculo()])
+      return Promise.reject(new ErroApi(401, { erro: 'sessao invalida' }))
+    })
+    const onSessaoExpirada = vi.fn()
+    render(<VeiculosLista onSessaoExpirada={onSessaoExpirada} />)
+    await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalled())
+  })
+})
+
+describe('VeiculosLista — o botao abre o modal de lancamento QUE JA EXISTE, pre-preenchido', () => {
+  it('Gasolina abre o ModalLancamento com a categoria e o veiculo escolhidos', async () => {
+    mockCarga([veiculo({ id: 'v-1', marca: 'Fiat', modelo: 'Fiorino', placa: 'ABC-1234' })], [])
+    render(<VeiculosLista periodo="2026-06" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Lançar gasolina/ }))
+
+    // E o modal de lancamento de verdade (mesmo aria-label de LancamentosLista),
+    // nao uma copia local.
+    expect(screen.getByRole('dialog', { name: 'Novo lançamento' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^categoria$/i)).toHaveValue('Gasolina')
+    expect(screen.getByLabelText(/^veículo$/i)).toHaveValue('v-1')
+  })
+
+  it('Manutenção e Multa pre-preenchem a categoria correspondente', async () => {
+    mockCarga([veiculo({ id: 'v-1' })], [])
+    render(<VeiculosLista periodo="2026-06" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Lançar manutenção/ }))
+    expect(screen.getByLabelText(/^categoria$/i)).toHaveValue('Manutenção dos Carros')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Lançar multa/ }))
+    expect(screen.getByLabelText(/^categoria$/i)).toHaveValue('Multa')
+  })
+
+  it('salvar pelo modal manda veiculo_id e categoria, e o gasto da linha reage sem refetch', async () => {
+    mockCarga([veiculo({ id: 'v-1' })], [])
+    mockPost.mockResolvedValue(lanc({ id: 'novo', veiculo_id: 'v-1', valor: 250, data: '2026-06-14' }))
+    render(<VeiculosLista periodo="2026-06" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Lançar gasolina/ }))
+    fireEvent.change(screen.getByLabelText(/data do lançamento/i), { target: { value: '2026-06-14' } })
+    fireEvent.change(screen.getByLabelText(/valor/i), { target: { value: '250' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/api/lancamentos', expect.objectContaining({
+      categoria: 'Gasolina', veiculo_id: 'v-1', valor: 250,
+    })))
+    await waitFor(() => expect(gastoNaLinha('Fiat Fiorino')).toBe('R$ 250,00'))
+  })
+
+  it('clicar numa linha do historico abre o MESMO modal em modo edicao', async () => {
+    mockCarga(
+      [veiculo({ id: 'v-1' })],
+      [lanc({ id: 'l-9', veiculo_id: 'v-1', valor: 480, data: '2026-06-11', categoria: 'Manutenção dos Carros', descricao: 'Troca de óleo' })],
+    )
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+    fireEvent.click(linhaDoVeiculo('Fiat Fiorino'))
+    fireEvent.click(screen.getByText('Troca de óleo'))
+    expect(screen.getByRole('dialog', { name: 'Editar lançamento' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^veículo$/i)).toHaveValue('v-1')
+  })
+})
+
+describe('VeiculosLista — historico do veiculo', () => {
+  it('a linha expandida lista os lancamentos do periodo, mais recente primeiro', async () => {
+    mockCarga(
+      [veiculo({ id: 'v-1' })],
+      [
+        lanc({ id: 'a', valor: 300, data: '2026-06-02', descricao: 'Posto da BR' }),
+        lanc({ id: 'b', valor: 130, data: '2026-06-20', categoria: 'Multa', descricao: 'Radar' }),
+      ],
+    )
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+    fireEvent.click(linhaDoVeiculo('Fiat Fiorino'))
+
+    expect(screen.getByText(/2 lançamento\(s\) no período/)).toBeInTheDocument()
+    const descricoes = screen.getAllByText(/Posto da BR|Radar/).map(e => e.textContent)
+    expect(descricoes).toEqual(['Radar', 'Posto da BR'])
+  })
+
+  it('com os lancamentos indisponiveis, o historico diz "indisponivel" e nao "nenhum"', async () => {
+    mockCarga([veiculo()], null)
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByRole('status')
+    fireEvent.click(linhaDoVeiculo('Fiat Fiorino'))
+    expect(screen.getByText(/HISTÓRICO — indisponível/)).toBeInTheDocument()
+    expect(screen.queryByText(/Nenhum lançamento no período/)).not.toBeInTheDocument()
+  })
+})
+
+describe('VeiculosLista — o cadastro (admin-only, sem branch de papel)', () => {
+  it('"Novo veiculo" esta sempre presente: a tela e admin-only', async () => {
+    mockCarga([veiculo()], [])
+    render(<VeiculosLista />)
+    await screen.findByText('Fiat Fiorino')
+    expect(screen.getByRole('button', { name: /novo veículo/i })).toBeInTheDocument()
+  })
+
+  it('Editar abre o ModalVeiculo do cadastro', async () => {
+    mockCarga([veiculo()], [])
+    render(<VeiculosLista />)
+    fireEvent.click(await screen.findByRole('button', { name: /Editar — Fiat Fiorino/ }))
+    expect(screen.getByRole('dialog', { name: 'Editar veículo' })).toBeInTheDocument()
+  })
+
+  it('veiculo inativo mostra selo "Inativo" e continua listado', async () => {
+    mockCarga([veiculo({ ativo: false })], [])
+    render(<VeiculosLista />)
+    await screen.findByText('Fiat Fiorino')
     expect(screen.getByText('Inativo')).toBeInTheDocument()
   })
 })
 
-describe('VeiculosLista — permissoes (admin gerencia cadastro, colaborador so pega/devolve)', () => {
-  it('admin ve "Novo veículo" e pode clicar num veiculo para editar', async () => {
-    mockCarga([veiculo()])
-    render(<VeiculosLista papel="admin" />)
-    await screen.findByText('ABC-1234')
-    expect(screen.getByRole('button', { name: /novo veículo/i })).toBeInTheDocument()
-    fireEvent.click(screen.getByText('ABC-1234'))
-    expect(screen.getByRole('dialog', { name: 'Editar veículo' })).toBeInTheDocument()
-  })
-
-  it('colaborador NAO ve "Novo veículo" e clicar no veiculo nao abre o cadastro', async () => {
-    mockCarga([veiculo()])
-    render(<VeiculosLista papel="colaborador" />)
-    await screen.findByText('ABC-1234')
-    expect(screen.queryByRole('button', { name: /novo veículo/i })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByText('ABC-1234'))
-    expect(screen.queryByRole('dialog', { name: 'Editar veículo' })).not.toBeInTheDocument()
-  })
-
-  it('sem papel informado, trata como colaborador (mais restritivo)', async () => {
-    mockCarga([veiculo()])
+describe('VeiculosLista — o check-in/check-out saiu da tela', () => {
+  it('nao ha mais Pegar, Devolver, Disponivel nem "Com fulano desde"', async () => {
+    mockCarga([veiculo()], [])
     render(<VeiculosLista />)
-    await screen.findByText('ABC-1234')
-    expect(screen.queryByRole('button', { name: /novo veículo/i })).not.toBeInTheDocument()
+    await screen.findByText('Fiat Fiorino')
+    expect(screen.queryByRole('button', { name: 'Pegar' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Devolver' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Disponível')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Com .* desde/)).not.toBeInTheDocument()
   })
 
-  it('colaborador ve os botoes Pegar/Devolver normalmente', async () => {
-    mockCarga([veiculo({ uso_aberto: null })], [funcionario()])
-    render(<VeiculosLista papel="colaborador" />)
-    await screen.findByText('ABC-1234')
-    expect(screen.getByRole('button', { name: 'Pegar' })).toBeInTheDocument()
-  })
-})
-
-describe('VeiculosLista — pegar', () => {
-  it('clicar em Pegar abre o seletor de funcionario', async () => {
-    mockCarga([veiculo()], [funcionario({ id: 'f-1', nome: 'João' }), funcionario({ id: 'f-2', nome: 'Maria' })])
-    render(<VeiculosLista papel="colaborador" />)
-    await screen.findByText('ABC-1234')
-    fireEvent.click(screen.getByRole('button', { name: 'Pegar' }))
-    expect(screen.getByRole('dialog', { name: /Pegar ABC-1234/ })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'João' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Maria' })).toBeInTheDocument()
-  })
-
-  it('confirmar sem escolher funcionario mostra erro e nao chama a API', async () => {
-    mockCarga([veiculo()], [funcionario()])
-    render(<VeiculosLista papel="colaborador" />)
-    await screen.findByText('ABC-1234')
-    fireEvent.click(screen.getByRole('button', { name: 'Pegar' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
-    expect(screen.getByRole('alert')).toHaveTextContent('Escolha quem está pegando o carro.')
-    expect(mockPost).not.toHaveBeenCalled()
-  })
-
-  it('confirmar com funcionario escolhido chama POST /:id/pegar e atualiza a linha', async () => {
-    mockCarga([veiculo({ id: 'v1', placa: 'ABC-1234' })], [funcionario({ id: 'f-1', nome: 'João' })])
-    mockPost.mockResolvedValue({ id: 'u1', funcionario_id: 'f-1', saida_em: new Date().toISOString() })
-    render(<VeiculosLista papel="colaborador" />)
-    await screen.findByText('ABC-1234')
-    fireEvent.click(screen.getByRole('button', { name: 'Pegar' }))
-    fireEvent.change(screen.getByLabelText(/funcionário/i), { target: { value: 'f-1' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
-
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/api/veiculos/v1/pegar', { funcionario_id: 'f-1' }))
-    expect(await screen.findByText(/Com João desde/)).toBeInTheDocument()
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-  })
-
-  it('409 ao pegar (concorrencia) mostra erro inline, nao fecha o dialogo', async () => {
-    mockCarga([veiculo()], [funcionario({ id: 'f-1', nome: 'João' })])
-    mockPost.mockRejectedValue(new ErroApi(409, { erro: 'este veiculo ja esta em uso' }))
-    render(<VeiculosLista papel="colaborador" />)
-    await screen.findByText('ABC-1234')
-    fireEvent.click(screen.getByRole('button', { name: 'Pegar' }))
-    fireEvent.change(screen.getByLabelText(/funcionário/i), { target: { value: 'f-1' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Este veículo acabou de ser pego por outra pessoa.')
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
-  })
-
-  it('cancelar o dialogo de pegar fecha sem chamar a API', async () => {
-    mockCarga([veiculo()], [funcionario()])
-    render(<VeiculosLista papel="colaborador" />)
-    await screen.findByText('ABC-1234')
-    fireEvent.click(screen.getByRole('button', { name: 'Pegar' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(mockPost).not.toHaveBeenCalled()
-  })
-
-  it('401 ao pegar chama onSessaoExpirada', async () => {
-    mockCarga([veiculo()], [funcionario({ id: 'f-1' })])
-    mockPost.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
-    const onSessaoExpirada = vi.fn()
-    render(<VeiculosLista papel="colaborador" onSessaoExpirada={onSessaoExpirada} />)
-    await screen.findByText('ABC-1234')
-    fireEvent.click(screen.getByRole('button', { name: 'Pegar' }))
-    fireEvent.change(screen.getByLabelText(/funcionário/i), { target: { value: 'f-1' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }))
-    await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalledOnce())
-  })
-})
-
-describe('VeiculosLista — devolver', () => {
-  it('clicar em Devolver chama POST /:id/devolver e a linha volta a "Disponível"', async () => {
-    const desde = new Date().toISOString()
-    mockCarga([veiculo({
-      id: 'v1', uso_aberto: { id: 'u1', funcionario_id: 'f-1', funcionario_nome: 'João', desde },
-    })])
-    mockPost.mockResolvedValue({ id: 'u1', volta_em: new Date().toISOString() })
-    render(<VeiculosLista papel="colaborador" />)
-    await screen.findByText(/Com João desde/)
-    fireEvent.click(screen.getByRole('button', { name: 'Devolver' }))
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/api/veiculos/v1/devolver'))
-    expect(await screen.findByText('Disponível')).toBeInTheDocument()
-  })
-
-  it('401 ao devolver chama onSessaoExpirada', async () => {
-    const desde = new Date().toISOString()
-    mockCarga([veiculo({
-      uso_aberto: { id: 'u1', funcionario_id: 'f-1', funcionario_nome: 'João', desde },
-    })])
-    mockPost.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
-    const onSessaoExpirada = vi.fn()
-    render(<VeiculosLista papel="colaborador" onSessaoExpirada={onSessaoExpirada} />)
-    await screen.findByText(/Com João desde/)
-    fireEvent.click(screen.getByRole('button', { name: 'Devolver' }))
-    await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalledOnce())
+  it('a tela nao busca mais /api/funcionarios/opcoes (a rota deixou de existir)', async () => {
+    mockCarga([veiculo()], [])
+    render(<VeiculosLista />)
+    await screen.findByText('Fiat Fiorino')
+    const rotas = mockGet.mock.calls.map(c => c[0])
+    expect(rotas).not.toContain('/api/funcionarios/opcoes')
   })
 })

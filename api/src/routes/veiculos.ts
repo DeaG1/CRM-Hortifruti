@@ -2,10 +2,23 @@ import { Hono } from 'hono'
 import { withTenant, type EnvBanco } from '../db'
 import { exigirSessao, exigirAdmin, type Vars } from '../middleware/sessao'
 
-// Molde: api/src/routes/clientes.ts (sanear/paraJson/validacao/erros) e
-// api/src/routes/produtos.ts (leitura liberada pro colaborador, escrita so
-// admin). Especifico desta rota: as duas acoes operacionais (pegar/devolver)
-// tambem sao liberadas pro colaborador — ver bloco de permissoes abaixo.
+// Molde: api/src/routes/clientes.ts (sanear/paraJson/validacao/erros).
+//
+// ESTA ROTA ENCOLHEU. Ela tinha, alem do CRUD, tres endpoints do controle de
+// uso: POST /:id/pegar, POST /:id/devolver e GET /:id/historico (quem esta
+// com qual carro). O dono do negocio usou e concluiu que nao serve — o que
+// ele quer registrar no carro e o CUSTO dele, nao a posse. Os tres sairam,
+// junto com o agregado de uso aberto no GET /, o `paraJsonUso` e as
+// mensagens de erro que so aquelas rotas alcancavam.
+//
+// A tabela `veiculo_usos` continua no banco, com as linhas que ja tinha, e
+// nao e escrita nem lida por ninguem — ver db/migrations/013_lancamentos_veiculo.sql
+// para o que ficou orfa e o que seria preciso para remove-la.
+//
+// O gasto de cada veiculo NAO e servido daqui: e derivado no front a partir
+// de GET /api/lancamentos (`veiculo_id`, migration 013), do mesmo jeito que
+// a folha de cada funcionario. Um agregado proprio aqui duplicaria a conta
+// que ja existe em outro lugar e teria de repetir o recorte de periodo.
 
 const CAMPOS = ['placa', 'modelo', 'marca', 'ano', 'ativo', 'obs'] as const
 
@@ -43,43 +56,6 @@ function paraJson<T extends Record<string, unknown>>(linha: T) {
   return { ...resto, ano: linha.ano == null ? null : Number(linha.ano) }
 }
 
-/**
- * GET / traz, para cada veiculo, o uso em aberto se houver — agregado numa
- * unica query (left join), nunca um por carro: com 10 carros seriam 11
- * requisicoes, e cada ida ao banco custa ~116ms medidos em producao (ver
- * comentario em api/src/db.ts). O indice parcial `veiculo_usos_aberto_unico`
- * garante no maximo 1 uso aberto por veiculo, entao o left join nunca
- * duplica uma linha de veiculo.
- */
-interface LinhaVeiculoComUso {
-  [campo: string]: unknown
-  uso_id: string | null
-  uso_funcionario_id: string | null
-  uso_funcionario_nome: string | null
-  uso_saida_em: Date | string | null
-}
-
-function paraJsonComUso(linha: LinhaVeiculoComUso) {
-  const { uso_id, uso_funcionario_id, uso_funcionario_nome, uso_saida_em, ...resto } = linha
-  return {
-    ...paraJson(resto),
-    uso_aberto: uso_id
-      ? {
-          id: uso_id,
-          funcionario_id: uso_funcionario_id,
-          funcionario_nome: uso_funcionario_nome,
-          desde: uso_saida_em,
-        }
-      : null,
-  }
-}
-
-/** `tenant_id` sai do corpo pelo mesmo motivo de paraJson acima. */
-function paraJsonUso<T extends Record<string, unknown>>(linha: T) {
-  const { tenant_id: _tenantId, ...resto } = linha
-  return resto
-}
-
 function numeroNaoInteiro(v: unknown): boolean {
   if (v === undefined || v === null) return false
   const n = Number(v)
@@ -105,47 +81,39 @@ function placaEmBranco(placa: unknown): boolean {
 }
 
 /**
- * `veiculos` tem uma unica constraint unique (placa por tenant, ver
- * veiculos_placa_unica na migration); `veiculo_usos` tem outra
- * (veiculo_usos_aberto_unico, a regra central desta feature). As duas sao
- * 23505 — o nome da constraint (nao o texto da mensagem do Postgres, que
- * pode mudar entre versoes/locale) e o que distingue qual foi violada.
- */
-const MENSAGENS_UNICO: Record<string, string> = {
-  veiculos_placa_unica: 'ja existe um veiculo com essa placa',
-  veiculo_usos_aberto_unico: 'este veiculo ja esta em uso',
-}
-
-const MENSAGENS_CHECK: Record<string, string> = {
-  veiculo_usos_volta_apos_saida: 'volta nao pode ser antes da saida',
-}
-
-const MENSAGENS_FK: Record<string, string> = {
-  veiculo_usos_veiculo_fk: 'veiculo nao encontrado',
-  veiculo_usos_funcionario_fk: 'funcionario nao encontrado',
-}
-
-/**
- * Mapeia SQLSTATEs conhecidos do Postgres para respostas {erro} previsiveis.
- * Mesmo contrato de clientes.ts/produtos.ts — a diferenca aqui e que 23505
- * pode vir de DUAS constraints diferentes (placa duplicada vs. checkin
- * duplicado), entao o fallback so aparece se uma terceira, desconhecida,
- * aparecer no futuro.
+ * Mapeia SQLSTATEs conhecidos do Postgres para respostas {erro} previsiveis
+ * em vez de deixar a excecao subir crua. Mesmo contrato de
+ * clientes.ts/produtos.ts.
+ *
+ * 23505 tem uma origem so: `veiculos_placa_unica` (011). A tabela nao tem
+ * outra constraint unique alcancavel — `veiculos_tenant_id_uk` e a chave
+ * candidata que a FK composta exige e so seria violada por um `id` duplicado,
+ * que a PK ja impede. (Este mapa tinha DUAS entradas ate a remocao do
+ * controle de uso: `veiculo_usos_aberto_unico` era a outra. Com aquela rota
+ * fora, a distincao por nome de constraint deixou de ter o que distinguir.)
+ *
+ * 23514 nao aparece aqui porque `veiculos` nao tem nenhuma CHECK — a unica
+ * que este arquivo tratava era `veiculo_usos_volta_apos_saida`, de uma
+ * tabela que este arquivo nao escreve mais.
+ *
+ * 23503 tem tambem uma origem so, e ela e o residuo visivel da tabela orfa:
+ * `veiculo_usos_veiculo_fk` e `on delete restrict` (011), entao um carro que
+ * tenha linha de uso do tempo do check-in/check-out continua barrado na
+ * exclusao. Nao e um bloqueio que a feature atual queira — a despesa por
+ * veiculo usa `on delete set null` justamente para nao barrar nada (013) —
+ * mas e o que o banco faz enquanto a tabela existir, e uma mensagem que
+ * mente ("veiculo nao encontrado", que era o texto anterior, herdado do
+ * check-in) e pior que o bloqueio. `ativo = false` segue sendo o caminho
+ * para aposentar o carro sem excluir.
  */
 export function respostaDeErroPg(err: unknown): { corpo: { erro: string }; status: 409 | 400 } | null {
   const e = err as { code?: string; constraint_name?: string }
-  if (e.code === '23505') {
-    const mensagem = (e.constraint_name && MENSAGENS_UNICO[e.constraint_name]) ?? 'registro duplicado'
-    return { corpo: { erro: mensagem }, status: 409 }
-  }
-  if (e.code === '23514') {
-    const mensagem = (e.constraint_name && MENSAGENS_CHECK[e.constraint_name])
-      ?? 'dado invalido para um dos campos'
-    return { corpo: { erro: mensagem }, status: 400 }
-  }
+  if (e.code === '23505') return { corpo: { erro: 'ja existe um veiculo com essa placa' }, status: 409 }
   if (e.code === '23503') {
-    const mensagem = (e.constraint_name && MENSAGENS_FK[e.constraint_name]) ?? 'referencia invalida'
-    return { corpo: { erro: mensagem }, status: 400 }
+    return {
+      corpo: { erro: 'este veiculo tem historico de uso registrado e nao pode ser excluido' },
+      status: 409,
+    }
   }
   return null
 }
@@ -153,7 +121,7 @@ export function respostaDeErroPg(err: unknown): { corpo: { erro: string }; statu
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** Sem isto, um id malformado chega intacto ao `where id = $1` e o Postgres
- * lanca "invalid input syntax for type uuid" sem tratamento. */
+ * lanca "invalid input syntax for type uuid". */
 function idValido(id: string): boolean {
   return UUID_RE.test(id)
 }
@@ -164,48 +132,33 @@ export const veiculos = new Hono<{
 }>()
 
 /**
- * Ler veiculos (lista, ficha e historico) e pegar/devolver exigem so sessao;
- * cadastrar, editar e excluir o CADASTRO do veiculo exige admin.
+ * ADMIN EM TUDO, inclusive na leitura — e isso MUDOU com esta entrega.
  *
- * A tela de Veiculos e visivel para o colaborador (web/src/telas.ts nao
- * inclui 'veiculos' em ADMIN_ONLY_SCREENS) — e ele quem de fato pega e
- * devolve o carro no dia a dia; se essa acao dependesse do admin estar por
- * perto pra clicar, ninguem registraria nada (o problema que a feature
- * inteira existe pra resolver). Cadastrar/editar/excluir o carro em si
- * continua restrito ao admin, mesmo racional de clientes.ts/produtos.ts:
- * a permissao e sobre GERENCIAR o cadastro, nao sobre USAR o carro.
+ * Enquanto a tela era check-in/check-out, ler a lista e pegar/devolver eram
+ * abertos ao colaborador: e ele quem pega o carro no dia a dia, e uma acao
+ * que dependesse do admin estar por perto nao seria registrada por ninguem.
+ * Essa acao deixou de existir. O que a tela de Veiculos mostra agora e
+ * quanto cada carro custou no periodo — que sai de GET /api/lancamentos,
+ * admin-only desde sempre (dado financeiro, mesma classe de Financeiro e da
+ * folha em Funcionarios).
  *
- * `exigirAdmin` e aplicado so em '/', '/:id' com POST/PUT/DELETE — nao em
- * '*' como em clientes.ts/produtos.ts — porque '*' tambem bateria em
- * '/:id/pegar' e '/:id/devolver' (POST), que precisam continuar abertos
- * pro colaborador.
+ * Manter a leitura aberta deixaria o colaborador com uma tela que so lista
+ * placas, sem nenhuma acao e sem o numero que e o motivo dela existir — e,
+ * pior, uma tela que dispararia um 403 garantido no proprio carregamento. A
+ * tela acompanha: 'veiculos' entrou em ADMIN_ONLY_SCREENS (web/src/telas.ts),
+ * entao o item some do menu do colaborador em vez de abrir e falhar.
  *
- * "Encerrar uso de outra pessoa" (o caso do esquecimento, decisao do dono
- * do negocio) usa o MESMO endpoint de devolver: /:id/devolver fecha
- * qualquer uso aberto daquele carro, nao so o do proprio usuario logado —
- * nao ha vinculo entre "quem esta devolvendo" (a sessao) e "quem pegou"
- * (funcionario_id do uso). Isso e deliberado: exigir que fosse a mesma
- * pessoa impediria justamente o cenario que a decisao do dono cobre (o
- * admin fechando um uso que outro funcionario esqueceu aberto).
+ * `exigirAdmin` volta a ser aplicado em '*' (como clientes.ts e
+ * lancamentos.ts) agora que nao ha rota excecao — era por causa de
+ * '/:id/pegar' e '/:id/devolver' que ele precisava ser declarado rota a
+ * rota.
  */
-veiculos.use('*', exigirSessao)
-veiculos.post('/', exigirAdmin)
-veiculos.put('/:id', exigirAdmin)
-veiculos.delete('/:id', exigirAdmin)
+veiculos.use('*', exigirSessao, exigirAdmin)
 
 veiculos.get('/', async (c) => {
-  const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx => tx<LinhaVeiculoComUso[]>`
-    select
-      v.*,
-      u.id as uso_id,
-      u.funcionario_id as uso_funcionario_id,
-      f.nome as uso_funcionario_nome,
-      u.saida_em as uso_saida_em
-    from veiculos v
-    left join veiculo_usos u on u.veiculo_id = v.id and u.volta_em is null
-    left join funcionarios f on f.id = u.funcionario_id
-    order by v.placa`)
-  return c.json(linhas.map(paraJsonComUso))
+  const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
+    tx`select * from veiculos order by placa`)
+  return c.json(linhas.map(paraJson))
 })
 
 veiculos.get('/:id', async (c) => {
@@ -214,30 +167,6 @@ veiculos.get('/:id', async (c) => {
   const [linha] = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
     tx`select * from veiculos where id = ${id}`)
   return linha ? c.json(paraJson(linha)) : c.json({ erro: 'nao encontrado' }, 404)
-})
-
-/**
- * Historico completo de usos do veiculo (abertos e fechados), do mais
- * recente pro mais antigo, com o nome do funcionario ja resolvido — mesmo
- * motivo de GET / trazer o uso aberto agregado: uma tela de historico nao
- * deveria disparar uma requisicao por linha so pra saber o nome de quem
- * pegou.
- */
-veiculos.get('/:id/historico', async (c) => {
-  const id = c.req.param('id')
-  if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
-  const resultado = await withTenant(c.get('sql'), c.get('tenantId'), async (tx) => {
-    const [veiculo] = await tx`select id from veiculos where id = ${id}`
-    if (!veiculo) return null
-    return tx`
-      select u.*, f.nome as funcionario_nome
-      from veiculo_usos u
-      join funcionarios f on f.id = u.funcionario_id
-      where u.veiculo_id = ${id}
-      order by u.saida_em desc`
-  })
-  if (!resultado) return c.json({ erro: 'nao encontrado' }, 404)
-  return c.json(resultado.map(paraJsonUso))
 })
 
 veiculos.post('/', async (c) => {
@@ -287,11 +216,16 @@ veiculos.put('/:id', async (c) => {
 veiculos.delete('/:id', async (c) => {
   const id = c.req.param('id')
   if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
-  // veiculo_usos_veiculo_fk e `on delete restrict` (migration 011): excluir
-  // um veiculo com historico de uso (aberto ou fechado) e barrado pelo
-  // banco — perder esse historico apagaria justamente o dado que a feature
-  // existe pra guardar. `ativo=false` (PUT) e o caminho pra aposentar um
-  // carro sem apagar o historico.
+  // Excluir um veiculo com LANCAMENTOS e permitido: `lancamentos_veiculo_fk`
+  // e `on delete set null` (013) — a despesa aconteceu, o dinheiro saiu, e o
+  // registro financeiro continua valido sem saber de qual carro foi. O total
+  // de custos do periodo nao pode mudar porque alguem arrumou o cadastro da
+  // frota.
+  //
+  // Ja um veiculo com HISTORICO DE USO antigo continua barrado pelo banco
+  // (`veiculo_usos_veiculo_fk`, `on delete restrict`, migration 011) e vira
+  // 409 com mensagem propria — ver respostaDeErroPg acima e o comentario
+  // final de 013_lancamentos_veiculo.sql.
   try {
     const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
       tx`delete from veiculos where id = ${id} returning id`)
@@ -301,66 +235,4 @@ veiculos.delete('/:id', async (c) => {
     if (mapeado) return c.json(mapeado.corpo, mapeado.status)
     throw err
   }
-})
-
-/**
- * Abre um uso: registra que `funcionario_id` pegou este veiculo agora. O
- * indice parcial `veiculo_usos_aberto_unico` e quem de fato impede dois usos
- * abertos do mesmo carro — aqui so validamos o formato do corpo e traduzimos
- * a violacao (23505) em 409 com mensagem clara.
- *
- * O mesmo funcionario pode ter dois carros em aberto ao mesmo tempo — decisao
- * do dono do negocio (deixa um na oficina, pega outro) — por isso NAO ha
- * nenhuma checagem de "este funcionario ja esta com um carro" aqui.
- */
-veiculos.post('/:id/pegar', async (c) => {
-  const id = c.req.param('id')
-  if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
-  const corpo = await c.req.json()
-  const funcionarioId = (corpo as Record<string, unknown>).funcionario_id
-  if (typeof funcionarioId !== 'string' || !idValido(funcionarioId)) {
-    return c.json({ erro: 'funcionario_id invalido' }, 400)
-  }
-  const obsBruta = (corpo as Record<string, unknown>).obs
-  const obs = typeof obsBruta === 'string' ? obsBruta : ''
-  const tenantId = c.get('tenantId')
-  try {
-    const resultado = await withTenant(c.get('sql'), tenantId, async (tx) => {
-      // Confirma que o veiculo existe neste tenant antes do insert: sem
-      // isso, um id de veiculo inexistente (ou de outro tenant) cairia na
-      // FK composta e viraria 23503 — "referencia invalida" e uma mensagem
-      // pior que "veiculo nao encontrado" pra esse caso, e o id ja veio pela
-      // URL (nao pelo corpo), entao merece o mesmo tratamento de GET/PUT/DELETE.
-      const [veiculo] = await tx`select id from veiculos where id = ${id}`
-      if (!veiculo) return null
-      const [uso] = await tx`insert into veiculo_usos ${
-        tx({ tenant_id: tenantId, veiculo_id: id, funcionario_id: funcionarioId, obs })
-      } returning *`
-      return uso
-    })
-    if (!resultado) return c.json({ erro: 'veiculo nao encontrado' }, 404)
-    return c.json(paraJsonUso(resultado), 201)
-  } catch (err) {
-    const mapeado = respostaDeErroPg(err)
-    if (mapeado) return c.json(mapeado.corpo, mapeado.status)
-    throw err
-  }
-})
-
-/**
- * Fecha o uso em aberto deste veiculo (`volta_em = now()`). Nao verifica
- * quem esta devolvendo contra quem pegou — ver comentario do bloco de
- * permissoes acima: e o MESMO endpoint que cobre tanto "o colaborador
- * devolveu o carro que ele mesmo pegou" quanto "o admin encerrou um uso que
- * outra pessoa esqueceu aberto" (a lista destaca esses casos, ha mais de
- * 12h, mas nao fecha sozinha — ver web/src/screens/VeiculosLista.tsx).
- */
-veiculos.post('/:id/devolver', async (c) => {
-  const id = c.req.param('id')
-  if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
-  const [uso] = await withTenant(c.get('sql'), c.get('tenantId'), tx => tx`
-    update veiculo_usos set volta_em = now()
-    where veiculo_id = ${id} and volta_em is null
-    returning *`)
-  return uso ? c.json(paraJsonUso(uso)) : c.json({ erro: 'nao ha uso em aberto para este veiculo' }, 404)
 })

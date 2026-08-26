@@ -12,9 +12,18 @@ import { exigirSessao, exigirAdmin, type Vars } from '../middleware/sessao'
  * Categoria livre corromperia os agrupamentos do relatorio financeiro
  * (que soma por categoria), por isso e validada como enum fechado, nao
  * como texto livre — diferente de `descricao`, que e texto livre mesmo.
+ *
+ * 'Multa' NAO vem do prototipo: foi pedida pelo dono do negocio junto com a
+ * despesa por veiculo ("gasolina, multa e manutencao"). Ate aqui uma multa
+ * so cabia em 'Outros', onde ela desaparecia dentro de um balde generico —
+ * e multa e justamente um custo que se quer ver separado, porque e o unico
+ * dos tres que da pra fazer cair. Entra ao lado das outras duas despesas de
+ * carro, e nao no fim da lista, porque a ORDEM daqui e a ordem do `<select>`
+ * do front (e `categorias[0]` e o valor inicial de um lancamento novo —
+ * inserir no comeco mudaria esse default sem que ninguem pedisse).
  */
 export const CATEGORIAS = [
-  'Frete', 'Gasolina', 'Manutenção dos Carros', 'Salário', 'Adiantamento de salário',
+  'Frete', 'Gasolina', 'Manutenção dos Carros', 'Multa', 'Salário', 'Adiantamento de salário',
   'Vale-alimentação', 'Vale-transporte', 'FGTS', 'INSS', 'Simples Nacional',
   'Parcelamento Impostos', 'Pagamento de conta de sócio', 'Outros',
 ] as const
@@ -28,11 +37,40 @@ type Categoria = (typeof CATEGORIAS)[number]
  */
 const CATEGORIAS_COM_FUNCIONARIO = new Set<string>(['Salário', 'Adiantamento de salário'])
 
+/**
+ * `veiculo_id` so faz sentido nas despesas do PROPRIO carro — e o que
+ * responde "quanto este veiculo custou no periodo". Mesma mecanica de
+ * CATEGORIAS_COM_FUNCIONARIO acima: fora desta lista o campo enviado e
+ * ignorado (nao rejeitado), porque nao e erro de quem chama, e um campo que
+ * nao se aplica aquela categoria.
+ *
+ * 'Frete' FICA DE FORA, e essa foi a unica das quatro candidatas que exigiu
+ * decisao:
+ *
+ *  - 'Gasolina', 'Manutenção dos Carros' e 'Multa' so existem porque a
+ *    empresa tem carro. Nao ha como gastar nelas sem que exista um veiculo
+ *    do outro lado — o nome da segunda ate diz "dos Carros".
+ *  - 'Frete' e o oposto: e o transporte COMPRADO de terceiro, o caminhao que
+ *    nao e da casa. Atribui-lo a uma placa da frota afirmaria que aquele
+ *    carro custou um dinheiro que na verdade foi pago a outra empresa, e o
+ *    "gasto do veiculo" — que e o numero inteiro desta feature — passaria a
+ *    misturar custo proprio com servico contratado. Quando o frete e feito
+ *    com carro proprio, o custo dele JA aparece: e a gasolina e a manutencao
+ *    daquele carro, lancadas nas suas proprias categorias. Contar o frete
+ *    junto seria contar o mesmo trajeto duas vezes na conta do mesmo carro.
+ *
+ * A assimetria e deliberada: incluir 'Frete' depois e uma linha nesta lista;
+ * desfazer meses de despesa atribuida ao carro errado exige achar e corrigir
+ * cada lancamento. Na duvida, o campo fica nulo — que e o valor honesto para
+ * "nao se sabe de qual carro foi", nao um palpite gravado.
+ */
+const CATEGORIAS_COM_VEICULO = new Set<string>(['Gasolina', 'Manutenção dos Carros', 'Multa'])
+
 function categoriaValida(v: unknown): v is Categoria {
   return typeof v === 'string' && (CATEGORIAS as readonly string[]).includes(v)
 }
 
-const CAMPOS = ['data', 'categoria', 'descricao', 'valor', 'funcionario_id'] as const
+const CAMPOS = ['data', 'categoria', 'descricao', 'valor', 'funcionario_id', 'veiculo_id'] as const
 
 type Lancamento = {
   data: string
@@ -40,6 +78,7 @@ type Lancamento = {
   descricao: string
   valor: number
   funcionario_id: string | null
+  veiculo_id: string | null
 }
 
 /** Mantem so os campos conhecidos — ignora qualquer extra vindo do cliente
@@ -172,6 +211,26 @@ async function funcionarioPertenceAoTenant(sql: Sql, tenantId: string, funcionar
   return linhas.length > 0
 }
 
+/**
+ * O mesmo de `funcionarioPertenceAoTenant` acima, para veiculos, e pelo
+ * mesmo motivo — inclusive o mesmo furo: a FK composta
+ * `lancamentos_veiculo_fk` (013) e quem de fato torna impossivel referenciar
+ * o carro de outra empresa, mas ela responde com 23503 cru. Esta checagem
+ * roda antes so para o usuario receber 400 com mensagem util em vez de um
+ * erro do banco. As duas camadas existem de proposito: se um dia esta funcao
+ * for esquecida numa rota nova, a do banco ainda segura.
+ *
+ * Duas funcoes quase iguais em vez de uma generica com o nome da tabela por
+ * parametro: montar identificador de tabela dinamicamente numa query e
+ * exatamente o tipo de indirecao que esconde de quem le O QUE esta sendo
+ * consultado, para economizar tres linhas.
+ */
+async function veiculoPertenceAoTenant(sql: Sql, tenantId: string, veiculoId: string): Promise<boolean> {
+  const linhas = await withTenant(sql, tenantId, tx =>
+    tx`select 1 from veiculos where id = ${veiculoId}`)
+  return linhas.length > 0
+}
+
 export const lancamentos = new Hono<{
   Bindings: EnvBanco
   Variables: Vars
@@ -217,6 +276,8 @@ lancamentos.post('/', async (c) => {
   // rejeitado) — nao e erro do usuario, e um campo que nao se aplica aquela
   // categoria (ver CATEGORIAS_COM_FUNCIONARIO acima).
   if (!CATEGORIAS_COM_FUNCIONARIO.has(dados.categoria)) dados.funcionario_id = null
+  // Mesma regra, mesmo motivo, para o veiculo (ver CATEGORIAS_COM_VEICULO).
+  if (!CATEGORIAS_COM_VEICULO.has(dados.categoria)) dados.veiculo_id = null
 
   const tenantId = c.get('tenantId')
   const funcionarioId = dados.funcionario_id
@@ -226,6 +287,16 @@ lancamentos.post('/', async (c) => {
     }
     if (!await funcionarioPertenceAoTenant(c.get('sql'), tenantId, funcionarioId)) {
       return c.json({ erro: 'funcionario invalido' }, 400)
+    }
+  }
+
+  const veiculoId = dados.veiculo_id
+  if (veiculoId) {
+    if (typeof veiculoId !== 'string' || !idValido(veiculoId)) {
+      return c.json({ erro: 'veiculo invalido' }, 400)
+    }
+    if (!await veiculoPertenceAoTenant(c.get('sql'), tenantId, veiculoId)) {
+      return c.json({ erro: 'veiculo invalido' }, 400)
     }
   }
 
@@ -271,12 +342,28 @@ lancamentos.put('/:id', async (c) => {
   //  - um PUT que so envia funcionario_id, sem tocar em categoria, correria
   //    o risco de vincular um funcionario a um lancamento cuja categoria
   //    atual nao suporta o campo.
+  //
+  // `veiculo_id` entra nos dois ramos com a MESMA regra do funcionario, so
+  // trocando o sujeito, e a leitura da categoria gravada e feita uma vez so
+  // para os dois. A diferenca entre os ramos importa: quando a categoria
+  // MUDA, os dois vinculos sao zerados mesmo que nao venham no corpo (e o
+  // caso que o comentario acima descreve); quando ela NAO muda, so se mexe
+  // no campo que o corpo de fato enviou — zerar o outro apagaria um vinculo
+  // que ninguem pediu para apagar.
   if ('categoria' in dados) {
-    if (!CATEGORIAS_COM_FUNCIONARIO.has(dados.categoria as string)) dados.funcionario_id = null
-  } else if ('funcionario_id' in dados && dados.funcionario_id) {
+    const categoria = dados.categoria as string
+    if (!CATEGORIAS_COM_FUNCIONARIO.has(categoria)) dados.funcionario_id = null
+    if (!CATEGORIAS_COM_VEICULO.has(categoria)) dados.veiculo_id = null
+  } else if (('funcionario_id' in dados && dados.funcionario_id) || ('veiculo_id' in dados && dados.veiculo_id)) {
     const [atual] = await withTenant(sql, tenantId, tx =>
       tx`select categoria from lancamentos where id = ${id}`)
-    if (!atual || !CATEGORIAS_COM_FUNCIONARIO.has(atual.categoria)) dados.funcionario_id = null
+    const categoria = atual?.categoria as string | undefined
+    if ('funcionario_id' in dados && (!categoria || !CATEGORIAS_COM_FUNCIONARIO.has(categoria))) {
+      dados.funcionario_id = null
+    }
+    if ('veiculo_id' in dados && (!categoria || !CATEGORIAS_COM_VEICULO.has(categoria))) {
+      dados.veiculo_id = null
+    }
   }
 
   const funcionarioId = dados.funcionario_id
@@ -286,6 +373,16 @@ lancamentos.put('/:id', async (c) => {
     }
     if (!await funcionarioPertenceAoTenant(sql, tenantId, funcionarioId)) {
       return c.json({ erro: 'funcionario invalido' }, 400)
+    }
+  }
+
+  const veiculoId = dados.veiculo_id
+  if (veiculoId) {
+    if (typeof veiculoId !== 'string' || !idValido(veiculoId)) {
+      return c.json({ erro: 'veiculo invalido' }, 400)
+    }
+    if (!await veiculoPertenceAoTenant(sql, tenantId, veiculoId)) {
+      return c.json({ erro: 'veiculo invalido' }, 400)
     }
   }
 

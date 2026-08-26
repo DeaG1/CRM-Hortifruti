@@ -74,7 +74,7 @@ function perdaDaApi(campos: { un: string; qtd: number; qtd_kg: number | null }):
 }
 
 const lancamento = (over: Partial<Lancamento> = {}): Lancamento => ({
-  id: 'l1', data: '2026-06-10', categoria: 'Frete', descricao: '', valor: 0, funcionario_id: null, ...over,
+  id: 'l1', data: '2026-06-10', categoria: 'Frete', descricao: '', valor: 0, funcionario_id: null, veiculo_id: null, ...over,
 } as Lancamento)
 
 const cliente = (over: Partial<Cliente> = {}): Cliente => ({

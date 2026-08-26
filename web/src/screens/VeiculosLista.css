@@ -1,11 +1,17 @@
-/* Molde: SaidasLista.css. Tokens do produto: fundo #ece8db, superfície
-   #fffefa, texto #2a2a24, suave #6a685c, linha #d8d3c2, acento #5a7d3a.
-   Semáforo: disponível #3f8f5b, em uso #c79320, aberto há muito #c2502f. */
+/* Molde: FuncionariosLista.css — a tela passou a ter a mesma estrutura
+   (cartões do período, linha que expande com o histórico, botões de lançar).
+   Tokens do produto: fundo #ece8db, superfície #fffefa, texto #2a2a24, suave
+   #6a685c, linha #d8d3c2, acento #5a7d3a.
+
+   Saíram daqui, junto com o check-in/check-out, as regras de status
+   (.veiculos-status--disponivel / --em-uso / --antigo, o semáforo de "aberto
+   há muito tempo"), os botões Pegar/Devolver e o diálogo de escolher
+   funcionário (.veiculos-pegar-*). */
 
 .veiculos-estado {
   padding: 30px 4px;
   font-size: 14px;
-  color: #6a685c;
+  color: #5a584a;
 }
 
 .veiculos-estado--erro {
@@ -13,30 +19,20 @@
   font-weight: 600;
 }
 
-.veiculos-vazio {
-  background: #fffefa;
-  border: 1px solid #d8d3c2;
-  border-radius: 13px;
-  padding: 40px 18px;
-  text-align: center;
-  max-width: 620px;
-}
-
-.veiculos-vazio-titulo {
-  font-size: 14px;
-  font-weight: 600;
-  color: #2a2a24;
-}
-
-.veiculos-vazio-sub {
-  font-size: 12.5px;
-  color: #6a685c;
-  margin-top: 4px;
-  margin-bottom: 16px;
-}
-
 .veiculos-lista {
   max-width: 1180px;
+}
+
+/* ---------- aviso de falha isolada (gasto indisponivel) ---------- */
+
+.veiculos-aviso-gasto {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  background: #f6efd8;
+  border: 1px solid #e5d6a8;
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: #7a6118;
 }
 
 /* ---------- topo ---------- */
@@ -45,13 +41,15 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  row-gap: 10px;
+  flex-wrap: wrap;
   margin-bottom: 16px;
 }
 
 .veiculos-dica {
-  flex: 1;
+  flex: 1 1 260px;
   font-size: 12.5px;
-  color: #6a685c;
+  color: #8a8775;
 }
 
 .veiculos-botao-novo {
@@ -74,49 +72,140 @@
   background: #4a6b2e;
 }
 
+.veiculos-botao-novo-icone {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* ---------- cartoes ---------- */
+
+/* Cinco: cadastro, gasto total e uma por categoria de despesa de carro
+   (CATEGORIAS_COM_VEICULO_ORDEM). Uma por categoria em vez de "as duas
+   maiores" para nenhuma ficar de fora por escolha arbitrária — e porque o
+   dono nomeou as três. */
+.veiculos-cartoes {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.veiculos-cartao {
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 13px;
+  padding: 15px 17px;
+}
+
+.veiculos-cartao-label {
+  font-size: 12px;
+  color: #8a8775;
+  font-weight: 600;
+}
+
+.veiculos-cartao-valor {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 20px;
+  color: #21331f;
+  margin-top: 6px;
+}
+
+.veiculos-cartao-sub {
+  font-size: 11.5px;
+  color: #9a9784;
+}
+
+/* ---------- vazio ---------- */
+
+.veiculos-vazio {
+  background: #fff;
+  border: 1px solid #d8d3c2;
+  border-radius: 13px;
+  padding: 40px 18px;
+  text-align: center;
+  max-width: 620px;
+}
+
+.veiculos-vazio-titulo {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2a2a24;
+}
+
+.veiculos-vazio-sub {
+  font-size: 12.5px;
+  color: #6a685c;
+  margin-top: 4px;
+  margin-bottom: 16px;
+}
+
 /* ---------- tabela ---------- */
 
 .veiculos-tabela {
-  background: #fffefa;
-  border: 1px solid #d8d3c2;
+  background: #fff;
+  border: 1px solid #e6e2d4;
   border-radius: 13px;
   overflow: hidden;
 }
 
 .veiculos-linha {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr 1.6fr 0.9fr;
-  gap: 8px;
-  align-items: center;
-}
-
-.veiculos-linha--cabecalho {
-  padding: 12px 18px;
-  background: #ece8db;
-  border-bottom: 1px solid #d8d3c2;
-  font-size: 11px;
-  font-weight: 700;
-  color: #6a685c;
-  letter-spacing: 0.3px;
-}
-
-.veiculos-linha--dados {
-  padding: 13px 18px;
   border-bottom: 1px solid #f1eee2;
-  font-size: 13px;
-  cursor: pointer;
 }
 
-.veiculos-linha--dados:last-child {
+.veiculos-linha:last-child {
   border-bottom: none;
 }
 
-.veiculos-linha--dados:hover {
-  background: #ece8db;
+.veiculos-linha--aberta {
+  background: #faf8f0;
 }
 
-.veiculos-col-acao {
-  text-align: right;
+.veiculos-cabecalho {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  row-gap: 10px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+}
+
+.veiculos-toggle {
+  flex: 1 1 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  min-width: 0;
+}
+
+.veiculos-toggle:hover .veiculos-nome {
+  color: #3f6b2f;
+}
+
+.veiculos-identificacao {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  row-gap: 10px;
+  flex-wrap: wrap;
+}
+
+.veiculos-seta {
+  color: #9a9784;
+  font-size: 12px;
+  flex: 0 0 10px;
+}
+
+.veiculos-nome-bloco {
+  flex: 1 1 180px;
+  min-width: 0;
 }
 
 .veiculos-celula-nome {
@@ -129,16 +218,20 @@
 .veiculos-nome {
   font-family: 'Archivo', sans-serif;
   font-weight: 700;
+  font-size: 15.5px;
   color: #21331f;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.veiculos-placa {
+/* Placa e ano: a placa é o identificador legal do carro e continua em
+   monoespaçada, como estava na tabela antiga. */
+.veiculos-sub {
   font-family: 'IBM Plex Mono', monospace;
-  color: #2a2a24;
-  font-weight: 600;
+  font-size: 12px;
+  color: #8a8775;
+  margin-top: 2px;
 }
 
 .veiculos-inativo-badge {
@@ -151,182 +244,183 @@
   white-space: nowrap;
 }
 
-/* ---------- status (semaforo) ---------- */
+/* ---------- as colunas de dinheiro ---------- */
 
-.veiculos-status {
+.veiculos-numeros {
+  display: flex;
+  gap: 26px;
+  row-gap: 12px;
+  flex-wrap: wrap;
+  padding-left: 24px;
+}
+
+.veiculos-rotulo {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #9a9784;
+  letter-spacing: 0.3px;
+}
+
+.veiculos-mono {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  color: #2a2a24;
+  margin-top: 1px;
+}
+
+.veiculos-gasto {
+  font-size: 16px;
+  font-weight: 700;
+  color: #9a4a2e;
+}
+
+/* ---------- acoes ---------- */
+
+.veiculos-acoes {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.veiculos-botao-lancar {
+  background: #fff;
+  color: #a96b3a;
+  border: 1px solid #e0c9b4;
+  border-radius: 8px;
+  padding: 8px 13px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  white-space: nowrap;
+}
+
+.veiculos-botao-lancar:hover {
+  background: #f6efe4;
+}
+
+.veiculos-botao-editar {
+  background: #fff;
+  color: #4a4838;
+  border: 1px solid #d8d3c2;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  white-space: nowrap;
+}
+
+.veiculos-botao-editar:hover {
+  background: #f3f0e6;
+}
+
+/* ---------- linha expandida ---------- */
+
+.veiculos-detalhe {
+  padding: 0 20px 18px 24px;
+  background: #faf8f0;
+}
+
+.veiculos-historico-titulo {
+  font-size: 11px;
+  font-weight: 700;
+  color: #7c7a6a;
+  letter-spacing: 0.3px;
+  margin-bottom: 8px;
+}
+
+.veiculos-historico-vazio {
+  background: #fff;
+  border: 1px dashed #ddd8c6;
+  border-radius: 9px;
+  padding: 14px;
+  font-size: 12.5px;
+  color: #9a9784;
+  text-align: center;
+}
+
+.veiculos-lancamento {
+  display: grid;
+  grid-template-columns: 0.55fr 1.2fr 1.8fr 0.7fr;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  background: #fff;
+  border: 1px solid #eee9da;
+  border-radius: 9px;
+  padding: 9px 13px;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.veiculos-lancamento:hover {
+  border-color: #c3d3a8;
+}
+
+.veiculos-lancamento .veiculos-mono {
+  font-size: 12.5px;
+  color: #5a584a;
+  margin-top: 0;
+}
+
+.veiculos-categoria-badge {
   font-size: 11.5px;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 3px 10px;
   border-radius: 14px;
   white-space: nowrap;
 }
 
-.veiculos-status--disponivel {
-  color: #3f8f5b;
-  background: #e7f1e8;
+.veiculos-lancamento-descricao {
+  color: #5a584a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.veiculos-status--em-uso {
-  color: #c79320;
-  background: #f6efd8;
-}
-
-.veiculos-status--antigo {
-  color: #c2502f;
-  background: #f6e4dc;
-}
-
-/* ---------- acoes (pegar/devolver) ---------- */
-
-.veiculos-botao-pegar {
-  background: #5a7d3a;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: 7px 14px;
-  font-size: 12.5px;
-  font-weight: 700;
-  cursor: pointer;
-  font-family: 'Public Sans', sans-serif;
-}
-
-.veiculos-botao-pegar:hover:not(:disabled) {
-  background: #4a6b2e;
-}
-
-.veiculos-botao-pegar:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.veiculos-botao-devolver {
-  background: #fff;
-  color: #c79320;
-  border: 1px solid #ecd9a3;
-  border-radius: 8px;
-  padding: 7px 14px;
-  font-size: 12.5px;
-  font-weight: 700;
-  cursor: pointer;
-  font-family: 'Public Sans', sans-serif;
-}
-
-.veiculos-botao-devolver:hover:not(:disabled) {
-  background: #f6efd8;
-}
-
-.veiculos-botao-devolver:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-/* ---------- dialogo "Pegar" (seletor de funcionario) ---------- */
-
-.veiculos-pegar-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(20, 25, 18, 0.48);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 50;
-  padding: 24px;
-}
-
-.veiculos-pegar-card {
-  background: #fffefa;
-  border-radius: 14px;
-  width: 380px;
-  max-width: 100%;
-  padding: 20px;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
-}
-
-.veiculos-pegar-titulo {
-  font-family: 'Archivo', sans-serif;
-  font-weight: 700;
-  font-size: 15px;
-  color: #21331f;
-  margin-bottom: 14px;
-}
-
-.veiculos-pegar-rotulo {
-  font-size: 11.5px;
+.veiculos-lancamento-valor {
+  text-align: right;
   font-weight: 600;
-  color: #6a685c;
-  margin-bottom: 5px;
-  display: block;
-}
-
-.veiculos-pegar-select {
-  width: 100%;
-  padding: 9px 11px;
-  border: 1px solid #d8d3c2;
-  border-radius: 8px;
-  font-size: 13px;
-  font-family: 'Public Sans', sans-serif;
-  color: #2a2a24;
-  background: #fff;
-  box-sizing: border-box;
-}
-
-.veiculos-pegar-select:focus {
-  outline: none;
-  border-color: #7cb342;
-  box-shadow: 0 0 0 3px rgba(124, 179, 66, 0.22);
-}
-
-.veiculos-pegar-erro {
-  margin: 10px 0 0;
-  background: #f6e4dc;
-  border: 1px solid #e7cbbf;
-  border-radius: 9px;
-  padding: 9px 12px;
-  font-size: 12.5px;
   color: #9a4a2e;
-  font-weight: 600;
 }
 
-.veiculos-pegar-rodape {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 18px;
-}
-
-.veiculos-botao-cancelar {
+.veiculos-obs {
+  margin: 10px 0 0;
+  padding: 9px 13px;
   background: #fff;
-  color: #4a4838;
-  border: 1px solid #d8d3c2;
+  border: 1px solid #eee9da;
   border-radius: 9px;
-  padding: 9px 18px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: 'Public Sans', sans-serif;
+  font-size: 12.5px;
+  color: #5a584a;
 }
 
-.veiculos-botao-cancelar:hover {
-  background: #f3f0e6;
+/* ---------- nota de rodape ---------- */
+
+.veiculos-nota {
+  font-size: 12px;
+  color: #8a8775;
+  margin-top: 12px;
 }
 
-.veiculos-botao-confirmar {
-  background: #5a7d3a;
-  color: #fff;
-  border: none;
-  border-radius: 9px;
-  padding: 9px 22px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  font-family: 'Public Sans', sans-serif;
+.veiculos-nota strong {
+  color: #2a2a24;
 }
 
-.veiculos-botao-confirmar:hover:not(:disabled) {
-  background: #4a6b2e;
+@media (max-width: 1100px) {
+  .veiculos-cartoes {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
-.veiculos-botao-confirmar:disabled {
-  cursor: not-allowed;
-  opacity: 0.7;
+@media (max-width: 700px) {
+  .veiculos-cartoes {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }

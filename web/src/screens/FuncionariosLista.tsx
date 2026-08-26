@@ -38,6 +38,25 @@ function formatarDataBr(iso: string): string {
   return m ? `${m[3]}/${m[2]}` : iso
 }
 
+/**
+ * Lista de veículos VAZIA para o ModalLancamento, e é uma decisão, não um
+ * esquecimento (a prop é obrigatória justamente para forçar a decisão).
+ *
+ * Esta tela só abre o modal a partir de Adiantar, Pagar salário ou de uma
+ * linha do histórico do funcionário — sempre em categoria de folha, onde o
+ * campo de veículo nem é exibido. Não há vínculo de veículo a perder aqui.
+ *
+ * Buscar /api/veiculos só pelo caso de alguém trocar a categoria para
+ * Gasolina dentro do modal acoplaria a folha à frota: uma queda de
+ * /api/veiculos derrubaria os botões Adiantar e Pagar salário, que não têm
+ * nada a ver com carro. Quem quer lançar gasolina tem a tela de Veículos e a
+ * de Lançamentos, as duas com a lista completa.
+ *
+ * Constante de módulo (não `[]` inline) para não criar um array novo a cada
+ * render e remontar o `<select>` à toa.
+ */
+const VEICULOS_NENHUM: never[] = []
+
 const AMBER = '#c79320'
 const GREEN = '#3f8f5b'
 const NEUTRO = '#9a9784'
@@ -441,6 +460,7 @@ export function FuncionariosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
           lancamento={modalLancamento}
           categorias={categorias}
           funcionarios={funcionarios}
+          veiculos={VEICULOS_NENHUM}
           onSalvo={aoSalvarLancamento}
           onExcluido={aoExcluirLancamento}
           onFechar={() => setModalLancamento(undefined)}

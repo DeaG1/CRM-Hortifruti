@@ -46,7 +46,7 @@ const fornecedor = (over: Partial<Fornecedor> = {}): Fornecedor => ({
 
 const lancamento = (over: Partial<Lancamento> = {}): Lancamento => ({
   id: 'l1', data: '2026-06-08', categoria: 'Frete', descricao: 'Coleta Norte',
-  valor: 1280, funcionario_id: null, ...over,
+  valor: 1280, funcionario_id: null, veiculo_id: null, ...over,
 })
 
 /**

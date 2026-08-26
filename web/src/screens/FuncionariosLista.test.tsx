@@ -30,7 +30,7 @@ const funcionario = (over: Partial<Funcionario> = {}): Funcionario => ({
 
 const lanc = (over: Partial<Lancamento> = {}): Lancamento => ({
   id: 'l1', data: '2026-06-10', categoria: 'Adiantamento de salário',
-  descricao: '', valor: 0, funcionario_id: '1', ...over,
+  descricao: '', valor: 0, funcionario_id: '1', veiculo_id: null, ...over,
 })
 
 /** Resolve as tres rotas que a tela busca (/api/funcionarios sozinha, e

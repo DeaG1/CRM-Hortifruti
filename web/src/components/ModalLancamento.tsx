@@ -1,6 +1,9 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react'
 import { api, ErroApi } from '../api/client'
-import { LANCAMENTO_NOVO_BASE, CATEGORIAS_COM_FUNCIONARIO, type Lancamento } from '../derive/lancamentos'
+import {
+  LANCAMENTO_NOVO_BASE, CATEGORIAS_COM_FUNCIONARIO, CATEGORIAS_COM_VEICULO, type Lancamento,
+} from '../derive/lancamentos'
+import { nomeVeiculo, type Veiculo } from '../derive/veiculos'
 import './ModalLancamento.css'
 
 // Molde: ModalCliente.tsx (formulario, validacao, noValidate, 401) +
@@ -22,12 +25,28 @@ interface FuncionarioOpcao {
   nome: string
 }
 
+/** Só o que o `<select>` de veículo precisa. Aceita o `Veiculo` inteiro que
+ * as telas já têm em mãos, sem obrigar ninguém a montar um objeto reduzido. */
+type VeiculoOpcao = Pick<Veiculo, 'id' | 'placa' | 'marca' | 'modelo'>
+
 interface ModalLancamentoProps {
   lancamento: Partial<Lancamento> | null // null = criando
   /** Lista fechada de categorias — vem de GET /api/lancamentos/categorias, buscada por quem abre este modal (LancamentosLista). */
   categorias: string[]
   /** Funcionários pra popular o vínculo — só aparece nas categorias de CATEGORIAS_COM_FUNCIONARIO. */
   funcionarios: FuncionarioOpcao[]
+  /**
+   * Veículos pra popular o vínculo — só aparece nas categorias de
+   * CATEGORIAS_COM_VEICULO (gasolina, manutenção, multa).
+   *
+   * Obrigatória, e não opcional com `[]` de default, de propósito: quem abre
+   * este modal numa tela que edita lançamento de despesa de carro PRECISA
+   * passar a lista. Um `<select>` sem a opção correspondente ao
+   * `veiculo_id` gravado cai para '' sozinho, e o submit gravaria `null` —
+   * perda silenciosa do vínculo. Exigir a prop força cada chamador a decidir
+   * (ver o comentário em FuncionariosLista.tsx, o único que passa `[]`).
+   */
+  veiculos: VeiculoOpcao[]
   onSalvo: (l: Lancamento) => void
   /** Exclusao confirmada e concluida na API — quem chama decide o que fazer (fechar, atualizar a lista). */
   onExcluido: (id: string) => void
@@ -37,7 +56,7 @@ interface ModalLancamentoProps {
 }
 
 export function ModalLancamento({
-  lancamento, categorias, funcionarios, onSalvo, onExcluido, onFechar, onSessaoExpirada,
+  lancamento, categorias, funcionarios, veiculos, onSalvo, onExcluido, onFechar, onSessaoExpirada,
 }: ModalLancamentoProps) {
   const [rascunho, setRascunho] = useState<Rascunho>({
     ...LANCAMENTO_NOVO_BASE,
@@ -45,6 +64,9 @@ export function ModalLancamento({
     categoria: categorias[0] ?? '',
     ...(lancamento ?? {}),
     funcionario_id: (lancamento?.funcionario_id ?? LANCAMENTO_NOVO_BASE.funcionario_id) as string,
+    // `null` vindo da API vira '' — é o que um <select> controlado espera
+    // quando nada está escolhido. Mesmo tratamento de funcionario_id acima.
+    veiculo_id: (lancamento?.veiculo_id ?? LANCAMENTO_NOVO_BASE.veiculo_id) as string,
   })
   const [erroData, setErroData] = useState('')
   const [erroValor, setErroValor] = useState('')
@@ -60,6 +82,10 @@ export function ModalLancamento({
   // efeito confunde quem usa. Esconder aqui é só UX; a limpeza de fato
   // acontece no submit (`funcionarioIdEfetivo` abaixo).
   const mostraFuncionario = CATEGORIAS_COM_FUNCIONARIO.has(rascunho.categoria)
+  // Idem para o veículo (CATEGORIAS_COM_VEICULO em derive/lancamentos.ts):
+  // gasolina, manutenção e multa. 'Frete' não entra — é serviço comprado de
+  // terceiro, não custo do carro próprio.
+  const mostraVeiculo = CATEGORIAS_COM_VEICULO.has(rascunho.categoria)
 
   function campo<K extends keyof Rascunho>(chave: K) {
     return {
@@ -91,12 +117,14 @@ export function ModalLancamento({
     setSalvando(true)
     try {
       const funcionarioIdEfetivo = mostraFuncionario && rascunho.funcionario_id ? rascunho.funcionario_id : null
+      const veiculoIdEfetivo = mostraVeiculo && rascunho.veiculo_id ? rascunho.veiculo_id : null
       const corpo = {
         data: rascunho.data,
         categoria: rascunho.categoria,
         descricao: rascunho.descricao,
         valor: valorNum || 0,
         funcionario_id: funcionarioIdEfetivo,
+        veiculo_id: veiculoIdEfetivo,
       }
       const salvo = editando
         ? await api.put<Lancamento>(`/api/lancamentos/${lancamento!.id}`, corpo)
@@ -207,9 +235,22 @@ export function ModalLancamento({
                   </div>
                 )}
 
+                {mostraVeiculo && (
+                  <div className="modal-campo">
+                    <label className="modal-rotulo" htmlFor="lancamento-veiculo_id">Veículo</label>
+                    <select className="modal-select" {...campo('veiculo_id')}>
+                      <option value="">—</option>
+                      {veiculos.map(v => (
+                        <option key={v.id} value={v.id}>{nomeVeiculo(v)} · {v.placa}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 <div className="modal-campo modal-campo--full modal-dica">
                   O lançamento entra no <strong>total de custos</strong> do período e — quando vinculado a
-                  um funcionário — desconta do <strong>a pagar</strong> dele.
+                  um funcionário — desconta do <strong>a pagar</strong> dele. Vinculado a um{' '}
+                  <strong>veículo</strong>, entra no gasto daquele carro na tela de Veículos.
                 </div>
               </div>
 

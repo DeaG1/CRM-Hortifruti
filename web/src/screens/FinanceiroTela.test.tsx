@@ -27,26 +27,29 @@ const entrada = (over: Partial<EntradaFin> = {}): EntradaFin => ({
 
 const lancamento = (over: Partial<Lancamento> = {}): Lancamento => ({
   id: 'l1', data: '2026-06-05', categoria: 'Frete', descricao: 'Coleta Norte',
-  valor: 100, funcionario_id: null, ...over,
+  valor: 100, funcionario_id: null, veiculo_id: null, ...over,
 })
 
-/** Resolve as cinco rotas que a tela (e o LancamentosLista embutido) usam. */
+/** Resolve as seis rotas que a tela (e o LancamentosLista embutido) usam —
+ * /api/veiculos entrou com a coluna VEICULO do razao. */
 function mockCarga(opts: {
   saidas?: SaidaFin[]
   entradas?: EntradaFin[]
   lancamentos?: Lancamento[]
   funcionarios?: unknown[]
+  veiculos?: unknown[]
   categorias?: string[]
 } = {}) {
   const {
     saidas = [], entradas = [], lancamentos = [],
-    funcionarios = [], categorias = ['Frete', 'Gasolina', 'Outros'],
+    funcionarios = [], veiculos = [], categorias = ['Frete', 'Gasolina', 'Outros'],
   } = opts
   mockGet.mockImplementation((rota: string) => {
     if (rota === '/api/saidas') return Promise.resolve(saidas)
     if (rota === '/api/entradas') return Promise.resolve(entradas)
     if (rota === '/api/lancamentos') return Promise.resolve(lancamentos)
     if (rota === '/api/funcionarios') return Promise.resolve(funcionarios)
+    if (rota === '/api/veiculos') return Promise.resolve(veiculos)
     if (rota === '/api/lancamentos/categorias') return Promise.resolve(categorias)
     return Promise.reject(new Error('rota inesperada: ' + rota))
   })

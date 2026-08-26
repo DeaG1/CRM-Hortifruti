@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, ErroApi } from '../api/client'
 import type { Lancamento } from '../derive/lancamentos'
 import type { Funcionario } from '../derive/funcionarios'
+import { nomeVeiculo, type Veiculo } from '../derive/veiculos'
 import { ModalLancamento } from '../components/ModalLancamento'
 import { intervaloDoPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import './LancamentosLista.css'
@@ -42,6 +43,12 @@ interface LancamentosListaProps {
 export function LancamentosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: LancamentosListaProps) {
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [funcionarios, setFuncionarios] = useState<Funcionario[]>([])
+  // Os veiculos entram no mesmo Promise.all do resto, e nao numa busca que
+  // falha sozinha: sem eles, editar um lancamento de Gasolina aqui abriria o
+  // modal com o `<select>` de veiculo vazio, o valor gravado cairia para ''
+  // sozinho e o salvar apagaria o vinculo em silencio. Melhor a tela inteira
+  // dizer que nao carregou do que gravar uma perda silenciosa.
+  const [veiculos, setVeiculos] = useState<Veiculo[]>([])
   const [categorias, setCategorias] = useState<string[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
@@ -68,12 +75,16 @@ export function LancamentosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: 
     Promise.all([
       api.get<Lancamento[]>('/api/lancamentos'),
       api.get<Funcionario[]>('/api/funcionarios'),
+      api.get<Veiculo[]>('/api/veiculos'),
       // Lista fechada de categorias: SEMPRE vem do servidor (nunca hardcoded
       // aqui), pra nao ter duas fontes divergindo — ver comentario em
       // api/src/routes/lancamentos.ts sobre a rota /categorias.
       api.get<string[]>('/api/lancamentos/categorias'),
     ])
-      .then(([ls, fs, cs]) => { if (!cancelado) { setLancamentos(ls); setFuncionarios(fs); setCategorias(cs) } })
+      .then(([ls, fs, vs, cs]) => {
+        if (cancelado) return
+        setLancamentos(ls); setFuncionarios(fs); setVeiculos(vs); setCategorias(cs)
+      })
       .catch((err: unknown) => {
         if (cancelado) return
         if (err instanceof ErroApi && err.status === 401) {
@@ -104,6 +115,14 @@ export function LancamentosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: 
   if (erro) return <p className="lancamentos-estado lancamentos-estado--erro" role="alert">{erro}</p>
 
   const nomeFuncionario = (id: string | null) => funcionarios.find(f => f.id === id)?.nome ?? '—'
+  // Travessao quando o lancamento nao tem veiculo (a maioria) E quando o
+  // veiculo foi excluido do cadastro depois: `lancamentos_veiculo_fk` e
+  // `on delete set null`, entao o `veiculo_id` ja chega nulo — nunca um id
+  // pendurado sem dono.
+  const nomeDoVeiculo = (id: string | null) => {
+    const v = veiculos.find(x => x.id === id)
+    return v ? nomeVeiculo(v) : '—'
+  }
 
   const visiveis = lancamentos.filter(l => {
     const mes = mesDe(l.data)
@@ -158,6 +177,7 @@ export function LancamentosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: 
             <div>CATEGORIA</div>
             <div>DESCRIÇÃO</div>
             <div>FUNCIONÁRIO</div>
+            <div>VEÍCULO</div>
             <div className="lancamentos-col-num">VALOR</div>
           </div>
 
@@ -171,6 +191,7 @@ export function LancamentosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: 
               <div><span className="lancamentos-categoria-badge">{l.categoria}</span></div>
               <div className="lancamentos-descricao">{l.descricao || '—'}</div>
               <div className="lancamentos-funcionario">{nomeFuncionario(l.funcionario_id)}</div>
+              <div className="lancamentos-funcionario">{nomeDoVeiculo(l.veiculo_id)}</div>
               <div className="lancamentos-col-num lancamentos-mono lancamentos-valor">({money(l.valor)})</div>
             </div>
           ))}
@@ -186,6 +207,7 @@ export function LancamentosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: 
           lancamento={modal}
           categorias={categorias}
           funcionarios={funcionarios}
+          veiculos={veiculos}
           onSalvo={aoSalvar}
           onExcluido={aoExcluir}
           onFechar={() => setModal(undefined)}

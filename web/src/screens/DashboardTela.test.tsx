@@ -119,6 +119,8 @@ describe('DashboardTela — os quatro estados', () => {
     mockApiPara({ clientes: [] })
     render(<DashboardTela onNavegar={() => {}} onSessaoExpirada={() => {}} />)
     expect(await screen.findByText(/nenhum cliente cadastrado/i)).toBeInTheDocument()
+    // Termo generico ("cliente"), nao o do primeiro tenant (hortifruti).
+    expect(screen.getByText(/cadastre os clientes que você atende/i)).toBeInTheDocument()
   })
 
   it('com dados: renderiza as secoes do painel', async () => {
@@ -154,7 +156,7 @@ describe('DashboardTela — indicador sem dado mostra travessao, nunca zero', ()
     expect(within(screen.getByText('Receita bruta').closest('.dashboard-card-topo') as HTMLElement).getByText('—')).toBeInTheDocument()
 
     // KPIs que dependem de pedidos entregues
-    for (const rotulo of ['Ticket médio / minimercado', 'Ticket médio por entrega', 'Inadimplência por cliente']) {
+    for (const rotulo of ['Ticket médio / cliente', 'Ticket médio por entrega', 'Inadimplência por cliente']) {
       const card = cartao(rotulo)
       expect(within(card).getByText('—')).toBeInTheDocument()
       expect(within(card).getByText('sem dado')).toBeInTheDocument()
@@ -286,8 +288,8 @@ describe('DashboardTela — KPI bate a meta / fora da meta', () => {
     await screen.findByText('Painel de indicadores')
     expect(within(cartao('Ticket médio por entrega')).getByText('R$ 1.000')).toBeInTheDocument()
     expect(within(cartao('Ticket médio por entrega')).queryByText('R$ 1.000*')).not.toBeInTheDocument()
-    expect(within(cartao('Ticket médio / minimercado')).getByText('R$ 1.000')).toBeInTheDocument()
-    expect(within(cartao('Ticket médio / minimercado')).queryByText('R$ 1.000*')).not.toBeInTheDocument()
+    expect(within(cartao('Ticket médio / cliente')).getByText('R$ 1.000')).toBeInTheDocument()
+    expect(within(cartao('Ticket médio / cliente')).queryByText('R$ 1.000*')).not.toBeInTheDocument()
   })
 
   it('item de entrada sem peso medio marca o indice pelo DENOMINADOR (kg recebido curto)', async () => {

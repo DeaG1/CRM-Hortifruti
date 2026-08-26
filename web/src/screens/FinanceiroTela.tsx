@@ -290,7 +290,7 @@ function CicloCaixaCard({ ciclo }: { ciclo: CicloCaixa }) {
 
       <div className="financeiro-ciclo-formula">
         Ciclo de caixa = giro de estoque + recebimento − pagamento ao produtor (CCC padrão). Se você recebe do
-        minimercado antes de pagar o produtor, é o produtor quem financia seu capital de giro nesse intervalo — por
+        cliente antes de pagar o produtor, é o produtor quem financia seu capital de giro nesse intervalo — por
         isso o prazo dele reduz o ciclo, em vez de somar.
       </div>
     </div>

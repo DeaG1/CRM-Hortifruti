@@ -68,6 +68,8 @@ describe('ClientesLista — os quatro estados', () => {
     mockRotas([])
     render(<ClientesLista onAbrir={() => {}} />)
     expect(await screen.findByText(/nenhum cliente cadastrado/i)).toBeInTheDocument()
+    // Termo generico ("cliente"), nao o do primeiro tenant (hortifruti).
+    expect(screen.getByText(/cadastre os clientes que você atende/i)).toBeInTheDocument()
   })
 
   it('com dados: lista os clientes recebidos', async () => {

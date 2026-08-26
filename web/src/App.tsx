@@ -278,14 +278,14 @@ function App() {
   }
 
   /**
-   * Encerra a sessao e volta a tela de login LIMPA. Serve tanto ao "Sair da
-   * conta" quanto ao "Trocar de usuario" — os dois botoes do Shell fazem
-   * exatamente isto, e e de proposito que facam: o que muda entre eles e a
-   * palavra que o usuario le, nao o efeito. Num computador compartilhado,
-   * "Trocar de usuario" e o rotulo que o funcionario procura; "Sair da conta"
-   * e o que o dono procura no fim do dia. O caminho seguro tem que estar
-   * escrito com as duas palavras, senao quem nao achou a sua simplesmente
-   * deixa a sessao aberta.
+   * Encerra a sessao e volta a tela de login LIMPA. E o unico botao de saida
+   * do Shell ("Sair"), e serve aos dois motivos pelos quais alguem clica
+   * nele num computador compartilhado: o dono saindo no fim do dia e o
+   * funcionario que assume a maquina no meio do turno. Ja existiu um segundo
+   * botao so para a segunda situacao ("Trocar de usuario") — nasceu quando
+   * sair nao levava a uma tela de login limpa, e deixou de fazer sentido
+   * quando passou a levar (478133f, sessao morre por aba). Desde entao os
+   * dois botoes chamavam esta mesma funcao; hoje so ha um.
    *
    * "LIMPA" e a parte que exige cuidado, e nao e o cookie — e o estado desta
    * funcao. TUDO que veio da sessao anterior e zerado aqui: quem era (`eu`),
@@ -385,7 +385,6 @@ function App() {
         onPeriodo={setPeriodo}
         onNavegar={setTela}
         onSair={sair}
-        onTrocarUsuario={sair}
         onSessaoExpirada={aoExpirar}
       >
         <Conteudo

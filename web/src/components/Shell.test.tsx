@@ -85,59 +85,45 @@ describe('Shell — menu por papel', () => {
     expect(screen.getByRole('button', { name: 'Estoque' })).not.toHaveAttribute('aria-current')
   })
 
-  it('clicar em Sair da conta chama onSair', () => {
+  it('clicar em Sair chama onSair', () => {
     const onSair = vi.fn()
     render(
       <Shell papel="admin" telaAtual="clientes" {...PERIODO_PADRAO} onNavegar={() => {}} onSair={onSair}>
         <p>conteudo</p>
       </Shell>,
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Sair da conta' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sair' }))
     expect(onSair).toHaveBeenCalledOnce()
   })
 
-  // ---------------------------------------- trocar de usuario (computador
-  // compartilhado): o funcionario assume a maquina sem fechar o navegador.
+  // ---------------------------------------- um so botao de saida (computador
+  // compartilhado): ja existiu um segundo botao ("Trocar de usuário") para o
+  // funcionario assumir a maquina, mas fazia exatamente o mesmo que "Sair" —
+  // sair() ja leva a uma tela de login limpa desde 478133f. Guarda contra
+  // reintroducao do segundo botao.
 
-  it('oferece "Trocar de usuário" junto do "Sair da conta"', () => {
-    render(
-      <Shell
-        papel="admin" telaAtual="clientes" {...PERIODO_PADRAO}
-        onNavegar={() => {}} onSair={() => {}} onTrocarUsuario={() => {}}
-      >
+  it('ha exatamente um botao de sair na barra lateral', () => {
+    const { container } = render(
+      <Shell papel="admin" telaAtual="clientes" {...PERIODO_PADRAO} onNavegar={() => {}} onSair={() => {}}>
         <p>conteudo</p>
       </Shell>,
     )
-    expect(screen.getByRole('button', { name: 'Trocar de usuário' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Sair da conta' })).toBeInTheDocument()
+    // Conta os botoes do CONTAINER de saida, nao por rotulo: um segundo
+    // botao reintroduzido pode nao conter a palavra "sair" (o antigo
+    // "Trocar de usuário" nao continha), e so contar por nome deixaria essa
+    // reintroducao passar batido.
+    expect(container.querySelectorAll('.shell-sair-container button')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Sair' })).toBeInTheDocument()
   })
 
-  it('clicar em "Trocar de usuário" chama onTrocarUsuario, e nao onSair', () => {
-    const onTrocarUsuario = vi.fn()
-    const onSair = vi.fn()
-    render(
-      <Shell
-        papel="admin" telaAtual="clientes" {...PERIODO_PADRAO}
-        onNavegar={() => {}} onSair={onSair} onTrocarUsuario={onTrocarUsuario}
-      >
+  it('o colaborador tambem ve exatamente um botao de sair', () => {
+    const { container } = render(
+      <Shell papel="colaborador" telaAtual="entradas" {...PERIODO_PADRAO} onNavegar={() => {}} onSair={() => {}}>
         <p>conteudo</p>
       </Shell>,
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Trocar de usuário' }))
-    expect(onTrocarUsuario).toHaveBeenCalledOnce()
-    expect(onSair).not.toHaveBeenCalled()
-  })
-
-  it('o colaborador tambem tem o botao — e ele quem mais troca de turno', () => {
-    render(
-      <Shell
-        papel="colaborador" telaAtual="entradas" {...PERIODO_PADRAO}
-        onNavegar={() => {}} onSair={() => {}} onTrocarUsuario={() => {}}
-      >
-        <p>conteudo</p>
-      </Shell>,
-    )
-    expect(screen.getByRole('button', { name: 'Trocar de usuário' })).toBeInTheDocument()
+    expect(container.querySelectorAll('.shell-sair-container button')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Sair' })).toBeInTheDocument()
   })
 
   it('renderiza o titulo da tela atual no cabecalho', () => {
@@ -146,7 +132,9 @@ describe('Shell — menu por papel', () => {
         <p>conteudo</p>
       </Shell>,
     )
-    expect(screen.getByText('Clientes — Minimercados')).toBeInTheDocument()
+    // Selector explicito: 'Clientes' tambem e o rotulo do item de menu
+    // correspondente (a mesma palavra aparece duas vezes na tela).
+    expect(screen.getByText('Clientes', { selector: '.shell-header-titulo' })).toBeInTheDocument()
   })
 })
 

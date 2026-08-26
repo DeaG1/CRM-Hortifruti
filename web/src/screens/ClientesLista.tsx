@@ -116,7 +116,7 @@ function paraPedidos(saidasBrutas: SaidaBruta[], clientes: Cliente[]): Pedido[] 
 interface ClientesListaProps {
   onAbrir: (id: string) => void
   /** Período global do cabeçalho (App.tsx). O CADASTRO nunca some com ele —
-   * um minimercado não deixa de ser cliente porque não comprou em julho; o
+   * um cliente não desaparece da carteira porque não comprou em julho; o
    * que respeita o recorte são as colunas derivadas (faturado, ticket,
    * participação, inadimplência) e, por consequência, a saúde do cliente. */
   periodo?: Periodo
@@ -187,7 +187,7 @@ export function ClientesLista({ onAbrir, periodo = PERIODO_TODOS, onSessaoExpira
       <div className="estado-vazio clientes-vazio">
         <div className="clientes-vazio-titulo">Nenhum cliente cadastrado ainda.</div>
         <div className="clientes-vazio-sub">
-          Cadastre os minimercados que você atende. Sem cliente não é possível lançar uma saída (venda).
+          Cadastre os clientes que você atende. Sem cliente não é possível lançar uma saída (venda).
         </div>
       </div>
     )

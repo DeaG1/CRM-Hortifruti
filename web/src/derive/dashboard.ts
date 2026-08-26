@@ -125,7 +125,7 @@ export const METAS_DASHBOARD = {
   /** Ticket médio por entrega (R$) — meta ≥430, âmbar a partir de 150. */
   ticketEntregaMeta: 430,
   ticketEntregaAmbarAte: 150,
-  /** Ticket médio por minimercado/mês (R$) — meta 3.500–3.800, âmbar a partir de 3.000. */
+  /** Ticket médio por cliente/mês (R$) — meta 3.500–3.800, âmbar a partir de 3.000. */
   ticketMesMetaBaixo: 3500,
   ticketMesMetaAlto: 3800,
   ticketMesAmbarAte: 3000,
@@ -134,8 +134,8 @@ export const METAS_DASHBOARD = {
    * mesma meta 3.500–3.800 dos dois acima, mas faixa âmbar PRÓPRIA, a partir
    * de 2.000 (protótipo, `design/CRM Hortifruti.dc.html` 2234). Não é
    * descuido nem duplicação: `ticketMesAmbarAte` classifica a MÉDIA da
-   * carteira (receita ÷ minimercados atendidos), onde 2.900 já é um mês
-   * ruim; aqui se classifica UM minimercado, onde a dispersão entre o maior
+   * carteira (receita ÷ clientes atendidos), onde 2.900 já é um mês
+   * ruim; aqui se classifica UM cliente, onde a dispersão entre o maior
    * e o menor cliente é normal e 2.900 ainda é um cliente saudável. Mesma
    * meta, réguas diferentes porque as duas perguntas são diferentes.
    */
@@ -302,12 +302,12 @@ export function ticketMedioPorEntrega(saidas: Saida[]): Indicador {
   return disponivel(total / entregues.length)
 }
 
-/** Ticket médio por minimercado = receita bruta / nº de clientes distintos
+/** Ticket médio por cliente = receita bruta / nº de clientes distintos
  * atendidos (que tiveram ao menos 1 pedido entregue) — não é o mesmo
  * denominador do KPI acima (nº de pedidos), nem o mesmo do "clientes
  * ativos" (cadastro): é quem comprou de fato. Pedidos sem cliente
  * identificado (cliente_id nulo) não entram na contagem de clientes. */
-export function ticketMedioPorMinimercado(saidas: Saida[]): Indicador {
+export function ticketMedioPorCliente(saidas: Saida[]): Indicador {
   const entregues = entreguesDe(saidas)
   if (entregues.length === 0) return indisponivel('sem pedidos entregues registrados')
   const total = entregues.reduce((s, p) => s + (p.valor || 0), 0)

@@ -115,6 +115,13 @@ describe('guiaDePrimeirosPassos — preenchimento parcial, um estágio de cada v
       expect(p.cta.length).toBeGreaterThan(0)
     }
   })
+
+  // Termo generico ("cliente"), nao o do primeiro tenant (hortifruti) — o
+  // CRM passou a ser vendido para ramos onde "minimercado" nao faz sentido.
+  it('a dica do passo de clientes usa o termo genérico "cliente"', () => {
+    const passo = guiaDePrimeirosPassos(ZERADO).passos.find(p => p.id === 'clientes')
+    expect(passo?.hint).toBe('Os clientes que você atende')
+  })
 })
 
 describe('guiaDePrimeirosPassos — os cinco cumpridos: o guia some', () => {

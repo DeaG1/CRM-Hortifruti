@@ -113,7 +113,7 @@ const DEFINICOES: DefinicaoDePasso[] = [
   {
     id: 'clientes',
     label: 'Cadastrar clientes',
-    hint: 'Os minimercados que você atende',
+    hint: 'Os clientes que você atende',
     cta: 'Cadastrar cliente',
     tela: 'clientes',
     contar: c => c.clientes,

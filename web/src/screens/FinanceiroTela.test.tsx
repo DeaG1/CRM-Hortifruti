@@ -88,6 +88,8 @@ describe('FinanceiroTela — os quatro estados', () => {
     render(<FinanceiroTela onSessaoExpirada={() => {}} />)
     expect(await screen.findByText(/Resultado —/)).toBeInTheDocument()
     expect(screen.getByText('Ciclo de caixa')).toBeInTheDocument()
+    // Termo generico ("cliente"), nao o do primeiro tenant (hortifruti).
+    expect(screen.getByText(/se você recebe do cliente antes de pagar o produtor/i)).toBeInTheDocument()
     // Lançamentos embutido (LancamentosLista) mostra a descricao do lancamento
     expect(await screen.findByText('Coleta Norte')).toBeInTheDocument()
   })

@@ -72,7 +72,7 @@ export interface ResumoSaidas {
   /** Sub-linha do cartão 2: quantos pedidos entregues compõem esse valor. */
   pedidosEntregues: number
   /**
-   * Cartão 3, o que motivou este módulo: quanto os minimercados ainda devem
+   * Cartão 3, o que motivou este módulo: quanto os clientes ainda devem
    * — soma dos pedidos cuja situação de pagamento não é 'Pago' nem '—'
    * (cancelado/devolvido não é dívida). Vem de
    * `derivarRelatorioPedidos().totais.aReceber`, exatamente o mesmo número

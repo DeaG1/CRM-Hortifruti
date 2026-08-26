@@ -10,7 +10,7 @@ import {
   percentualLucro,
   indiceDePerdas,
   ticketMedioPorEntrega,
-  ticketMedioPorMinimercado,
+  ticketMedioPorCliente,
   inadimplenciaGeral,
   markupMedio,
   giroDeEstoque,
@@ -404,7 +404,7 @@ export function DashboardTela({ periodo = PERIODO_TODOS, onNavegar, onSessaoExpi
         <div className="estado-vazio dashboard-vazio">
           <div className="dashboard-vazio-titulo">Nenhum cliente cadastrado ainda.</div>
           <div className="dashboard-vazio-sub">
-            Cadastre os minimercados que você atende para começar a acompanhar a saúde do negócio — os
+            Cadastre os clientes que você atende para começar a acompanhar a saúde do negócio — os
             indicadores desta tela dependem da carteira de clientes.
           </div>
         </div>
@@ -442,14 +442,14 @@ export function DashboardTela({ periodo = PERIODO_TODOS, onNavegar, onSessaoExpi
   const perdas1 = indiceDePerdas(entradasPeriodo, perdasPeriodo)
   // `produtosAgregados` já vem filtrado do servidor (ver o efeito acima).
   const markup = markupMedio(produtosAgregados)
-  const ticketMes = ticketMedioPorMinimercado(saidasPeriodo)
+  const ticketMes = ticketMedioPorCliente(saidasPeriodo)
   const ticketEntrega = ticketMedioPorEntrega(saidasPeriodo)
   const inad = inadimplenciaGeral(saidasPeriodo, hojeIsoLocal())
 
   const kpis: CartaoKpi[] = [
     cartaoDeIndicador('Índice de perdas (%)', perdas1, pct1, '≤ 10%', statusIndiceDePerdas, METAS_DASHBOARD.perdaMetaPct),
     cartaoDeIndicador('Markup médio (venda/compra)', markup, v => Math.round(v) + '%', '≥ 60%', statusMarkup, METAS_DASHBOARD.markupMetaPct),
-    cartaoDeIndicador('Ticket médio / minimercado', ticketMes, money, '3,5–3,8k', statusTicketMes, METAS_DASHBOARD.ticketMesMetaAlto),
+    cartaoDeIndicador('Ticket médio / cliente', ticketMes, money, '3,5–3,8k', statusTicketMes, METAS_DASHBOARD.ticketMesMetaAlto),
     cartaoDeIndicador('Ticket médio por entrega', ticketEntrega, money, '≥ R$ 430', statusTicketEntrega, METAS_DASHBOARD.ticketEntregaMeta),
     cartaoDeIndicador('Inadimplência por cliente', inad, pct1, '≤ 1%', statusInadimplencia, METAS_DASHBOARD.inadimplenciaMetaPct),
     cartaoDeIndicador('Giro de estoque (dias)', giro, v => String(Math.round(v)), '≤ 4 d', statusGiroDeEstoque, METAS_DASHBOARD.giroEstoqueMetaDias),

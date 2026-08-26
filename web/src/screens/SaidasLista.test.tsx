@@ -115,6 +115,8 @@ describe('SaidasLista — os quatro estados', () => {
     mockGetPadrao([])
     render(<SaidasLista onSessaoExpirada={() => {}} />)
     expect(await screen.findByText(/nenhuma saída lançada/i)).toBeInTheDocument()
+    // Termo generico ("cliente"), nao o do primeiro tenant (hortifruti).
+    expect(screen.getByText(/lance a primeira venda entregue a um cliente/i)).toBeInTheDocument()
     expect(screen.getByText(/alimenta faturamento, ticket médio e estoque/i)).toBeInTheDocument()
   })
 
@@ -415,7 +417,7 @@ describe('SaidasLista — abrir o modal', () => {
 /**
  * Os quatro cartoes de resumo (achado S-1 da auditoria; protótipo
  * `pedidoStats`, markup 412-419 e dados 2394-2399). O terceiro e o motivo de
- * este bloco existir: "quanto os minimercados me devem" nao aparecia em
+ * este bloco existir: "quanto os clientes me devem" nao aparecia em
  * nenhuma tela de rotina, so em Relatorios ▸ Inadimplentes, que e tela de
  * analise.
  */
@@ -439,7 +441,7 @@ describe('SaidasLista — cartoes de resumo', () => {
     expect(within(c).getByText('1 pedido entregue')).toBeInTheDocument()
   })
 
-  it('"A receber / atrasado" soma o que os minimercados ainda devem', async () => {
+  it('"A receber / atrasado" soma o que os clientes ainda devem', async () => {
     mockGetPadrao([
       saida({ id: '1', numero: 'S-1', pag: 'Pago', valor: 1000, data_pag: '2026-08-06' }),
       saida({ id: '2', numero: 'S-2', pag: 'Pendente', venc: AMANHA, valor: 300 }),
@@ -522,7 +524,7 @@ describe('SaidasLista — cartoes de resumo', () => {
     fireEvent.click(botaoFiltro('Filtrar por pagamento', 'Pago'))
     expect(screen.queryByText('S-2')).not.toBeInTheDocument()
     // A tabela mostra so a saida paga, mas o cartao continua respondendo
-    // "quanto os minimercados me devem" pela carteira inteira.
+    // "quanto os clientes me devem" pela carteira inteira.
     expect(within(cartao('A RECEBER / ATRASADO')).getByText('R$ 300')).toBeInTheDocument()
     expect(within(cartao('PEDIDOS')).getByText('2')).toBeInTheDocument()
   })

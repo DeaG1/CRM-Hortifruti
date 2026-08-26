@@ -21,9 +21,16 @@ const NAV_DEFS: { key: Tela; label: string }[] = [
 /** Título e subtítulo do topo, por tela — portado do objeto `titles` do protótipo. */
 const TITULOS: Record<Tela, [string, string]> = {
   dashboard: ['Saúde do Negócio', 'Visão geral da operação'],
-  clientes: ['Clientes — Minimercados', 'Carteira completa e health score'],
+  // Sem qualificador depois do nome — as outras dez telas deste objeto
+  // repetem o rótulo do menu tal e qual (Financeiro/Financeiro,
+  // Estoque/Estoque…). 'Clientes — Minimercados' era a única exceção, e
+  // amarrava o título ao tipo de cliente do primeiro tenant (hortifruti); um
+  // tenant de outro ramo (distribuidora, papelaria) não vende para
+  // minimercado nenhum. Tirar o qualificador não só generaliza a palavra,
+  // alinha esta tela ao mesmo padrão das outras nove.
+  clientes: ['Clientes', 'Carteira completa e health score'],
   entradas: ['Entradas (Compras)', 'Coletas e compras dos fornecedores'],
-  pedidos: ['Saídas (Vendas)', 'Entregas aos minimercados'],
+  pedidos: ['Saídas (Vendas)', 'Entregas aos clientes'],
   estoque: ['Estoque', 'Quantidade por produto'],
   // O subtítulo do protótipo é 'Norte do PR · preços de compra e variação'
   // (linha 2141). A metade que diz o que a tela CALCULA volta agora que as
@@ -56,20 +63,14 @@ interface ShellProps {
   periodo: Periodo
   onPeriodo: (periodo: Periodo) => void
   onNavegar: (tela: Tela) => void
-  onSair: () => void
   /**
-   * Trocar de usuario sem fechar o navegador: encerra a sessao e leva a tela
-   * de login limpa, para o funcionario assumir a maquina que o dono estava
-   * usando. Opcional so para nao quebrar os testes que montam o Shell
-   * isolado; o App sempre passa.
-   *
-   * O efeito e o mesmo de `onSair` (ver `sair()` em App.tsx). Sao dois botoes
-   * porque sao duas PERGUNTAS diferentes na cabeca de quem esta na frente da
-   * tela: "vou embora" e "agora sou eu quem vai usar". Quem chega para
-   * trabalhar e nao encontra a segunda escrita em algum lugar nao clica na
-   * primeira — continua na sessao do outro, que e o problema inteiro.
+   * Encerra a sessao e leva a tela de login limpa — serve tanto para o dono
+   * sair no fim do dia quanto para o funcionario assumir a maquina
+   * (computador compartilhado). Um botao so: ver o comentario de `sair()`
+   * em App.tsx para o porque de nao haver mais um segundo rotulo para o
+   * mesmo efeito.
    */
-  onTrocarUsuario?: () => void
+  onSair: () => void
   /** Sessao expirou (401) — repassado ao badge de saldo, a unica parte do
    * Shell que fala com a API. */
   onSessaoExpirada?: () => void
@@ -77,7 +78,7 @@ interface ShellProps {
 }
 
 export function Shell({
-  papel, telaAtual, periodo, onPeriodo, onNavegar, onSair, onTrocarUsuario,
+  papel, telaAtual, periodo, onPeriodo, onNavegar, onSair,
   onSessaoExpirada, children,
 }: ShellProps) {
   const isAdmin = papel === 'admin'
@@ -128,19 +129,7 @@ export function Shell({
           </div>
         </div>
         <div className="shell-sair-container">
-          {/* "Trocar de usuario" vem PRIMEIRO e com destaque maior porque e o
-              caminho mais usado nesta operacao: a mesma maquina passa de mao
-              em mao varias vezes por dia, e sair de vez acontece uma. */}
-          {onTrocarUsuario && (
-            <button
-              type="button"
-              className="shell-sair shell-trocar"
-              onClick={onTrocarUsuario}
-            >
-              Trocar de usuário
-            </button>
-          )}
-          <button type="button" className="shell-sair" onClick={onSair}>Sair da conta</button>
+          <button type="button" className="shell-sair" onClick={onSair}>Sair</button>
         </div>
       </aside>
 

@@ -7,7 +7,7 @@ import {
   percentualLucro,
   indiceDePerdas,
   ticketMedioPorEntrega,
-  ticketMedioPorMinimercado,
+  ticketMedioPorCliente,
   inadimplenciaGeral,
   markupMedio,
   giroDeEstoque,
@@ -283,18 +283,18 @@ describe('statusTicketEntrega', () => {
   })
 })
 
-describe('ticketMedioPorMinimercado', () => {
+describe('ticketMedioPorCliente', () => {
   it('indisponivel sem pedidos entregues', () => {
-    expect(ticketMedioPorMinimercado([])).toEqual({ disponivel: false, motivo: 'sem pedidos entregues registrados' })
+    expect(ticketMedioPorCliente([])).toEqual({ disponivel: false, motivo: 'sem pedidos entregues registrados' })
   })
 
   it('indisponivel quando nenhum entregue tem cliente identificado', () => {
-    const r = ticketMedioPorMinimercado([saida({ cliente_id: null })])
+    const r = ticketMedioPorCliente([saida({ cliente_id: null })])
     expect(r).toEqual({ disponivel: false, motivo: 'nenhum pedido entregue tem cliente identificado' })
   })
 
   it('receita / clientes distintos atendidos (nao / numero de pedidos)', () => {
-    const r = ticketMedioPorMinimercado([
+    const r = ticketMedioPorCliente([
       saida({ cliente_id: 'c1', valor: 1000 }),
       saida({ cliente_id: 'c1', valor: 1000 }), // mesmo cliente, 2 pedidos
       saida({ cliente_id: 'c2', valor: 1000 }),

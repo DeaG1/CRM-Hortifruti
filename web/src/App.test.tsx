@@ -168,7 +168,7 @@ const chamadas = (rota: string) => mockGet.mock.calls.filter(c => c[0] === rota)
 
 const AVISO_EXPIRADA = 'Sessão expirada por inatividade'
 
-describe('App — trocar de usuario sem fechar o navegador', () => {
+describe('App — o botao Sair tambem serve pra trocar de usuario sem fechar o navegador', () => {
   it('encerra a sessao no SERVIDOR e volta a um login sem residuo do anterior', async () => {
     mockTudo('admin', 'u-dono')
     render(<App />)
@@ -178,7 +178,7 @@ describe('App — trocar de usuario sem fechar o navegador', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Fornecedores' }))
     await screen.findByText('Fornecedores', { selector: '.shell-header-titulo' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Trocar de usuário' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sair' }))
 
     // Apagar o cookie no navegador nao basta: o token tem que morrer no
     // banco, senao quem o copiou continua dentro por mais 30 minutos.

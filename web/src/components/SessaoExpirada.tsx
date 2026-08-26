@@ -39,10 +39,9 @@ interface SessaoExpiradaProps {
  * "NAO SOU EU" e a saida para o outro caso — o funcionario que encontrou a
  * maquina com a sessao do dono vencida na tela. Ele nao tem a senha do dono e
  * nao deve ficar preso num formulario que so aceita ela: o botao descarta a
- * sessao e leva a tela de login limpa, o mesmo caminho do "Trocar de
- * usuario" do menu. O que estava digitado se perde, mas ai e escolha
- * explicita de quem clicou, avisada na propria linha do botao — nao um
- * descarte silencioso.
+ * sessao e leva a tela de login limpa, o mesmo caminho do botao "Sair" do
+ * menu. O que estava digitado se perde, mas ai e escolha explicita de quem
+ * clicou, avisada na propria linha do botao — nao um descarte silencioso.
  */
 export function SessaoExpirada({ onEntrar, onSair }: SessaoExpiradaProps) {
   return (

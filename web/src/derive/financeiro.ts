@@ -414,7 +414,7 @@ export function diasEstoque(entradas: EntradaFin[], saidas: SaidaFin[], periodo:
  * padrão — e o CCC clássico SUBTRAI o prazo de pagamento ao fornecedor, não
  * soma: em logica-dashboard.txt linha 35, `cicloDias = cicloEst + cicloReceb
  * - cicloPag`, mesma direção. O prazo que o produtor concede TRABALHA A
- * FAVOR do caixa — se você recebe do minimercado em 14 dias mas só paga o
+ * FAVOR do caixa — se você recebe do cliente em 14 dias mas só paga o
  * produtor em 30, é o produtor quem financia seu capital de giro nesse
  * intervalo. Somando (como a versão anterior fazia), o indicador piorava
  * justamente quando a negociação com o produtor era boa — o oposto do que

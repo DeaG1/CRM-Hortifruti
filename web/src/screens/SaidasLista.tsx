@@ -113,7 +113,7 @@ function Cartao({ label, valor, sub, corSub }: {
  * continua inteira — padrão de isolação de falha de ClientesLista.tsx.
  *
  * O terceiro cartão é o motivo de este bloco existir: "quanto os
- * minimercados me devem" não aparecia em nenhuma tela de rotina, só em
+ * clientes me devem" não aparecia em nenhuma tela de rotina, só em
  * Relatórios ▸ Inadimplentes, que é tela de análise.
  */
 function CartoesResumo({ resumo, periodo }: { resumo: ResumoSaidas | null; periodo: Periodo }) {
@@ -190,7 +190,7 @@ interface SaidasListaProps {
    * Período global do cabeçalho (App.tsx, achado S-3), recortado pela data de
    * ENTREGA — a mesma data que a receita usa em Financeiro e no Dashboard, e
    * a mesma do protótipo (`pedidosPeriodo`, linha 2158). Vale para a tabela e
-   * para os cartões: "quanto os minimercados me devem" continua sendo a
+   * para os cartões: "quanto os clientes me devem" continua sendo a
    * pergunta, agora dentro do recorte escolhido.
    */
   periodo?: Periodo
@@ -302,7 +302,7 @@ export function SaidasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Saida
         <div className="estado-vazio saidas-vazio">
           <div className="saidas-vazio-titulo">Nenhuma saída lançada ainda.</div>
           <div className="saidas-vazio-sub">
-            Lance a primeira venda entregue a um minimercado. Ela alimenta faturamento, ticket médio e estoque.
+            Lance a primeira venda entregue a um cliente. Ela alimenta faturamento, ticket médio e estoque.
           </div>
           <button type="button" className="saidas-botao-novo" onClick={() => setModal(null)}>
             ＋ Lançar primeira saída
@@ -343,7 +343,7 @@ export function SaidasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Saida
       : saidasPeriodo.filter(s => situacaoExibidaSaida(s.pag, s.venc, hojeIso) === f).length
 
   // Os cartões somam TODAS as saídas do período, nunca `visiveis`: "quanto os
-  // minimercados me devem" tem que responder pela carteira toda. Se
+  // clientes me devem" tem que responder pela carteira toda. Se
   // seguissem os filtros, filtrar por "Pago" zeraria o cartão de "A receber"
   // e a tela responderia outra pergunta com o mesmo rótulo. A nota logo
   // abaixo dos cartões diz isso ao usuário, para o número não parecer

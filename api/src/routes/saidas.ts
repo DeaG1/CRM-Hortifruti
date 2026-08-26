@@ -280,6 +280,128 @@ saidas.get('/', async (c) => {
   return c.json(linhas.map(paraJson))
 })
 
+/** Linha crua da consulta de memoria de preco. `preco` e numeric (string no
+ * postgres.js) e `data` e uma coluna `date` (objeto Date no driver) — as
+ * duas convertidas na borda, como no resto da API. */
+interface LinhaUltimoPreco {
+  produto_id: string
+  un: string
+  preco: string | number
+  data: unknown
+  numero: string
+}
+
+/**
+ * GET /ultimos-precos/:clienteId — a MEMORIA DE PRECO por cliente.
+ *
+ * Devolve, para UM cliente, o ultimo preco cobrado dele em CADA
+ * (produto, unidade) que ele ja comprou, com a DATA daquela venda.
+ *
+ * ---- por que um endpoint so, e nao um por item ----
+ *
+ * O modal de saida ja dispara varias chamadas ao abrir (clientes, produtos,
+ * listagem de saidas) e roda em Cloudflare Workers, onde ha teto de
+ * subrequisicoes por invocacao — foi esse teto que obrigou o projeto a
+ * adotar o Hyperdrive (ver criarPoolDoEnv em src/db.ts). Uma consulta por
+ * produto digitado transformaria um pedido de 15 itens em 15 idas ao banco,
+ * cada uma com o custo de withTenant (~594ms medidos em producao, ver o
+ * comentario no fim de db.ts). O mapa inteiro do cliente vem de uma vez,
+ * numa consulta so, e o resto e lookup em memoria no navegador.
+ *
+ * ---- por que a data vai junto ----
+ *
+ * Nao e enfeite. Um preco de tres meses atras preenchido em silencio faz
+ * vender pelo valor errado; com a data a vista quem esta no balcao decide
+ * se aquele numero ainda vale. `data` e a data do PEDIDO (`data_pedido`),
+ * nao a da entrega: e quando o preco foi acordado, e e a unica das duas
+ * garantida pela API (entrega e opcional, data_pedido e obrigatoria).
+ *
+ * ---- chave (produto, unidade), nao so produto ----
+ *
+ * `saida_itens.preco` e preco POR UNIDADE da linha (`saida_itens.un`, que
+ * aceita 'KG','CX','UN','DZ','MC' — migration 009). "R$ 30,00" de uma caixa
+ * e "R$ 30,00" de um quilo sao numeros diferentes; devolver so o ultimo
+ * preco do produto, sem dizer de que unidade ele e, entregaria ao front um
+ * numero que ele nao tem como aplicar sem risco de trocar preco de caixa
+ * por preco de quilo. A chave (produto, un) e a mesma que estoque.ts usa
+ * (`chaves`, la agrupando pelo mesmo motivo: unidade lancada faz parte da
+ * identidade da movimentacao).
+ *
+ * ---- desempate ----
+ *
+ * `distinct on` devolve a PRIMEIRA linha de cada grupo na ordem do `order
+ * by` — se a ordem nao for total, "primeira" fica a criterio do plano de
+ * execucao e o preco devolvido muda entre chamadas. Duas vendas para o
+ * mesmo cliente na mesma data sao comuns, entao `data_pedido desc` sozinho
+ * NAO desempata: vem `numero desc` (unico por tenant, indice unico
+ * (tenant_id, numero)) e, para o caso de o mesmo produto+unidade aparecer
+ * duas vezes DENTRO da mesma saida, `i.id desc`. Esse bug exato ja apareceu
+ * neste projeto na variacao de preco por fornecedor (commit f8e2954), onde
+ * o desempate por numero foi acrescentado pela mesma razao.
+ *
+ * ---- que status entra na memoria ----
+ *
+ * Fica de fora so 'Cancelado'. Uma venda cancelada NUNCA ACONTECEU — o
+ * preco dela nunca foi cobrado de ninguem, e lembrar dele seria inventar um
+ * acordo que nao existiu. 'Devolvido' ENTRA: a venda aconteceu, o preco foi
+ * negociado e cobrado, e a devolucao e sobre a mercadoria ter voltado, nao
+ * sobre o preco ter deixado de ser acordado.
+ *
+ * Isso destoa, DE PROPOSITO, de estoque.ts e de `diasEstoque`
+ * (web/src/derive/financeiro.ts), que excluem os DOIS status: la a pergunta
+ * e "quanta mercadoria de fato se moveu / faturou", e mercadoria devolvida
+ * voltou pra prateleira. Aqui a pergunta e outra — "qual preco foi acordado
+ * com este cliente" — e a resposta dela nao muda porque a caixa voltou.
+ * Pendente/Em rota tambem entram, e sao os casos mais frequentes: o pedido
+ * de ontem, ainda nao entregue, e justamente o preco mais atual que existe.
+ *
+ * ---- por que `preco > 0` ----
+ *
+ * O modal converte campo de preco vazio em 0 no envio (ver `salvar` em
+ * web/src/components/ModalSaida.tsx), entao 0 aqui quase sempre significa
+ * "ninguem preencheu", nao "vendido de graca". Devolver esse 0 faria o
+ * campo abrir com "R$ 0,00" ja escrito — exatamente o defeito do zero
+ * pre-preenchido que este projeto ja corrigiu duas vezes (a pessoa nao
+ * apaga o zero e grava "01"/"05"). Item sem preco registrado nao e dado de
+ * preco: a memoria cai no ultimo preco de verdade que existir, e a data
+ * devolvida junto diz o quao antigo ele e.
+ *
+ * ---- permissao ----
+ *
+ * Nada alem de `exigirSessao` (aplicado em '*' acima): quem lanca saida e o
+ * colaborador ('pedidos' nao esta em ADMIN_ONLY_SCREENS, web/src/telas.ts),
+ * e e exatamente ele quem abre o modal que consome isto. O dado tambem nao
+ * e novo pra ele — sao os precos das proprias saidas, que ele ja le em
+ * GET / e GET /:id.
+ *
+ * Roda dentro de withTenant como toda consulta de negocio: fora dele a RLS
+ * de saidas/saida_itens nao acha `app.tenant_id` e devolve zero linhas em
+ * SILENCIO — a memoria simplesmente nunca preencheria nada, sem erro
+ * nenhum pra denunciar a causa.
+ */
+saidas.get('/ultimos-precos/:clienteId', async (c) => {
+  const clienteId = c.req.param('clienteId')
+  if (!idValido(clienteId)) return c.json({ erro: 'clienteId invalido' }, 400)
+
+  const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx => tx<LinhaUltimoPreco[]>`
+    select distinct on (i.produto_id, i.un)
+           i.produto_id, i.un, i.preco, s.data_pedido as data, s.numero
+    from saida_itens i
+    join saidas s on s.id = i.saida_id
+    where s.cliente_id = ${clienteId}
+      and s.status <> 'Cancelado'
+      and i.preco > 0
+    order by i.produto_id, i.un, s.data_pedido desc, s.numero desc, i.id desc`)
+
+  return c.json(linhas.map(l => ({
+    produto_id: l.produto_id,
+    un: l.un,
+    preco: Number(l.preco),
+    data: dataParaTexto(l.data),
+    numero: l.numero,
+  })))
+})
+
 // GET /:id devolve o cabecalho COM os itens — ao contrario de GET /, aqui a
 // tela de ficha/edicao precisa da lista completa para poder editar.
 saidas.get('/:id', async (c) => {

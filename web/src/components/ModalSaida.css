@@ -426,3 +426,29 @@
   cursor: not-allowed;
   opacity: 0.7;
 }
+
+/* Nota do último preço, sob o campo de R$/UN de cada item — "último:
+   R$ 4,20/KG em 12/08". Discreta de propósito: informa a data e a unidade da
+   última venda daquele produto para aquele cliente sem competir com o campo
+   nem parecer erro. Alinhada à direita porque acompanha um campo numérico
+   alinhado à direita (.modal-input--linha). */
+.modal-nota--linha {
+  margin: 4px 0 0;
+  font-size: 10.5px;
+  line-height: 1.25;
+  text-align: right;
+  color: #8a8878;
+}
+
+/* Falha ao carregar a memória de preço — mesma paleta âmbar discreta de
+   .modal-aviso-limite e .clientes-aviso-vendas: informa, não repreende, e não
+   bloqueia nada. */
+.modal-aviso-memoria {
+  margin: 10px 14px 0;
+  background: #f6efd8;
+  border: 1px solid #e8dcae;
+  border-radius: 9px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #8a6a1f;
+}

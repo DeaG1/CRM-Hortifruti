@@ -39,6 +39,17 @@ let produtoCaixaComPeso: string
 let produtoCaixaSemPeso: string
 let clienteId: string // prazo = 10 dias
 let clienteSemPrazoId: string // prazo = 0 dias, so pra variar o calculo
+// Um cliente por cenario da memoria de preco (ver comentario no beforeAll).
+let clienteMemoriaId: string
+let clienteDesempateId: string
+let clienteSemHistoricoId: string
+let clienteStatusId: string
+let clientePrecoZeroId: string
+let clienteUnidadesId: string
+// Segundo tenant, com sessao propria — isolamento de verdade.
+let tokenOutroTenant: string
+let produtoOutroTenantId: string
+let clienteOutroTenantId: string
 
 beforeAll(async () => {
   admin = criarPool(ADMIN)
@@ -96,7 +107,63 @@ beforeAll(async () => {
   const [cliente2] = await admin`
     insert into clientes (tenant_id, nome, prazo) values (${tenantId}, 'Mercado Prazo 0', 0) returning id`
   clienteSemPrazoId = cliente2.id
+
+  // ---- fixtures da memoria de preco (GET /ultimos-precos/:clienteId) ----
+  // Um cliente POR CENARIO: a consulta e "tudo o que este cliente ja
+  // comprou", entao dois cenarios no mesmo cliente se contaminariam (e um
+  // teste passaria a depender da ordem de execucao do outro).
+  const nomesMemoria = [
+    'Memoria Historico', 'Memoria Desempate', 'Memoria Sem Historico',
+    'Memoria Status', 'Memoria Preco Zero', 'Memoria Unidades',
+  ]
+  const criados = await Promise.all(nomesMemoria.map(nome => admin`
+    insert into clientes (tenant_id, nome) values (${tenantId}, ${nome}) returning id`))
+  ;[
+    clienteMemoriaId, clienteDesempateId, clienteSemHistoricoId,
+    clienteStatusId, clientePrecoZeroId, clienteUnidadesId,
+  ] = criados.map(([c]) => c.id as string)
+
+  // Segundo tenant COM SESSAO PROPRIA — sem isso o teste de isolamento
+  // provaria so que um id inexistente devolve vazio, nao que o dado do
+  // vizinho existe e mesmo assim nao vaza.
+  const [uOutro] = await admin`
+    insert into usuarios (tenant_id, email, senha_hash, nome, papel)
+    values (${outroTenantId}, 'admin@saidas-http-2.com', ${hash}, 'Admin 2', 'admin') returning id`
+  tokenOutroTenant = await criarSessao(sql, uOutro.id, outroTenantId)
+  const [pOutro] = await admin`
+    insert into produtos (tenant_id, nome) values (${outroTenantId}, 'Tomate Vizinho') returning id`
+  produtoOutroTenantId = pOutro.id
+  const [cOutro] = await admin`
+    insert into clientes (tenant_id, nome) values (${outroTenantId}, 'Mercado Vizinho') returning id`
+  clienteOutroTenantId = cOutro.id
 })
+
+/**
+ * Semeia uma venda direto via `admin` (superusuario, fora da RLS) em vez de
+ * pelo POST da rota: estes testes leem a memoria de preco, e precisam
+ * controlar com exatidao `numero`, `data_pedido`, `status` e o preco de
+ * cada item — inclusive combinacoes que o POST calcularia sozinho (venc) ou
+ * que so existem no historico ja gravado. A camada HTTP de POST ja e
+ * coberta pelos blocos acima deste arquivo.
+ */
+async function semearVenda(
+  tenant: string,
+  clienteAlvo: string,
+  numero: string,
+  dataPedido: string,
+  status: string,
+  itens: { produto: string; un?: string; preco: number; qtd?: number }[],
+) {
+  const [s] = await admin`
+    insert into saidas (tenant_id, cliente_id, numero, data_pedido, status)
+    values (${tenant}, ${clienteAlvo}, ${numero}, ${dataPedido}, ${status}) returning id`
+  for (const it of itens) {
+    await admin`
+      insert into saida_itens (tenant_id, saida_id, produto_id, un, qtd, preco)
+      values (${tenant}, ${s.id}, ${it.produto}, ${it.un ?? 'KG'}, ${it.qtd ?? 10}, ${it.preco})`
+  }
+  return s.id as string
+}
 
 afterAll(async () => {
   await sql?.end()
@@ -792,5 +859,222 @@ describe('peso em KG (conversao por produtos.peso_medio)', () => {
     // que ja esta certo. So o peso muda de unidade.
     expect(linha.perda_kg).toBe(6)
     expect(linha.peso).toBe(200)
+  })
+})
+
+/**
+ * A MEMORIA DE PRECO POR CLIENTE — GET /ultimos-precos/:clienteId.
+ *
+ * O que a rota promete: para UM cliente, o ultimo preco cobrado dele em cada
+ * (produto, unidade) que ele ja comprou, com a data daquela venda, numa
+ * consulta so. O raciocinio completo (por que um endpoint agregado, por que
+ * a data vai junto, por que a chave inclui a unidade, o desempate e o filtro
+ * de status) esta no comentario da rota em src/routes/saidas.ts.
+ */
+describe('GET /ultimos-precos/:clienteId — memoria de preco por cliente', () => {
+  const comoOutroTenant = (init: RequestInit = {}): RequestInit => ({
+    ...init,
+    headers: { ...init.headers, cookie: `${COOKIE_SESSAO}=${tokenOutroTenant}` },
+  })
+
+  async function memoriaDe(clienteAlvo: string, comoQuem = comoAdmin) {
+    const res = await pedir(`/api/saidas/ultimos-precos/${clienteAlvo}`, comoQuem())
+    expect(res.status).toBe(200)
+    return await res.json() as {
+      produto_id: string; un: string; preco: number; data: string; numero: string
+    }[]
+  }
+
+  it('cliente com historico: devolve o ultimo preco daquele produto E a data da venda', async () => {
+    await semearVenda(tenantId, clienteMemoriaId, 'S-MEM-01', '2026-05-10', 'Entregue',
+      [{ produto: produtoId, preco: 3.5 }])
+    await semearVenda(tenantId, clienteMemoriaId, 'S-MEM-02', '2026-08-12', 'Entregue',
+      [{ produto: produtoId, preco: 4.2 }])
+
+    const memoria = await memoriaDe(clienteMemoriaId)
+    expect(memoria).toEqual([
+      { produto_id: produtoId, un: 'KG', preco: 4.2, data: '2026-08-12', numero: 'S-MEM-02' },
+    ])
+    // preco e numeric e data e `date`: sem conversao na borda o primeiro
+    // voltaria como string ("4.2000") e a segunda como ISO completo
+    // ("2026-08-12T00:00:00.000Z"), que nao e o formato que o resto da API
+    // usa nem o que a tela sabe formatar.
+    expect(typeof memoria[0].preco).toBe('number')
+  })
+
+  it('duas vendas do MESMO cliente na MESMA data: desempate estavel pelo numero da saida', async () => {
+    // Mesma data — sem um segundo criterio de ordenacao, qual das duas o
+    // `distinct on` escolhe fica a criterio do plano de execucao, e o preco
+    // devolvido muda conforme a ordem em que o banco entrega as linhas. Este
+    // bug exato ja apareceu no projeto (variacao de preco por fornecedor,
+    // commit f8e2954).
+    //
+    // DOIS PARES ESPELHADOS, de proposito. Um par so nao prova nada: sem o
+    // desempate o banco devolve UMA das duas linhas empatadas, e se calhar
+    // de ser justo a esperada o teste passa por sorte (medido — foi o que
+    // aconteceu na primeira versao deste teste). Com dois pares gravados em
+    // ordens opostas, o vencedor correto e a linha gravada PRIMEIRO num par
+    // e a gravada POR ULTIMO no outro: qualquer criterio implicito que o
+    // plano use (a primeira linha do grupo, a ultima, a ordem fisica no
+    // heap) acerta no maximo um dos dois pares. So a regra explicita —
+    // maior numero vence — acerta os dois ao mesmo tempo.
+    await semearVenda(tenantId, clienteDesempateId, 'S-DES-2', '2026-08-20', 'Entregue',
+      [{ produto: produtoId, preco: 9 }])
+    await semearVenda(tenantId, clienteDesempateId, 'S-DES-1', '2026-08-20', 'Entregue',
+      [{ produto: produtoId, preco: 7 }])
+    await semearVenda(tenantId, clienteDesempateId, 'S-DES-3', '2026-08-20', 'Entregue',
+      [{ produto: produtoCaixaComPeso, un: 'CX', preco: 70 }])
+    await semearVenda(tenantId, clienteDesempateId, 'S-DES-4', '2026-08-20', 'Entregue',
+      [{ produto: produtoCaixaComPeso, un: 'CX', preco: 90 }])
+
+    const primeira = await memoriaDe(clienteDesempateId)
+    expect(primeira).toEqual([
+      { produto_id: produtoCaixaComPeso, un: 'CX', preco: 90, data: '2026-08-20', numero: 'S-DES-4' },
+      { produto_id: produtoId, un: 'KG', preco: 9, data: '2026-08-20', numero: 'S-DES-2' },
+      // Ordenado como a consulta ordena (por produto_id), sem depender de
+      // qual uuid o Postgres sorteou pra cada produto neste run.
+    ].sort((a, b) => (a.produto_id < b.produto_id ? -1 : 1)))
+
+    // Repetido: o valor nao pode variar entre chamadas identicas.
+    const segunda = await memoriaDe(clienteDesempateId)
+    const terceira = await memoriaDe(clienteDesempateId)
+    expect(segunda).toEqual(primeira)
+    expect(terceira).toEqual(primeira)
+  })
+
+  it('o mesmo produto+unidade duas vezes DENTRO da mesma saida tambem desempata sozinho', async () => {
+    // `numero` nao separa estas duas: e a mesma saida. Sem o `i.id desc` no
+    // fim do order by, o `distinct on` escolheria uma das duas linhas sem
+    // criterio nenhum. O valor devolvido tem de ser sempre o mesmo.
+    await semearVenda(tenantId, clienteDesempateId, 'S-DES-9', '2026-08-21', 'Entregue',
+      [{ produto: produtoCaixaSemPeso, un: 'CX', preco: 11 },
+       { produto: produtoCaixaSemPeso, un: 'CX', preco: 13 }])
+
+    const linhas = await Promise.all([1, 2, 3].map(() => memoriaDe(clienteDesempateId)))
+    const doProduto = linhas.map(l => l.find(x => x.produto_id === produtoCaixaSemPeso)?.preco)
+    expect(doProduto[0]).toBeDefined()
+    expect(new Set(doProduto).size).toBe(1)
+  })
+
+  it('cliente sem nenhuma venda: devolve vazio (nao inventa preco de outro cliente nem media)', async () => {
+    // clienteMemoriaId acima ja tem historico do MESMO produto — se a rota
+    // caisse em "preco de qualquer cliente" ou numa media, este array viria
+    // preenchido.
+    expect(await memoriaDe(clienteSemHistoricoId)).toEqual([])
+  })
+
+  it('produto que ESTE cliente nunca comprou nao aparece, mesmo tendo sido vendido a outro', async () => {
+    await semearVenda(tenantId, clienteSemPrazoId, 'S-MEM-20', '2026-08-01', 'Entregue',
+      [{ produto: produtoCaixaComPeso, un: 'CX', preco: 55 }])
+
+    const memoria = await memoriaDe(clienteMemoriaId)
+    expect(memoria.map(l => l.produto_id)).not.toContain(produtoCaixaComPeso)
+  })
+
+  it('venda CANCELADA nao entra na memoria — e a memoria cai no ultimo preco que de fato foi cobrado', async () => {
+    // Uma venda cancelada nunca aconteceu: o preco dela nunca foi cobrado de
+    // ninguem. Ela tambem nao pode "sombrear" o historico real — o preco
+    // devolvido tem de ser o da ultima venda VALIDA, nao vazio.
+    await semearVenda(tenantId, clienteStatusId, 'S-MEM-30', '2026-07-01', 'Entregue',
+      [{ produto: produtoId, preco: 2.5 }])
+    await semearVenda(tenantId, clienteStatusId, 'S-MEM-31', '2026-08-25', 'Cancelado',
+      [{ produto: produtoId, preco: 99 }])
+
+    const memoria = await memoriaDe(clienteStatusId)
+    expect(memoria).toEqual([
+      { produto_id: produtoId, un: 'KG', preco: 2.5, data: '2026-07-01', numero: 'S-MEM-30' },
+    ])
+  })
+
+  it('produto comprado SO em venda cancelada nao aparece', async () => {
+    await semearVenda(tenantId, clienteStatusId, 'S-MEM-32', '2026-08-26', 'Cancelado',
+      [{ produto: produtoCaixaSemPeso, un: 'CX', preco: 40 }])
+
+    const memoria = await memoriaDe(clienteStatusId)
+    expect(memoria.map(l => l.produto_id)).not.toContain(produtoCaixaSemPeso)
+  })
+
+  it('venda DEVOLVIDA entra: a venda aconteceu e o preco foi acordado', async () => {
+    // Decisao deliberada, e diferente de estoque.ts / diasEstoque, que
+    // excluem Cancelado E Devolvido: la a pergunta e quanta mercadoria se
+    // moveu (a devolvida voltou pra prateleira); aqui e qual preco foi
+    // acordado com este cliente, e a devolucao nao desfaz o acordo.
+    await semearVenda(tenantId, clienteStatusId, 'S-MEM-33', '2026-08-27', 'Devolvido',
+      [{ produto: produtoId, preco: 6.75 }])
+
+    const memoria = await memoriaDe(clienteStatusId)
+    expect(memoria).toContainEqual(
+      { produto_id: produtoId, un: 'KG', preco: 6.75, data: '2026-08-27', numero: 'S-MEM-33' },
+    )
+  })
+
+  it('pedido ainda Pendente entra — e costuma ser o preco mais atual que existe', async () => {
+    await semearVenda(tenantId, clienteStatusId, 'S-MEM-34', '2026-08-28', 'Pendente',
+      [{ produto: produtoId, preco: 8.1 }])
+
+    const memoria = await memoriaDe(clienteStatusId)
+    expect(memoria).toContainEqual(
+      { produto_id: produtoId, un: 'KG', preco: 8.1, data: '2026-08-28', numero: 'S-MEM-34' },
+    )
+  })
+
+  it('item gravado com preco 0 nao vira memoria — cai no ultimo preco de verdade', async () => {
+    // O modal converte campo de preco vazio em 0 no envio, entao 0 aqui quase
+    // sempre e "ninguem preencheu". Devolve-lo abriria o campo com "R$ 0,00"
+    // ja escrito — o defeito do zero pre-preenchido que o projeto ja corrigiu.
+    await semearVenda(tenantId, clientePrecoZeroId, 'S-MEM-40', '2026-08-05', 'Entregue',
+      [{ produto: produtoId, preco: 5.25 }])
+    await semearVenda(tenantId, clientePrecoZeroId, 'S-MEM-41', '2026-08-22', 'Entregue',
+      [{ produto: produtoId, preco: 0 }])
+
+    const memoria = await memoriaDe(clientePrecoZeroId)
+    expect(memoria).toEqual([
+      { produto_id: produtoId, un: 'KG', preco: 5.25, data: '2026-08-05', numero: 'S-MEM-40' },
+    ])
+  })
+
+  it('mesmo produto em KG e em CX sao memorias separadas — preco por unidade', async () => {
+    // "R$ 30,00" de uma caixa e "R$ 30,00" de um quilo sao numeros
+    // diferentes; colapsar os dois numa chave so entregaria a tela um preco
+    // que ela nao teria como aplicar sem trocar caixa por quilo.
+    await semearVenda(tenantId, clienteUnidadesId, 'S-MEM-50', '2026-08-10', 'Entregue',
+      [{ produto: produtoId, un: 'KG', preco: 4 }, { produto: produtoId, un: 'CX', preco: 80 }])
+
+    const memoria = await memoriaDe(clienteUnidadesId)
+    expect(memoria).toEqual([
+      { produto_id: produtoId, un: 'CX', preco: 80, data: '2026-08-10', numero: 'S-MEM-50' },
+      { produto_id: produtoId, un: 'KG', preco: 4, data: '2026-08-10', numero: 'S-MEM-50' },
+    ])
+  })
+
+  it('isolamento: o tenant vizinho tem memoria propria, e ela nao vaza para ca', async () => {
+    await semearVenda(outroTenantId, clienteOutroTenantId, 'S-MEM-60', '2026-08-15', 'Entregue',
+      [{ produto: produtoOutroTenantId, preco: 12.5 }])
+
+    // O vizinho enxerga a propria memoria (prova que a fixture existe — sem
+    // isto o teste abaixo passaria mesmo com a tabela vazia).
+    const doVizinho = await memoriaDe(clienteOutroTenantId, comoOutroTenant)
+    expect(doVizinho).toEqual([
+      { produto_id: produtoOutroTenantId, un: 'KG', preco: 12.5, data: '2026-08-15', numero: 'S-MEM-60' },
+    ])
+
+    // Mesma rota, mesmo id de cliente, sessao daqui: a RLS nao devolve nada.
+    expect(await memoriaDe(clienteOutroTenantId, comoAdmin)).toEqual([])
+  })
+
+  it('colaborador pode consultar — e ele quem lanca saida e abre o modal', async () => {
+    const memoria = await memoriaDe(clienteMemoriaId, comoColab)
+    expect(memoria.length).toBeGreaterThan(0)
+  })
+
+  it('sem cookie -> 401', async () => {
+    const res = await pedir(`/api/saidas/ultimos-precos/${clienteMemoriaId}`)
+    expect(res.status).toBe(401)
+  })
+
+  it('clienteId malformado -> 400 (nao deixa o uuid invalido chegar ao Postgres)', async () => {
+    const res = await pedir('/api/saidas/ultimos-precos/nao-e-uuid', comoAdmin())
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'clienteId invalido' })
   })
 })

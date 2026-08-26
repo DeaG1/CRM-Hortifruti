@@ -2,6 +2,10 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { api, ErroApi } from '../api/client'
 import type { Cliente } from '../derive/clientes'
 import { avisoLimiteCredito } from '../derive/pagamento'
+import {
+  MEMORIA_VAZIA, aplicarMemoriaNaLinha, aplicarMemoriaNasLinhas, montarMemoriaPreco,
+  notaUltimoPreco, type MemoriaPreco, type PrecoLembrado,
+} from '../derive/memoriaPreco'
 import './ModalSaida.css'
 
 export type StatusSaida = 'Pendente' | 'Em rota' | 'Entregue' | 'Cancelado' | 'Devolvido'
@@ -120,10 +124,21 @@ interface ItemLinha extends Omit<ItemSaida, 'qtd' | 'preco'> {
   chave: number
   qtd: number | string
   preco: number | string
+  /**
+   * Marca que o valor em `preco` foi escrito pela MEMORIA DE PRECO
+   * (derive/memoriaPreco.ts), e nao digitado. So um valor marcado assim pode
+   * ser reescrito ou apagado depois — e o que separa "preencher item novo"
+   * (ajuda) de "sobrescrever o que a pessoa colocou a mao" (destroi
+   * trabalho). Nao vai pro corpo do request, igual a `chave`.
+   */
+  precoAutomatico: boolean
 }
 
 function linhaNova(): ItemLinha {
-  return { chave: proximaChaveItem++, produto_id: '', un: 'KG', qtd: '', preco: '', perda_kg: 0 }
+  return {
+    chave: proximaChaveItem++, produto_id: '', un: 'KG',
+    qtd: '', preco: '', perda_kg: 0, precoAutomatico: false,
+  }
 }
 
 const money = (n: number) =>
@@ -163,6 +178,14 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
   // ("em aberto = 0", nao "nao sei"). So esta flag distingue "carregou e
   // nao tem nada" de "nao carregou" — ver o calculo de `aviso` abaixo.
   const [saidasAnterioresCarregadas, setSaidasAnterioresCarregadas] = useState(false)
+
+  // MEMORIA DE PRECO do cliente selecionado — o ultimo preco cobrado dele em
+  // cada (produto, unidade). Comeca vazia e volta a vazia a cada troca de
+  // cliente; enquanto estiver vazia, nada e preenchido (que e o
+  // comportamento certo tanto pra "cliente sem historico" quanto pra "ainda
+  // nao carregou" quanto pra "falhou").
+  const [memoria, setMemoria] = useState<MemoriaPreco>(MEMORIA_VAZIA)
+  const [erroMemoria, setErroMemoria] = useState('')
 
   const [carregando, setCarregando] = useState(editando)
   const [erroDetalhe, setErroDetalhe] = useState('')
@@ -224,6 +247,58 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
     return () => { cancelado = true }
   }, [onSessaoExpirada])
 
+  /**
+   * MEMORIA DE PRECO — busca o mapa do cliente selecionado.
+   *
+   * Uma chamada por CLIENTE, nao por item: o endpoint devolve o ultimo preco
+   * de TODOS os produtos que aquele cliente ja comprou de uma vez. Este modal
+   * ja dispara varias chamadas ao abrir e a API roda em Cloudflare Workers,
+   * com teto de subrequisicoes por invocacao (foi o que obrigou o projeto a
+   * adotar o Hyperdrive — ver criarPoolDoEnv em api/src/db.ts): uma consulta
+   * por produto digitado seria o desenho errado.
+   *
+   * ISOLACAO DE FALHA (mesmo padrao de ClientesLista.tsx e do fetch de
+   * vendas anteriores acima): se esta busca cair, o modal continua
+   * TOTALMENTE funcional — campos de preco vazios, um aviso discreto
+   * `role="status"` dizendo o que ficou indisponivel, e a venda salva
+   * normalmente. Um dado auxiliar que falha nunca impede o lancamento. O
+   * aviso aqui NAO some em silencio (ao contrario do de limite de credito,
+   * logo acima) porque a ausencia dele e visivel e confunde: o usuario que
+   * esperava o preco preenchido veria campos vazios sem explicacao, e
+   * poderia concluir que aquele cliente nunca comprou aquele produto.
+   *
+   * A limpeza vem ANTES da busca, de proposito: no instante em que o cliente
+   * muda, os precos que a memoria do cliente ANTERIOR escreveu deixam de
+   * valer. Deixa-los na tela enquanto a nova busca nao volta mostraria, sob o
+   * nome do cliente novo, um preco que nunca foi cobrado dele. O que foi
+   * DIGITADO a mao nao e tocado em nenhum momento — ver
+   * `aplicarMemoriaNasLinhas` (derive/memoriaPreco.ts).
+   */
+  useEffect(() => {
+    const clienteId = rascunho.cliente_id
+    setErroMemoria('')
+    setMemoria(MEMORIA_VAZIA)
+    setItens(is => aplicarMemoriaNasLinhas(is, MEMORIA_VAZIA))
+    if (!clienteId) return
+
+    let cancelado = false
+    api.get<PrecoLembrado[]>(`/api/saidas/ultimos-precos/${clienteId}`)
+      .then((linhas) => {
+        if (cancelado) return
+        const nova = montarMemoriaPreco(linhas)
+        setMemoria(nova)
+        // Preenche o que estiver livre (item novo, ou preco que a memoria
+        // anterior tinha escrito) — nunca o que foi digitado.
+        setItens(is => aplicarMemoriaNasLinhas(is, nova))
+      })
+      .catch((err: unknown) => {
+        if (cancelado) return
+        if (err instanceof ErroApi && err.status === 401) { onSessaoExpirada?.(); return }
+        setErroMemoria('Não foi possível carregar os últimos preços deste cliente — preencha os valores à mão.')
+      })
+    return () => { cancelado = true }
+  }, [rascunho.cliente_id, onSessaoExpirada])
+
   // Modo edicao: busca o cabecalho COM itens (GET /:id) para preencher o
   // rascunho — a listagem (GET /) nao traz itens, so os totais agregados.
   useEffect(() => {
@@ -245,7 +320,12 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
           forma_pag: s.forma_pag ?? '',
           obs: s.obs ?? '',
         })
-        setItens((s.itens ?? []).map(it => ({ ...it, chave: proximaChaveItem++ })))
+        // `precoAutomatico: false` — preco vindo do banco e dado gravado, nao
+        // sugestao: a memoria nunca o reescreve nem o apaga (nem ao trocar o
+        // cliente desta saida).
+        setItens((s.itens ?? []).map(it => ({
+          ...it, chave: proximaChaveItem++, precoAutomatico: false,
+        })))
       })
       .catch((err: unknown) => {
         if (cancelado) return
@@ -284,8 +364,30 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
   // perceber. A conversao pra numero acontece so onde o valor e usado de
   // fato — total/subtotal abaixo, e no corpo do envio em `salvar`.
   function atualizarItem(chave: number, campoItem: 'produto_id' | 'un' | 'qtd' | 'preco', valor: string) {
-    setItens(is => is.map((it) => (it.chave === chave ? { ...it, [campoItem]: valor } : it)))
+    setItens(is => is.map((it) => {
+      if (it.chave !== chave) return it
+      // Digitar no campo de preco tira a marca de automatico: dali em diante
+      // o valor e da pessoa, e a memoria nao escreve mais nesta linha.
+      if (campoItem === 'preco') return { ...it, preco: valor, precoAutomatico: false }
+      const atualizado = { ...it, [campoItem]: valor }
+      // Escolher o produto (ou trocar a unidade) muda QUAL preco a memoria
+      // lembra — e o momento em que o item novo e preenchido, e tambem o
+      // momento em que um preco automatico que deixou de valer para a
+      // unidade escolhida e apagado.
+      if (campoItem === 'produto_id' || campoItem === 'un') {
+        return aplicarMemoriaNaLinha(atualizado, memoria)
+      }
+      return atualizado
+    }))
   }
+
+  /** A nota do ultimo preco de um item — "ultimo: R$ 4,20/KG em 12/08", ou
+   * null quando aquele cliente nunca comprou aquele produto (a tela nao
+   * desenha nada). Usa a venda mais recente em QUALQUER unidade
+   * (`porProduto`), enquanto o preenchimento exige unidade igual
+   * (`porProdutoEUn`): numa linha em KG de um cliente que so comprou em CX, o
+   * campo fica vazio E o usuario fica sabendo por que. */
+  const notaDoItem = (produtoId: string) => notaUltimoPreco(memoria.porProduto.get(produtoId))
 
   const total = itens.reduce((soma, it) => soma + (Number(it.qtd) || 0) * (Number(it.preco) || 0), 0)
 
@@ -344,7 +446,7 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
         // pra esses dois nesta tela hoje (so produto_id e checado acima),
         // entao converter '' pra 0 aqui nao afrouxa nenhuma validacao
         // existente.
-        itens: itens.map(({ chave: _chave, id: _id, qtd, preco, ...item }) => ({
+        itens: itens.map(({ chave: _chave, id: _id, precoAutomatico: _auto, qtd, preco, ...item }) => ({
           ...item,
           qtd: Number(qtd) || 0,
           preco: Number(preco) || 0,
@@ -511,6 +613,15 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
                     </button>
                   </div>
 
+                  {/* Falha da memoria de preco: aviso, nunca bloqueio. role="status"
+                      (nao "alert") — informa sem interromper o leitor de tela, igual
+                      ao aviso de limite de credito e ao de ClientesLista.tsx. O
+                      formulario inteiro continua utilizavel e a venda continua
+                      salvavel com os precos digitados a mao. */}
+                  {erroMemoria && (
+                    <p className="modal-aviso-memoria" role="status">{erroMemoria}</p>
+                  )}
+
                   {itens.length > 0 && (
                     <div className="modal-itens-linha modal-itens-linha--cabecalho">
                       <div>PRODUTO</div>
@@ -604,16 +715,31 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
                             e nenhum valor de disponibilidade sao inventados
                             nesta interface por enquanto. */}
                       </div>
-                      <input
-                        className="modal-input modal-input--mono modal-input--linha"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="Ex.: 3,20"
-                        value={it.preco}
-                        onChange={e => atualizarItem(it.chave, 'preco', e.target.value)}
-                        aria-label="Preço por unidade"
-                      />
+                      <div>
+                        {/* O preco pre-preenchido e SUGESTAO, nunca trava: sem
+                            `disabled`, sem `readOnly`. Quem esta no balcao
+                            renegocia o preco na hora, e um campo bloqueado
+                            viraria ligacao pra destravar. Digitar aqui tambem
+                            desliga a memoria nesta linha (ver atualizarItem). */}
+                        <input
+                          className="modal-input modal-input--mono modal-input--linha"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="Ex.: 3,20"
+                          value={it.preco}
+                          onChange={e => atualizarItem(it.chave, 'preco', e.target.value)}
+                          aria-label="Preço por unidade"
+                        />
+                        {/* "último: R$ 4,20/KG em 12/08" — ver notaDoItem acima.
+                            A DATA e a UNIDADE nao sao enfeite: um preco de tres
+                            meses atras preenchido em silencio faz vender pelo valor
+                            errado, e "R$ 30,00" sem unidade nao diz se e o quilo ou
+                            a caixa. */}
+                        {notaDoItem(it.produto_id) && (
+                          <p className="modal-nota modal-nota--linha">{notaDoItem(it.produto_id)}</p>
+                        )}
+                      </div>
                       <div className="modal-itens-subtotal">
                         {money((Number(it.qtd) || 0) * (Number(it.preco) || 0))}
                       </div>

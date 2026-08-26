@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { ModalSaida, type Saida } from './ModalSaida'
 import { api, ErroApi } from '../api/client'
 import type { Cliente } from '../derive/clientes'
+import type { PrecoLembrado } from '../derive/memoriaPreco'
 
 // Mock so de api.get/post/put/del — mantem a classe ErroApi real (o
 // componente faz `err instanceof ErroApi`, precisa ser o mesmo construtor
@@ -57,11 +58,24 @@ const saidaExistente: Saida = {
  * anterior — nao muda o comportamento das suites que nao mexem com limite
  * de credito). Passar `'erro'` simula a falha desse fetch especifico
  * (isolada — GET /api/clientes e /api/produtos continuam OK), pra testar
- * que o modal continua funcional sem o aviso. */
-function mockGetPadrao(saida: Saida | null = null, saidasAnteriores: Saida[] | 'erro' = []) {
+ * que o modal continua funcional sem o aviso.
+ *
+ * `memoria`: resposta de GET /api/saidas/ultimos-precos/:clienteId (a memoria
+ * de preco por cliente). Ou um mapa clienteId -> linhas, ou `'erro'` pra
+ * simular a falha isolada desse fetch. Default: nenhum cliente tem historico
+ * — que e o comportamento neutro pras suites que nao tratam de preco. */
+function mockGetPadrao(
+  saida: Saida | null = null,
+  saidasAnteriores: Saida[] | 'erro' = [],
+  memoria: Record<string, PrecoLembrado[]> | 'erro' = {},
+) {
   mockGet.mockImplementation((rota: string) => {
     if (rota === '/api/clientes') return Promise.resolve([clienteA, clienteComLimite])
     if (rota === '/api/produtos') return Promise.resolve([produtoA, produtoB])
+    if (rota.startsWith('/api/saidas/ultimos-precos/')) {
+      if (memoria === 'erro') return Promise.reject(new Error('falha ao buscar a memoria de preco'))
+      return Promise.resolve(memoria[rota.replace('/api/saidas/ultimos-precos/', '')] ?? [])
+    }
     if (rota === '/api/saidas') {
       return saidasAnteriores === 'erro'
         ? Promise.reject(new Error('falha ao buscar vendas anteriores'))
@@ -573,5 +587,294 @@ describe('ModalSaida — aviso de limite de crédito', () => {
     await screen.findByLabelText(/número do pedido/i)
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * MEMORIA DE PRECO POR CLIENTE.
+ *
+ * Escolhido o cliente, o modal busca o ultimo preco cobrado dele em cada
+ * (produto, unidade) — uma chamada so, `GET /api/saidas/ultimos-precos/:id` —
+ * e usa isso pra preencher o campo de R$/UN dos itens, com a data a vista.
+ * As regras vivem em derive/memoriaPreco.ts (testadas la, isoladas); aqui se
+ * verifica que a TELA as aplica nos momentos certos e que nada disso trava o
+ * lancamento.
+ */
+describe('ModalSaida — memória de preço por cliente', () => {
+  const memoriaClienteA = {
+    'cli-1': [
+      { produto_id: 'prod-1', un: 'KG', preco: 4.2, data: '2026-08-12', numero: 'S-0007' },
+    ],
+  }
+
+  async function selecionarCliente(id: string, nome: string) {
+    await waitFor(() => expect(screen.getByRole('option', { name: nome })).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Cliente'), { target: { value: id } })
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith(`/api/saidas/ultimos-precos/${id}`))
+  }
+
+  async function adicionarLinha(produto = 'prod-1') {
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    await waitFor(() => expect(screen.getByLabelText('Produto')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Produto'), { target: { value: produto } })
+  }
+
+  it('busca a memória do cliente escolhido — uma chamada por cliente, não uma por item', async () => {
+    mockGetPadrao(null, [], memoriaClienteA)
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await selecionarCliente('cli-1', 'Mercado A')
+
+    await adicionarLinha('prod-1')
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    await waitFor(() => expect(screen.getAllByLabelText('Produto')).toHaveLength(2))
+    fireEvent.change(screen.getAllByLabelText('Produto')[1], { target: { value: 'prod-2' } })
+
+    // Dois itens, e ainda assim UMA unica ida ao servidor pela memoria: o
+    // modal roda em Workers, com teto de subrequisicoes por invocacao.
+    const chamadas = mockGet.mock.calls.filter(
+      (args: unknown[]) => String(args[0]).startsWith('/api/saidas/ultimos-precos/'))
+    expect(chamadas).toHaveLength(1)
+  })
+
+  it('item de produto conhecido abre com o preço preenchido e a data à vista', async () => {
+    mockGetPadrao(null, [], memoriaClienteA)
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await selecionarCliente('cli-1', 'Mercado A')
+    await adicionarLinha('prod-1')
+
+    expect(screen.getByLabelText('Preço por unidade')).toHaveValue(4.2)
+    // A data nao e enfeite: um preco de tres meses atras preenchido em
+    // silencio faz vender pelo valor errado.
+    expect(screen.getByText('último: R$ 4,20/KG em 12/08')).toBeInTheDocument()
+  })
+
+  it('produto sem histórico com aquele cliente: campo VAZIO, sem nota', async () => {
+    // Nada de preco de outro cliente nem media — o vazio faz a pessoa
+    // pensar, o numero errado faz ela clicar em salvar.
+    mockGetPadrao(null, [], memoriaClienteA)
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await selecionarCliente('cli-1', 'Mercado A')
+    await adicionarLinha('prod-2')
+
+    expect(screen.getByLabelText('Preço por unidade')).toHaveValue(null)
+    expect(screen.queryByText(/^último:/)).not.toBeInTheDocument()
+  })
+
+  it('cliente sem nenhuma compra: campo vazio', async () => {
+    mockGetPadrao(null, [], { 'cli-1': [] })
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await selecionarCliente('cli-1', 'Mercado A')
+    await adicionarLinha('prod-1')
+
+    expect(screen.getByLabelText('Preço por unidade')).toHaveValue(null)
+  })
+
+  it('o preço preenchido continua editável — é sugestão, nunca trava', async () => {
+    mockGetPadrao(null, [], memoriaClienteA)
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await selecionarCliente('cli-1', 'Mercado A')
+    await adicionarLinha('prod-1')
+
+    const campo = screen.getByLabelText('Preço por unidade')
+    expect(campo).not.toBeDisabled()
+    expect(campo).not.toHaveAttribute('readonly')
+    fireEvent.change(campo, { target: { value: '5.5' } })
+    expect(campo).toHaveValue(5.5)
+  })
+
+  it('linha em outra unidade não recebe o preço lembrado, mas a nota diz que ele existe', async () => {
+    // A memoria e de p1 em KG a R$ 4,20. Escrever 4,20 numa linha em CX
+    // afirmaria que a caixa custa R$ 4,20.
+    mockGetPadrao(null, [], memoriaClienteA)
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await selecionarCliente('cli-1', 'Mercado A')
+    await adicionarLinha('prod-1')
+    fireEvent.change(screen.getByLabelText('Unidade'), { target: { value: 'CX' } })
+
+    expect(screen.getByLabelText('Preço por unidade')).toHaveValue(null)
+    expect(screen.getByText('último: R$ 4,20/KG em 12/08')).toBeInTheDocument()
+  })
+})
+
+/**
+ * O caso que estraga trabalho digitado: trocar o cliente no MEIO do
+ * preenchimento. A regra implementada (derive/memoriaPreco.ts) e uma so —
+ * a memoria escreve apenas onde ninguem digitou:
+ *
+ *  - campo vazio  -> preenche com a memoria do cliente novo;
+ *  - campo que a PROPRIA memoria preencheu -> troca pelo preco do cliente
+ *    novo, ou APAGA se o cliente novo nunca comprou aquele produto (deixar
+ *    seria mostrar, sob o nome dele, um preco que nunca foi cobrado dele);
+ *  - campo digitado a mao -> intocado, sempre.
+ *
+ * "So preencher o que estiver vazio" nao bastava: o preco automatico do
+ * cliente ANTERIOR nao esta vazio, e sobreviveria a troca — silenciosamente
+ * errado, no campo de dinheiro.
+ */
+describe('ModalSaida — troca de cliente no meio do preenchimento', () => {
+  const memoriaDosDois = {
+    'cli-1': [
+      { produto_id: 'prod-1', un: 'KG', preco: 4.2, data: '2026-08-12', numero: 'S-0007' },
+      { produto_id: 'prod-2', un: 'KG', preco: 2, data: '2026-08-12', numero: 'S-0007' },
+    ],
+    'cli-2': [
+      { produto_id: 'prod-1', un: 'KG', preco: 6, data: '2026-08-20', numero: 'S-0009' },
+    ],
+  }
+
+  async function trocarCliente(id: string, nome: string) {
+    await waitFor(() => expect(screen.getByRole('option', { name: nome })).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Cliente'), { target: { value: id } })
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/api/saidas/ultimos-precos/' + id))
+  }
+
+  async function duasLinhas() {
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    await waitFor(() => expect(screen.getAllByLabelText('Produto')).toHaveLength(1))
+    fireEvent.change(screen.getAllByLabelText('Produto')[0], { target: { value: 'prod-1' } })
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    await waitFor(() => expect(screen.getAllByLabelText('Produto')).toHaveLength(2))
+    fireEvent.change(screen.getAllByLabelText('Produto')[1], { target: { value: 'prod-2' } })
+  }
+
+  it('NÃO reescreve o preço que a pessoa digitou à mão', async () => {
+    mockGetPadrao(null, [], memoriaDosDois)
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await trocarCliente('cli-1', 'Mercado A')
+    await duasLinhas()
+
+    // A segunda linha (prod-2) recebeu 2,00 da memoria do cli-1; a pessoa
+    // digita 9,90 por cima — dali em diante o valor e dela.
+    fireEvent.change(screen.getAllByLabelText('Preço por unidade')[1], { target: { value: '9.90' } })
+
+    await trocarCliente('cli-2', 'Mercado B')
+
+    expect(screen.getAllByLabelText('Preço por unidade')[1]).toHaveValue(9.9)
+  })
+
+  it('atualiza o preço que a própria memória tinha preenchido', async () => {
+    mockGetPadrao(null, [], memoriaDosDois)
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await trocarCliente('cli-1', 'Mercado A')
+    await duasLinhas()
+    expect(screen.getAllByLabelText('Preço por unidade')[0]).toHaveValue(4.2)
+
+    await trocarCliente('cli-2', 'Mercado B')
+
+    await waitFor(() =>
+      expect(screen.getAllByLabelText('Preço por unidade')[0]).toHaveValue(6))
+    expect(screen.getByText('último: R$ 6,00/KG em 20/08')).toBeInTheDocument()
+  })
+
+  it('APAGA o preço automático quando o cliente novo nunca comprou aquele produto', async () => {
+    mockGetPadrao(null, [], memoriaDosDois)
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await trocarCliente('cli-1', 'Mercado A')
+    await duasLinhas()
+    expect(screen.getAllByLabelText('Preço por unidade')[1]).toHaveValue(2)
+
+    // cli-2 nunca comprou prod-2: manter "2,00" ali seria mostrar, sob o
+    // nome do Mercado B, um preco cobrado do Mercado A.
+    await trocarCliente('cli-2', 'Mercado B')
+
+    await waitFor(() =>
+      expect(screen.getAllByLabelText('Preço por unidade')[1]).toHaveValue(null))
+  })
+
+  it('voltar o cliente para "Selecione…" apaga o preço automático na hora', async () => {
+    // Sem cliente selecionado nao existe "ultimo preco daquele cliente": o
+    // valor que a memoria escreveu deixa de ter dono, e ficar na tela seria
+    // um preco sem procedencia num campo de dinheiro. A limpeza acontece no
+    // proprio instante da troca, nao so quando a busca seguinte responde.
+    mockGetPadrao(null, [], memoriaDosDois)
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await trocarCliente('cli-1', 'Mercado A')
+    await duasLinhas()
+    expect(screen.getAllByLabelText('Preço por unidade')[0]).toHaveValue(4.2)
+
+    fireEvent.change(screen.getByLabelText('Cliente'), { target: { value: '' } })
+
+    await waitFor(() =>
+      expect(screen.getAllByLabelText('Preço por unidade')[0]).toHaveValue(null))
+    expect(screen.getAllByLabelText('Preço por unidade')[1]).toHaveValue(null)
+  })
+
+  it('o que foi digitado chega intacto no corpo enviado depois da troca', async () => {
+    mockGetPadrao(null, [], memoriaDosDois)
+    mockPost.mockResolvedValue({ ...saidaExistente, id: 'novo-mem' })
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await trocarCliente('cli-1', 'Mercado A')
+    await duasLinhas()
+    fireEvent.change(screen.getAllByLabelText('Preço por unidade')[1], { target: { value: '9.90' } })
+    await trocarCliente('cli-2', 'Mercado B')
+
+    fireEvent.change(screen.getByLabelText(/número do pedido/i), { target: { value: 'S-0400' } })
+    fireEvent.change(screen.getByLabelText(/data do pedido/i), { target: { value: '2026-08-10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    const corpo = mockPost.mock.calls[0][1] as { itens: { preco: number }[] }
+    expect(corpo.itens[1].preco).toBe(9.9)
+    // `precoAutomatico` e estado de UI, nao campo da API.
+    expect(corpo.itens[0]).not.toHaveProperty('precoAutomatico')
+  })
+
+  it('edição: preços já gravados na saída não são mexidos pela memória', async () => {
+    // O item gravado vale 5,00 e a memoria do cliente diz 4,20 — o valor do
+    // banco e dado, nao sugestao, e continua como esta.
+    mockGetPadrao(saidaExistente, [], memoriaDosDois)
+    render(<ModalSaida saidaId="saida-1" onSalvo={() => {}} onFechar={() => {}} />)
+    await screen.findByLabelText('Preço por unidade')
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/api/saidas/ultimos-precos/cli-1'))
+
+    expect(screen.getByLabelText('Preço por unidade')).toHaveValue(5)
+  })
+})
+
+/**
+ * ISOLACAO DE FALHA — se a memoria de preco nao carregar, o modal continua
+ * TOTALMENTE funcional. Nunca impedir o lancamento porque um dado auxiliar
+ * falhou (mesmo padrao de ClientesLista.tsx e do fetch de vendas anteriores).
+ */
+describe('ModalSaida — falha ao carregar a memória de preço', () => {
+  it('mostra aviso discreto role="status" e mantém o formulário inteiro utilizável', async () => {
+    mockGetPadrao(null, [], 'erro')
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Mercado A' })).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Cliente'), { target: { value: 'cli-1' } })
+
+    const aviso = await screen.findByRole('status')
+    expect(aviso).toHaveTextContent(/últimos preços/i)
+
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    await waitFor(() => expect(screen.getByLabelText('Produto')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Produto'), { target: { value: 'prod-1' } })
+    // Campo vazio (nunca um preco inventado) e editavel.
+    expect(screen.getByLabelText('Preço por unidade')).toHaveValue(null)
+    expect(screen.getByLabelText('Preço por unidade')).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Salvar' })).not.toBeDisabled()
+  })
+
+  it('a venda salva normalmente com os preços digitados à mão', async () => {
+    mockGetPadrao(null, [], 'erro')
+    mockPost.mockResolvedValue({ ...saidaExistente, id: 'novo-falha' })
+    const onSalvo = vi.fn()
+    render(<ModalSaida saidaId={null} onSalvo={onSalvo} onFechar={() => {}} />)
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Mercado A' })).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Cliente'), { target: { value: 'cli-1' } })
+    await screen.findByRole('status')
+
+    fireEvent.change(screen.getByLabelText(/número do pedido/i), { target: { value: 'S-0500' } })
+    fireEvent.change(screen.getByLabelText(/data do pedido/i), { target: { value: '2026-08-10' } })
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    await waitFor(() => expect(screen.getByLabelText('Produto')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Produto'), { target: { value: 'prod-1' } })
+    fireEvent.change(screen.getByLabelText('Quantidade'), { target: { value: '10' } })
+    fireEvent.change(screen.getByLabelText('Preço por unidade'), { target: { value: '7' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    await waitFor(() => expect(onSalvo).toHaveBeenCalled())
+    const corpo = mockPost.mock.calls[0][1] as { itens: { preco: number }[] }
+    expect(corpo.itens[0].preco).toBe(7)
   })
 })

@@ -128,13 +128,19 @@ export function infoPagamento(
  * 'AAAA-MM-DD' -> 'DD/MM'. `null` para data ausente ou fora do formato —
  * nunca uma data inventada nem a string crua vazando para a tela.
  *
+ * Exportada (era privada) porque `notaUltimoPreco` (derive/memoriaPreco.ts)
+ * precisa exatamente do mesmo formato curto, pelo mesmo motivo: a nota
+ * acompanha um preço do histórico recente, onde o ano é redundante. Escrever
+ * um segundo formatador de data lá seria a duplicação que este arquivo já
+ * evitou uma vez.
+ *
  * Vive aqui, e não numa tela, porque é metade de `infoPagamento`: uma função
  * que devolvesse os pedaços e deixasse a junção para cada tela empurraria de
  * volta às duas cópias da regra que esta unificação evita. O ano fica de
  * fora igual ao protótipo (`_fmtDate`) — a sub-linha acompanha um pedido do
  * período em vista, onde o ano é redundante.
  */
-function dataBrCurta(iso: string | null | undefined): string | null {
+export function dataBrCurta(iso: string | null | undefined): string | null {
   const m = String(iso ?? '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
   return m ? `${m[3].padStart(2, '0')}/${m[2].padStart(2, '0')}` : null
 }

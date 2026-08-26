@@ -591,6 +591,123 @@ describe('ModalSaida — aviso de limite de crédito', () => {
 })
 
 /**
+ * AVISO DE ITEM SEM PRECO — hoje o campo vazio vira 0 no envio e a venda
+ * grava assim em silencio (isso ja obrigou a memoria de preco a filtrar
+ * `preco > 0` na propria consulta, e distorce o preco medio de venda do
+ * relatorio de produtos). DECISAO DO DONO DO PRODUTO: SO avisa, nunca
+ * bloqueia — mesma linha do aviso de limite de credito, acima. Nenhum teste
+ * aqui deve checar `disabled` no botao Salvar nem qualquer validacao que
+ * impeca o envio por causa do preco; o teste "a venda salva normalmente..."
+ * abaixo existe justamente pra proteger essa decisao contra alguem
+ * "endurecer" isto depois.
+ */
+describe('ModalSaida — aviso de item sem preço', () => {
+  async function preencherCabecalhoMinimo() {
+    fireEvent.change(screen.getByLabelText(/número do pedido/i), { target: { value: 'S-0700' } })
+    fireEvent.change(screen.getByLabelText(/data do pedido/i), { target: { value: '2026-08-10' } })
+  }
+
+  /** Adiciona uma linha de item nova e a preenche — `preco` fica de fora de
+   * proposito quando omitido (o cenario que este describe testa). */
+  async function adicionarItem(produtoId: string, qtd: string, preco?: string) {
+    fireEvent.click(screen.getByRole('button', { name: /adicionar produto/i }))
+    const produtos = await screen.findAllByLabelText('Produto')
+    const idx = produtos.length - 1
+    fireEvent.change(produtos[idx], { target: { value: produtoId } })
+    fireEvent.change(screen.getAllByLabelText('Quantidade')[idx], { target: { value: qtd } })
+    if (preco !== undefined) {
+      fireEvent.change(screen.getAllByLabelText('Preço por unidade')[idx], { target: { value: preco } })
+    }
+  }
+
+  it('item com preço preenchido: nenhum aviso, nem depois de tentar salvar', async () => {
+    mockPost.mockResolvedValue({ ...saidaExistente, id: 'novo-com-preco' })
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/api/produtos'))
+    await preencherCabecalhoMinimo()
+    await adicionarItem('prod-1', '10', '5')
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('não avisa antes da primeira tentativa de salvar, mesmo com item recém-adicionado sem preço', async () => {
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/api/produtos'))
+    await preencherCabecalhoMinimo()
+    await adicionarItem('prod-1', '10') // produto acabou de ser escolhido, preco ainda vazio
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('um item sem preço avisa nomeando o produto', async () => {
+    mockPost.mockResolvedValue({ ...saidaExistente, id: 'novo-sem-preco' })
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/api/produtos'))
+    await preencherCabecalhoMinimo()
+    await adicionarItem('prod-1', '10') // Tomate, sem preco
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    const aviso = await screen.findByRole('status')
+    // frase exata (nao so um regex frouxo): protege tambem a concordancia
+    // no singular ("esta", nao "estao") contra um erro de pluralizacao.
+    expect(aviso).toHaveTextContent('Tomate está sem preço — a venda salva assim mesmo, como R$ 0,00.')
+  })
+
+  it('vários itens sem preço nomeiam todos os produtos', async () => {
+    mockPost.mockResolvedValue({ ...saidaExistente, id: 'novo-varios-sem-preco' })
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/api/produtos'))
+    await preencherCabecalhoMinimo()
+    await adicionarItem('prod-1', '10') // Tomate, sem preco
+    await adicionarItem('prod-2', '5')  // Batata, sem preco
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    const aviso = await screen.findByRole('status')
+    // frase exata: protege a lista ("Tomate e Batata", nao "Tomate, Batata")
+    // e a concordancia no plural ("estao").
+    expect(aviso).toHaveTextContent('Tomate e Batata estão sem preço — a venda salva assim mesmo, como R$ 0,00.')
+  })
+
+  // Protege a decisao do dono do produto: o aviso e so informativo. Se
+  // alguem tentar "endurecer" isto depois (desabilitar o Salvar, adicionar
+  // confirmacao, bloquear no backend), este teste quebra primeiro.
+  it('a venda salva normalmente com o aviso de item sem preço visível na tela', async () => {
+    mockPost.mockResolvedValue({ ...saidaExistente, id: 'novo-salva-com-aviso' })
+    const onSalvo = vi.fn()
+    render(<ModalSaida saidaId={null} onSalvo={onSalvo} onFechar={() => {}} />)
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/api/produtos'))
+    await preencherCabecalhoMinimo()
+    await adicionarItem('prod-1', '10') // sem preco
+
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    expect(await screen.findByRole('status')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Salvar' })).not.toBeDisabled()
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    await waitFor(() => expect(onSalvo).toHaveBeenCalled())
+    const corpo = mockPost.mock.calls[0][1] as { itens: Array<{ preco: number }> }
+    expect(corpo.itens[0].preco).toBe(0)
+    // continua visivel depois: nao houve dialogo de confirmacao nem
+    // bloqueio no meio do caminho — so o POST normal, com o aviso ainda na tela.
+    expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  it('o aviso some quando o preço é preenchido, sem precisar clicar em Salvar de novo', async () => {
+    render(<ModalSaida saidaId={null} onSalvo={() => {}} onFechar={() => {}} />)
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/api/produtos'))
+    await preencherCabecalhoMinimo()
+    await adicionarItem('prod-1', '10') // sem preco
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    expect(await screen.findByRole('status')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Preço por unidade'), { target: { value: '5' } })
+
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+  })
+})
+
+/**
  * MEMORIA DE PRECO POR CLIENTE.
  *
  * Escolhido o cliente, o modal busca o ultimo preco cobrado dele em cada

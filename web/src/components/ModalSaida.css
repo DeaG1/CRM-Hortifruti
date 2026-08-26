@@ -452,3 +452,17 @@
   font-size: 12px;
   color: #8a6a1f;
 }
+
+/* Aviso de item sem preço — mesma paleta âmbar discreta de
+   .modal-aviso-memoria/.modal-aviso-limite: informa, não repreende. A venda
+   sempre salva mesmo com o aviso na tela (decisão do dono do produto), então
+   isto nunca pode ganhar a cor/peso de .modal-erro. */
+.modal-aviso-preco {
+  margin: 10px 14px 0;
+  background: #f6efd8;
+  border: 1px solid #e8dcae;
+  border-radius: 9px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #8a6a1f;
+}

@@ -154,6 +154,59 @@ function hojeIso(): string {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
 }
 
+/**
+ * Nomes (únicos, na ordem em que aparecem) dos produtos com item lançado mas
+ * SEM PREÇO — hoje o campo vazio vira 0 no envio (ver `salvar`) e a venda
+ * grava assim em silêncio. Isso já obrigou desvios em outros lugares (a
+ * memória de preço, `GET /api/saidas/ultimos-precos`, teve que excluir
+ * `preco > 0` da própria consulta pra não reabrir o próximo pedido já com
+ * "R$ 0,00" escrito) e distorce o relatório de produtos (preço médio de
+ * venda dividido por quantidade — item a zero puxa a média pra baixo).
+ *
+ * DECISÃO DO DONO DO PRODUTO: isto é só um AVISO, nunca um bloqueio — a
+ * venda sempre salva mesmo com item sem preço (ver `avisoItensSemPreco`,
+ * que só decide o TEXTO, e o uso em ModalSaida abaixo, que nunca desabilita
+ * o Salvar nem valida nada no envio). Mesma linha do aviso de limite de
+ * crédito (avisoLimiteCredito, derive/pagamento.ts).
+ *
+ * NÃO distingue campo vazio de zero DIGITADO de propósito (brinde,
+ * bonificação): os dois convertem pro mesmo `Number(preco) || 0` no envio
+ * (`salvar`, abaixo) e o formulário não guarda em lugar nenhum se aquele "0"
+ * veio do teclado ou nunca foi tocado — inventar essa distinção aqui exigiria
+ * um novo campo de estado só pra isso. Como a decisão do dono é "avisa nos
+ * dois casos, nunca bloqueia", a ausência da distinção não muda o
+ * comportamento correto: quem digitou 0 de propósito vê o aviso e salva
+ * assim mesmo, que é exatamente o que ele queria.
+ *
+ * Só conta linha com produto ESCOLHIDO: sem `produto_id` não há o que
+ * nomear, e essa falta já é bloqueada por `erroItens`
+ * ("Selecione um produto em todos os itens.") antes de chegar aqui.
+ */
+function nomesSemPreco(itens: ItemLinha[], produtos: Produto[]): string[] {
+  const vistos = new Set<string>()
+  const nomes: string[] = []
+  for (const it of itens) {
+    if (!it.produto_id) continue
+    if ((Number(it.preco) || 0) > 0) continue
+    const nome = produtos.find(p => p.id === it.produto_id)?.nome ?? it.produto_id
+    if (!vistos.has(nome)) { vistos.add(nome); nomes.push(nome) }
+  }
+  return nomes
+}
+
+/**
+ * Texto do aviso de item sem preço — nomeia os produtos, nunca um genérico
+ * "há itens sem preço": num pedido de vinte linhas, o genérico obriga
+ * conferir vinte campos, o específico aponta o dedo.
+ */
+function avisoItensSemPreco(nomes: string[]): string {
+  const lista = nomes.length === 1
+    ? nomes[0]
+    : nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1]
+  const verbo = nomes.length === 1 ? 'está' : 'estão'
+  return `${lista} ${verbo} sem preço — a venda salva assim mesmo, como R$ 0,00.`
+}
+
 interface ModalSaidaProps {
   /** null = criando uma saida nova. String = editando — usado para buscar o
    * cabecalho COM itens (GET /:id; a listagem so traz totais agregados). */
@@ -197,6 +250,17 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
   const [erroGeral, setErroGeral] = useState('')
   const [salvando, setSalvando] = useState(false)
 
+  // Aviso de item sem preco — ver `nomesSemPreco`/`avisoItensSemPreco` acima.
+  // Comeca DESLIGADO: mostrar isso enquanto a pessoa ainda esta preenchendo
+  // acusaria a linha recem-adicionada que ela ainda vai preencher (mesmo
+  // motivo por que "Selecione um produto..." tambem so aparece depois de uma
+  // tentativa de salvar, nao a cada tecla — ver `erroItens`). Uma vez
+  // armado (na PRIMEIRA tentativa de salvar, dentro de `salvar` abaixo) fica
+  // ligado pelo resto da sessao do formulario: dali em diante o aviso reage
+  // ao vivo com `itens` (some sozinho ao preencher o preco, reaparece se a
+  // pessoa apagar de novo), sem precisar clicar em Salvar de novo.
+  const [avisoPrecoAtivo, setAvisoPrecoAtivo] = useState(false)
+
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false)
   const [excluindo, setExcluindo] = useState(false)
   const [erroExclusao, setErroExclusao] = useState('')
@@ -212,11 +276,11 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
       .catch((err: unknown) => {
         if (cancelado) return
         if (err instanceof ErroApi && err.status === 401) { onSessaoExpirada?.(); return }
-        // Colaborador: hoje /api/clientes e /api/produtos sao admin-only
-        // (exigirAdmin), diferente de /api/saidas. A tela de saidas em si e
-        // liberada pro colaborador, mas sem esses dois endpoints os
-        // seletores ficam vazios — mensagem honesta em vez de um formulario
-        // silenciosamente quebrado. Ver observacao no relatorio final.
+        // GET /api/clientes e GET /api/produtos pedem so sessao
+        // (exigirSessao) — so POST/PUT/DELETE exigem admin (exigirAdmin)
+        // nesses dois endpoints, e este modal so LE os dois. Se a busca
+        // falhar mesmo assim (rede, 5xx, etc.), os seletores ficam vazios —
+        // mensagem honesta em vez de um formulario silenciosamente quebrado.
         setErroOpcoes('Não foi possível carregar clientes e produtos para os seletores.')
       })
     return () => { cancelado = true }
@@ -391,6 +455,11 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
 
   const total = itens.reduce((soma, it) => soma + (Number(it.qtd) || 0) * (Number(it.preco) || 0), 0)
 
+  // Aviso de item sem preco (NUNCA bloqueia — ver nomesSemPreco acima).
+  // Recalculado a cada render, igual a `total`: por isso o aviso some
+  // sozinho assim que o campo de preco em falta e preenchido.
+  const produtosSemPreco = nomesSemPreco(itens, produtos)
+
   // Aviso de limite de credito (NUNCA bloqueia — ver avisoLimiteCredito).
   // `saidaId` como `ignorarId`: ao editar, `saidasAnteriores` ja contem a
   // versao gravada desta mesma saida — sem excluir ela, o valor entraria
@@ -406,6 +475,11 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
     setErroDataPedido('')
     setErroItens('')
     setErroGeral('')
+    // Arma o aviso de item sem preco na primeira tentativa de salvar (ver o
+    // comentario junto de `avisoPrecoAtivo`, acima) — mesmo em tentativas que
+    // acabam bloqueadas por outro campo invalido abaixo: a pessoa clicou em
+    // Salvar, entao dali em diante o aviso pode aparecer.
+    setAvisoPrecoAtivo(true)
 
     let temCampoInvalido = false
     if (!rascunho.numero.trim()) {
@@ -620,6 +694,19 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
                       salvavel com os precos digitados a mao. */}
                   {erroMemoria && (
                     <p className="modal-aviso-memoria" role="status">{erroMemoria}</p>
+                  )}
+
+                  {/* Aviso de item sem preco: aviso, nunca bloqueio (decisao
+                      do dono do produto, mesma linha do aviso de limite de
+                      credito acima). role="status" (nao "alert") — informa
+                      sem interromper o leitor de tela. So aparece depois de
+                      uma tentativa de salvar (ver avisoPrecoAtivo) e nomeia
+                      os produtos em falta, nunca um generico "ha itens sem
+                      preco". */}
+                  {avisoPrecoAtivo && produtosSemPreco.length > 0 && (
+                    <p className="modal-aviso-preco" role="status">
+                      {avisoItensSemPreco(produtosSemPreco)}
+                    </p>
                   )}
 
                   {itens.length > 0 && (

@@ -353,3 +353,74 @@ describe('logout apaga a sessao no banco — provado, nao presumido', () => {
     expect(await segundosRestantes(token)).toBeGreaterThan(SEGUNDOS_DA_JANELA - 60)
   })
 })
+
+describe('a sessao morre ao fechar a ABA — o encerramento chega ao banco', () => {
+  /** Faz o login e devolve o token do cookie — o mesmo cookie que TODA aba
+   * daquele navegador vai mandar, porque cookie e escopo de navegador. */
+  async function logar(): Promise<string> {
+    const res = await pedir('/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ slug: 'teste-janela', email: 'dono@janela.com', senha: SENHA }),
+    })
+    expect(res.status).toBe(200)
+    const token = (res.headers.get('set-cookie') ?? '')
+      .match(new RegExp(`${COOKIE_SESSAO}=([^;]+)`))?.[1]
+    expect(token).toBeTruthy()
+    return token!
+  }
+
+  it('o logout que a aba nova dispara no boot APAGA A LINHA — nao so esconde a tela', async () => {
+    // A terceira camada (web/src/marcaDaAba.ts + o boot em web/src/App.tsx):
+    // aba sem marca nao confia no cookie e chama POST /api/logout ANTES de
+    // qualquer busca autenticada. O teste do front prova que a chamada sai e
+    // que a tela de login aparece; o que ele NAO consegue provar e o que
+    // interessa aqui — que a sessao deixou de existir do lado do servidor.
+    // Enquanto a linha existir, o cookie e uma sessao viva esperando quem
+    // souber usa-la, e a tela de login e so uma cortina.
+    const token = await logar()
+    expect((await pedir('/api/eu', comSessao(token))).status).toBe(200)
+
+    // O boot da aba nova, exatamente como o front o faz.
+    const res = await pedir('/api/logout', { method: 'POST', ...comSessao(token) })
+    expect(res.status).toBe(200)
+
+    // Consultado com o role admin: sem RLS e sem passar por resolver_sessao,
+    // a linha sumiu de verdade.
+    const [linha] = await admin`select 1 from sessoes where token = ${token}`
+    expect(linha).toBeUndefined()
+
+    // E o cookie que sobrou na aba antiga (a que fica aberta atras) nao vale
+    // mais nada: e assim que a segunda aba derruba a primeira.
+    expect((await pedir('/api/eu', comSessao(token))).status).toBe(401)
+  })
+
+  it('a sessao encerrada pela aba nao volta a valer sozinha nem depois de esperar', async () => {
+    // A renovacao roda em `waitUntil`, DEPOIS da resposta. Se ela pudesse
+    // reinserir ou ressuscitar o que o logout apagou, a sessao encerrada pela
+    // aba nova voltaria a existir alguns milissegundos depois — silenciosa,
+    // porque nada nos logs falaria disso.
+    const token = await logar()
+    await pedir('/api/logout', { method: 'POST', ...comSessao(token) })
+
+    for (let i = 0; i < 3; i++) {
+      expect((await pedir('/api/eu', comSessao(token))).status).toBe(401)
+    }
+    expect(await segundosRestantes(token)).toBeNull()
+  })
+
+  it('encerrar a sessao de uma aba nao derruba as OUTRAS sessoes da mesma conta', async () => {
+    // A camada nova encerra UMA sessao (a do token que chegou no cookie), nao
+    // "as sessoes daquele usuario" nem "as daquele tenant". Se alguem um dia
+    // trocar o delete por algo mais largo — `delete from sessoes where
+    // usuario_id = ...` — abrir o CRM numa aba nova no computador do balcao
+    // passaria a deslogar o celular do dono junto, sem nenhum motivo.
+    const deOutroAparelho = await criarSessao(sql, usuarioId, tenantId)
+    const token = await logar()
+
+    await pedir('/api/logout', { method: 'POST', ...comSessao(token) })
+
+    expect((await pedir('/api/eu', comSessao(token))).status).toBe(401)
+    expect((await pedir('/api/eu', comSessao(deOutroAparelho))).status).toBe(200)
+  })
+})

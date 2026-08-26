@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import App from './App'
 import { api, ErroApi } from './api/client'
 import { rotuloPeriodo } from './derive/periodo'
+import { abaFoiMarcada, marcarAba } from './marcaDaAba'
 import { JANELA_DE_AGRUPAMENTO_MS } from './presenca'
 
 // Mock de `api.get` e `api.post` — mantem a classe ErroApi real (App e as
@@ -44,10 +45,27 @@ function mockTudo(papel: 'admin' | 'colaborador' = 'admin', usuarioId = 'u-1') {
   })
 }
 
+/** O `sessionStorage` real do jsdom, para restaurar depois dos testes que o
+ * trocam por um que lança (molde: preferenciaGuia.test.ts). */
+const sessionStorageOriginal = Object.getOwnPropertyDescriptor(window, 'sessionStorage')!
+
+function trocarSessionStorage(descritor: PropertyDescriptor) {
+  Object.defineProperty(window, 'sessionStorage', { configurable: true, ...descritor })
+}
+
 beforeEach(() => {
   mockGet.mockReset()
   mockPost.mockReset()
   mockPost.mockResolvedValue({ ok: true })
+  // ESTA ABA JA AUTENTICOU ALGUEM. Desde a terceira camada da politica de
+  // sessao (marcaDaAba.ts), o boot so confia no cookie se a aba carregar a
+  // marca; sem ela, todo `render(<App />)` deste arquivo cairia na tela de
+  // login. Marcada, a aba modela o estado normal de quem entrou e depois
+  // recarregou a pagina — que e o que os testes daqui precisam. Os testes da
+  // propria camada limpam a marca de proposito.
+  trocarSessionStorage(sessionStorageOriginal)
+  window.sessionStorage.clear()
+  marcarAba()
 })
 
 describe('App — o periodo global sobrevive a troca de tela', () => {
@@ -394,5 +412,233 @@ describe('App — sinal de presenca mantem viva a sessao de quem esta digitando'
 
     expect(await screen.findByText(AVISO_EXPIRADA)).toBeInTheDocument()
     expect(screen.getByLabelText('Período')).toBeInTheDocument()
+  })
+})
+
+// ==================================================================
+// TERCEIRA CAMADA: A SESSAO MORRE AO FECHAR A ABA
+//
+// As duas camadas anteriores (cookie de sessao e 30 minutos de inatividade)
+// deixavam um buraco: cookie e escopo de NAVEGADOR, nao de aba. Fechar a guia
+// do CRM e abrir outra devolvia a sessao sem tela de login. Agora a aba que
+// autentica se marca (marcaDaAba.ts), e o boot que encontrar cookie SEM marca
+// encerra a sessao no SERVIDOR antes de qualquer outra coisa.
+//
+// Os testes abaixo cobrem tanto o que a camada tem que fazer quanto os tres
+// jeitos classicos de errar isso: deslogar no F5, deslogar ao navegar, e
+// falhar ABERTO quando o armazenamento nao esta disponivel.
+// ==================================================================
+
+/** Modela ABRIR UMA ABA NOVA. O que separa uma aba da outra, para efeito
+ * desta politica, e uma coisa so: `sessionStorage` e por aba e nasce vazio,
+ * enquanto o COOKIE e do navegador e chega igual nas duas. jsdom tem uma
+ * janela so, entao "abrir aba nova" aqui e limpar o armazenamento antes de
+ * montar o App — que e exatamente o estado com que a aba nova chegaria. */
+function abaNova() {
+  window.sessionStorage.clear()
+}
+
+const logoutsPedidos = () => mockPost.mock.calls.filter(c => c[0] === '/api/logout').length
+
+describe('App — aba sem marca nao herda a sessao de outra aba', () => {
+  it('encerra a sessao no SERVIDOR e exige login, mesmo com o cookie valido', async () => {
+    // `mockTudo` significa que o cookie ainda vale: /api/eu responderia 200.
+    // E justamente esse o caso perigoso — o cookie vale, e nao deveria valer
+    // NESTA aba.
+    mockTudo('admin', 'u-dono')
+    abaNova()
+    render(<App />)
+
+    expect(await screen.findByLabelText('E-mail')).toHaveValue('')
+    expect(screen.queryByLabelText('Período')).not.toBeInTheDocument()
+
+    // Mostrar a tela de login e esconder o app NAO basta: um cookie que
+    // continua valendo no servidor e uma sessao viva esperando quem souber
+    // usa-la. Quem apaga a linha e o POST /api/logout.
+    expect(mockPost).toHaveBeenCalledWith('/api/logout')
+
+    // E a ORDEM: a verificacao da aba correu antes de qualquer busca
+    // autenticada. Nao se carrega dado com um cookie que se vai invalidar na
+    // linha seguinte.
+    expect(chamadas('/api/eu')).toBe(0)
+  })
+
+  it('a aba MARCADA nao encerra nada — o cookie e dela', async () => {
+    // A outra metade da regra. Sem este teste, "encerrar sempre" passaria
+    // pelo teste de cima e ninguem conseguiria usar o sistema.
+    mockTudo('admin', 'u-dono')
+    render(<App />)
+
+    await screen.findByLabelText('Período')
+    expect(logoutsPedidos()).toBe(0)
+  })
+
+  it('logout que falha nao devolve a aba ao app — continua exigindo login', async () => {
+    // Falha fechada tambem aqui: se o servidor nao responder, a sessao pode
+    // ter sobrevivido no banco, mas quem esta na frente da tela digita a
+    // senha do mesmo jeito.
+    mockTudo('admin', 'u-dono')
+    mockPost.mockRejectedValue(new ErroApi(500, { erro: 'indisponivel' }))
+    abaNova()
+    render(<App />)
+
+    expect(await screen.findByLabelText('E-mail')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Período')).not.toBeInTheDocument()
+  })
+
+  it('sessionStorage indisponivel exige login mesmo com cookie valido (falha fechada)', async () => {
+    // Navegador com armazenamento de sites bloqueado: o proprio acesso a
+    // `window.sessionStorage` lanca, antes de qualquer leitura. Se a excecao
+    // fosse tratada como "esta tudo bem", a politica falharia ABERTA — e
+    // falhar aberto aqui e entregar a sessao do dono.
+    mockTudo('admin', 'u-dono')
+    trocarSessionStorage({ get() { throw new DOMException('acesso negado', 'SecurityError') } })
+    render(<App />)
+
+    expect(await screen.findByLabelText('E-mail')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Período')).not.toBeInTheDocument()
+    expect(mockPost).toHaveBeenCalledWith('/api/logout')
+    expect(chamadas('/api/eu')).toBe(0)
+  })
+})
+
+describe('App — o que NAO pode deslogar', () => {
+  it('recarregar a pagina (F5) nao desloga', async () => {
+    // O erro classico desta camada e usar `beforeunload`/`pagehide` para
+    // detectar o fechamento da aba: esses eventos disparam identicos no F5, e
+    // um F5 acidental derrubaria a sessao no meio de um pedido. Aqui a
+    // deteccao e a AUSENCIA DA MARCA no boot — e a marca sobrevive a recarga.
+    mockTudo('colaborador', 'u-func')
+    abaNova()
+    const aba = render(<App />)
+
+    // Entra pela tela de login desta aba: e o login que grava a marca.
+    await screen.findByLabelText('E-mail')
+    preencherLogin()
+    await screen.findByText('Entradas (Compras)', { selector: '.shell-header-titulo' })
+    const logoutsAntesDoF5 = logoutsPedidos()
+
+    // O F5. Recarregar joga fora TODO o estado de JavaScript (por isso
+    // desmontar e montar de novo) e PRESERVA o sessionStorage (por isso a
+    // marca nao e tocada). E esse par que define o comportamento a provar.
+    aba.unmount()
+    render(<App />)
+
+    await screen.findByText('Entradas (Compras)', { selector: '.shell-header-titulo' })
+    expect(screen.queryByLabelText('E-mail')).not.toBeInTheDocument()
+    expect(logoutsPedidos()).toBe(logoutsAntesDoF5)
+  })
+
+  it('recarregar dez vezes seguidas continua sem deslogar', async () => {
+    // A marca nao pode ser de uso unico: quem trabalha o dia inteiro recarrega
+    // a pagina varias vezes, e cada recarga passa pelo mesmo boot.
+    mockTudo('colaborador', 'u-func')
+    let aba = render(<App />)
+    await screen.findByText('Entradas (Compras)', { selector: '.shell-header-titulo' })
+
+    for (let i = 0; i < 10; i++) {
+      aba.unmount()
+      aba = render(<App />)
+      await screen.findByText('Entradas (Compras)', { selector: '.shell-header-titulo' })
+    }
+    expect(logoutsPedidos()).toBe(0)
+  })
+
+  it('navegar entre telas pelo menu nao desloga', async () => {
+    // Trocar de tela e troca de estado em React, nao boot: a verificacao da
+    // aba roda UMA vez, na montagem do App. Se ela morasse em algum lugar que
+    // reavalia a cada navegacao, o primeiro clique no menu derrubaria a
+    // sessao.
+    mockTudo('admin', 'u-dono')
+    render(<App />)
+    await screen.findByLabelText('Período')
+
+    for (const item of ['Fornecedores', 'Produtos', 'Entradas (Compras)', 'Saídas (Vendas)']) {
+      fireEvent.click(screen.getByRole('button', { name: item }))
+      await screen.findByText(item, { selector: '.shell-header-titulo' })
+    }
+
+    expect(logoutsPedidos()).toBe(0)
+    expect(screen.queryByLabelText('E-mail')).not.toBeInTheDocument()
+  })
+})
+
+describe('App — quem autentica marca a aba', () => {
+  it('login bem-sucedido grava a marca', async () => {
+    mockTudo('colaborador', 'u-func')
+    abaNova()
+    render(<App />)
+
+    await screen.findByLabelText('E-mail')
+    expect(abaFoiMarcada()).toBe(false)
+
+    preencherLogin()
+    await screen.findByText('Entradas (Compras)', { selector: '.shell-header-titulo' })
+
+    // Sem esta gravacao, o proximo F5 desta mesma aba a trataria como aba
+    // estranha e encerraria a sessao que acabou de nascer.
+    expect(abaFoiMarcada()).toBe(true)
+  })
+
+  it('reautenticar por cima do aviso de sessao expirada tambem marca', async () => {
+    mockTudo('colaborador', 'u-func')
+    render(<App />)
+    await screen.findByLabelText('Período')
+
+    expirarSessaoNoServidor()
+    fireEvent.click(screen.getByRole('button', { name: 'Saídas (Vendas)' }))
+    await screen.findByText(AVISO_EXPIRADA)
+
+    // A aba perdeu a marca no meio do caminho (dados do site limpos, por
+    // exemplo). O segundo caminho de autenticacao do sistema tem que marcar
+    // igual ao primeiro: quem entra AQUI e dono de uma sessao nova, e o F5
+    // seguinte nao pode derrubar uma sessao que ninguem abandonou.
+    window.sessionStorage.clear()
+    mockTudo('colaborador', 'u-func')
+    preencherLogin()
+
+    await waitFor(() => expect(screen.queryByText(AVISO_EXPIRADA)).not.toBeInTheDocument())
+    expect(abaFoiMarcada()).toBe(true)
+  })
+})
+
+describe('App — a segunda aba derruba a primeira (consequencia aceita)', () => {
+  it('a primeira cai no aviso por cima, com o formulario preenchido intacto', async () => {
+    // O dono pediu "o mais chato possivel", e isto e o preco: nao ha como
+    // distinguir "a mesma pessoa abriu duas abas" de "outra pessoa abriu uma
+    // aba", que e o problema inteiro. O que da para garantir e que a primeira
+    // aba caia BEM — sem levar junto o que estava digitado.
+    mockTudo('admin', 'u-dono')
+    const aba1 = render(<App />)
+    const em1 = within(aba1.container)
+    await em1.findByLabelText('Período')
+
+    // O dono esta no meio de um cadastro: modal aberto, nome ja digitado.
+    fireEvent.click(em1.getByRole('button', { name: /Novo cliente/ }))
+    fireEvent.change(em1.getByLabelText('Nome do estabelecimento'),
+      { target: { value: 'Mercado do Zé' } })
+
+    // O funcionario abre o CRM numa aba nova. Ela nasce sem marca e com o
+    // MESMO cookie — cookie e do navegador — entao encerra a sessao no
+    // servidor. (A aba 1 nao volta a ler a marca: ela nao faz boot de novo.)
+    abaNova()
+    const aba2 = render(<App />)
+    const em2 = within(aba2.container)
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/api/logout'))
+    expect(await em2.findByLabelText('E-mail')).toHaveValue('')
+
+    // A partir daqui o token esta morto no banco. A aba 1 descobre na
+    // primeira requisicao que fizer — aqui, o sinal de presenca.
+    expirarSessaoNoServidor()
+    const relogio = vi.spyOn(Date, 'now')
+      .mockReturnValue(Date.now() + JANELA_DE_AGRUPAMENTO_MS + 1)
+    fireEvent.keyDown(document.body)
+    relogio.mockRestore()
+
+    // A aba 1 CAI — mas no aviso por cima, nao na tela de login: a arvore
+    // continua montada e o que estava digitado continua la, byte por byte.
+    expect(await em1.findByText(AVISO_EXPIRADA)).toBeInTheDocument()
+    expect(em1.getByLabelText('Nome do estabelecimento')).toHaveValue('Mercado do Zé')
+    expect(em1.getByLabelText('Período')).toBeInTheDocument()
   })
 })

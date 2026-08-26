@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { api, ErroApi } from './api/client'
 import { instalarGuardaDeScrollNumerico } from './campoNumerico'
+import { abaFoiMarcada, marcarAba } from './marcaDaAba'
 import { instalarSinalDePresenca } from './presenca'
 import { Login } from './screens/Login'
 import { Shell } from './components/Shell'
@@ -170,16 +171,58 @@ function App() {
    */
   const [sessaoExpirada, setSessaoExpirada] = useState(false)
 
-  // Ao carregar a pagina (inclui F5), pergunta pra API se o cookie de
-  // sessao ainda e valido antes de decidir entre tela de login e app.
   // Vale para o app inteiro: a roda do mouse nao pode alterar campo
   // numerico focado (ver campoNumerico.ts).
   useEffect(instalarGuardaDeScrollNumerico, [])
 
+  /**
+   * O BOOT — e a terceira camada da politica de computador compartilhado.
+   *
+   * Ao carregar a pagina (inclui F5), pergunta pra API se o cookie de sessao
+   * ainda e valido antes de decidir entre tela de login e app. So que o
+   * cookie sozinho responde a pergunta errada. Ele e escopo de NAVEGADOR:
+   * fechar a aba do CRM e abrir outra devolve a mesma sessao, sem tela de
+   * login nenhuma. As duas camadas de 478133f nao pegam isso — a primeira so
+   * age ao fechar o navegador inteiro, a segunda so depois de 30 minutos
+   * parada.
+   *
+   * Entao a primeira pergunta nao e "o cookie vale?", e "ESTA ABA ja
+   * autenticou alguem?" (marcaDaAba.ts). Sem marca, o cookie que chegou junto
+   * e de outra aba, e ele NAO E APENAS IGNORADO: a sessao e encerrada NO
+   * SERVIDOR. Esconder a tela e deixar o token vivo seria trocar uma sessao
+   * aberta na tela por uma sessao aberta esperando quem souber usar o cookie
+   * — e o POST /api/logout apaga a linha de verdade (provado em
+   * api/test/janela_sessao.test.ts, nao presumido).
+   *
+   * A ORDEM IMPORTA. A verificacao da aba vem ANTES de qualquer busca
+   * autenticada: nao faz sentido pedir /api/eu (nem, mais adiante, a lista de
+   * clientes) com um cookie que se vai invalidar em seguida. Enquanto
+   * `estado` for 'verificando' o App nao renderiza nada, entao nenhuma tela
+   * chega a montar e disparar fetch proprio.
+   *
+   * NAO HA `beforeunload`/`pagehide` AQUI, E ISSO E DELIBERADO. Esses eventos
+   * disparam tambem em F5 e em navegacao — deslogar por eles derrubaria a
+   * sessao a cada recarregamento acidental. O sinal e a AUSENCIA DA MARCA no
+   * boot, e a marca sobrevive ao recarregamento; por isso F5 nao desloga.
+   *
+   * CONSEQUENCIA ACEITA: abrir uma segunda aba do CRM derruba a primeira, que
+   * cai no aviso de sessao expirada com o formulario preservado atras. Nao ha
+   * excecao para "e a mesma pessoa em duas abas" porque nao existe como
+   * distinguir isso de duas pessoas — que e o problema inteiro.
+   */
   useEffect(() => {
-    api.get<Eu>('/api/eu')
-      .then(dados => { setEu(dados); setEstado('logado') })
-      .catch(() => setEstado('deslogado'))
+    if (abaFoiMarcada()) {
+      api.get<Eu>('/api/eu')
+        .then(dados => { setEu(dados); setEstado('logado') })
+        .catch(() => setEstado('deslogado'))
+      return
+    }
+    // O erro e engolido de proposito: sem sessao valida o logout responde
+    // 401, e esse e o caso comum (primeira visita, cookie ja expirado). Deu
+    // certo ou nao, o destino e o mesmo — tela de login.
+    api.post('/api/logout')
+      .catch(() => {})
+      .finally(() => setEstado('deslogado'))
   }, [])
 
   /** Identidade estavel: e prop de dezenas de telas, varias delas com
@@ -214,6 +257,12 @@ function App() {
   }, [estado, sessaoExpirada, aoExpirar])
 
   async function aoEntrar() {
+    // A MARCA VEM PRIMEIRO. Ela e o que diz ao proximo boot desta aba
+    // (qualquer F5 daqui pra frente) que aqui dentro alguem autenticou de
+    // verdade. Gravar depois de `setEstado('logado')` deixaria uma janela em
+    // que a area logada esta montada e a aba, aos olhos da politica, ainda e
+    // uma aba estranha carregando cookie alheio.
+    marcarAba()
     // POST /api/login so confirma { ok: true } e grava o cookie; usuarioId
     // e papel vem de uma segunda chamada a /api/eu, ja autenticada por ele.
     try {
@@ -285,6 +334,11 @@ function App() {
    * sessao existe para fechar, entrando pela porta do lado.
    */
   async function aoReautenticar() {
+    // Mesmo motivo de `aoEntrar`: quem autentica NESTA aba marca esta aba.
+    // Sao os dois unicos caminhos por onde alguem entra, e a regra tem que
+    // valer nos dois — senao uma sessao nascida aqui morreria no F5 seguinte
+    // sem que ninguem tivesse fechado aba nenhuma.
+    marcarAba()
     try {
       const dados = await api.get<Eu>('/api/eu')
       if (dados.usuarioId !== eu?.usuarioId) {

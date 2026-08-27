@@ -761,17 +761,20 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
                             armadilhas nessa comparacao, e as tres derrubam o
                             aviso de formas diferentes:
 
-                            1) UNIDADE. O saldo vem EM KG e `it.qtd` esta na
-                            unidade escolhida na linha (`it.un`). Comparar os
-                            dois crus repetiria exatamente o defeito que as
-                            telas de Estoque, Compras, Vendas, Produtos e
-                            Perdas acabaram de corrigir: "50" caixas nunca
+                            1) UNIDADE. Cada linha do saldo vem na unidade em
+                            que ELA foi lancada (`un` da linha), e `it.qtd`
+                            esta na unidade escolhida AQUI (`it.un`) — que pode
+                            ser outra. Comparar os dois crus repetiria o
+                            defeito que as telas de Estoque, Compras, Vendas,
+                            Produtos e Perdas corrigiram: "50" caixas nunca
                             passam de "200" quilos, e o aviso simplesmente
-                            nunca dispararia. A comparacao tem de acontecer
-                            toda em kg — `it.qtd` convertido pela MESMA regra
-                            da API (un === 'KG' ? qtd : qtd * peso_medio, e so
-                            quando peso_medio > 0), com o `peso_medio` que
-                            `produtos` ja traz neste modal.
+                            nunca dispararia. Como somar linhas exige uma
+                            unidade comum, a comparacao tem de acontecer toda
+                            em kg — o `em_kg` de cada linha, e `it.qtd`
+                            convertido pela MESMA regra da API (un === 'KG'
+                            ? qtd : qtd * peso_medio, e so quando
+                            peso_medio > 0), com o `peso_medio` que `produtos`
+                            ja traz neste modal.
 
                             2) LINHAS POR PRODUTO. GET /api/estoque devolve uma
                             linha por (produto, unidade LANCADA), nao uma por
@@ -782,21 +785,17 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
                             naquela unidade, um numero menor e sem significado
                             aqui (avisaria falta de mercadoria que existe).
 
-                            3) LINHA INCOMPLETA. Linha com
-                            `itens_sem_conversao > 0` tem saldo incompleto por
-                            construcao (as quantidades ficaram de fora e so as
-                            perdas em kg entraram, entao ele tende a negativo).
-                            Um aviso disparado sobre ela e alarme falso — pelo
-                            mesmo motivo que EstoqueLista.tsx nao pinta esse
-                            saldo de vermelho. Nesse caso o certo e nao avisar
+                            3) LINHA SEM CONVERSAO. Linha com `em_kg === null`
+                            (unidade != KG sem peso medio cadastrado) nao pode
+                            entrar nessa soma: a quantidade dela e exata na
+                            unidade lancada, mas nao existe em quilos. Somar
+                            zero por ela produziria um saldo menor que a
+                            realidade e um alarme falso — o certo e nao avisar
                             (ou dizer que o saldo daquele produto nao e
-                            conhecido), nunca acusar excesso.
-
-                            E `equivalente_un` NAO e um atalho para nada disso:
-                            ele e null justamente quando un === 'KG' (nada a
-                            converter) ou peso_medio === 0 (sem fator), ou
-                            seja, falta nos dois casos em que seria preciso, e
-                            e por linha, herdando a armadilha 2.
+                            conhecido), nunca acusar excesso. E o mesmo
+                            criterio de `totalEstoqueKg` em derive/estoque.ts,
+                            que ja resolve exatamente esta soma e conta quantas
+                            linhas ficaram de fora.
 
                             Nao fizemos isso aqui ainda, entao nenhum calculo
                             e nenhum valor de disponibilidade sao inventados

@@ -8,6 +8,7 @@ import {
   TIPOS_MOVIMENTACAO,
   posicaoEstoque,
   avisoSaidasSemData,
+  totalEstoqueKg,
   PARAM_POSICAO,
   type MovimentacaoEstoque,
 } from './estoque'
@@ -132,7 +133,7 @@ describe('textoMovimentacao e rotulos', () => {
 describe('agruparMovimentacoes', () => {
   const mov = (over: Partial<MovimentacaoEstoque> = {}): MovimentacaoEstoque => ({
     produto_id: 'p-1', un: 'KG', tipo: 'entrada', data: '2026-08-01',
-    qtd_kg: 10, referencia: 'E-1', total: 1, ...over,
+    qtd: 10, qtd_kg: 10, referencia: 'E-1', total: 1, ...over,
   })
 
   it('agrupa por produto E unidade — CX e KG do mesmo produto sao historicos separados', () => {
@@ -258,5 +259,80 @@ describe('avisoSaidasSemData', () => {
 
   it('diz o que fazer a respeito, nao so o que aconteceu', () => {
     expect(avisoSaidasSemData(2)).toMatch(/Preencha a entrega/i)
+  })
+})
+
+
+// ============================================== o total ENTRE linhas, em kg
+
+describe('totalEstoqueKg', () => {
+  const soma = (saldo: number) => ({ em_kg: { entrou: saldo, perda: 0, saiu: 0, saldo } })
+  const fora = () => ({ em_kg: null })
+
+  it('soma as linhas convertiveis em quilos — a unica unidade em que a soma entre linhas fecha', () => {
+    const t = totalEstoqueKg([
+      { em_kg: { entrou: 100, perda: 15, saiu: 30, saldo: 55 } },
+      { em_kg: { entrou: 150, perda: 1, saiu: 0, saldo: 149 } },
+    ])
+    expect(t.entrou).toBe(250)
+    expect(t.perda).toBe(16)
+    expect(t.saiu).toBe(30)
+    expect(t.saldo).toBe(204)
+    expect(t.linhasSomadas).toBe(2)
+    expect(t.linhasDeFora).toBe(0)
+    expect(t.disponivel).toBe(true)
+    // Total completo nao ganha aviso: a tela nao explica o que nao aconteceu.
+    expect(t.aviso).toBe('')
+  })
+
+  it('linha sem conversao NAO entra como zero: fica de fora, e e contada', () => {
+    // Somar como zero seria o mesmo defeito que a tela acabou de deixar de
+    // cometer, um andar acima — um total afirmado com confianca que ignora
+    // mercadoria real em silencio.
+    const t = totalEstoqueKg([soma(55), fora(), soma(20)])
+    expect(t.saldo).toBe(75)
+    expect(t.linhasSomadas).toBe(2)
+    expect(t.linhasDeFora).toBe(1)
+    expect(t.disponivel).toBe(true)
+    expect(t.aviso).toContain('1 linha de 3')
+    expect(t.aviso).toMatch(/continua exata/)
+  })
+
+  it('o aviso diz as DUAS metades: quantas ficaram de fora e de quantas', () => {
+    const t = totalEstoqueKg([soma(10), fora(), fora(), fora()])
+    expect(t.aviso).toContain('3 linhas de 4')
+    expect(t.aviso).toMatch(/peso médio/)
+  })
+
+  it('nenhuma linha convertivel: nao ha total — disponivel false, e o saldo nao e uma afirmacao', () => {
+    // O caso real: quatro linhas em UN, 138 unidades no deposito. A tela usa
+    // `disponivel` para imprimir travessao; "0 kg" afirmaria um deposito
+    // vazio que ninguem mediu.
+    const t = totalEstoqueKg([fora(), fora(), fora(), fora()])
+    expect(t.disponivel).toBe(false)
+    expect(t.linhasSomadas).toBe(0)
+    expect(t.linhasDeFora).toBe(4)
+    expect(t.aviso).toMatch(/Nenhuma linha pôde ser somada/)
+    expect(t.aviso).toContain('4 linhas')
+    expect(t.aviso).toMatch(/continua exata/)
+  })
+
+  it('lista vazia: nao ha total nem linhas de fora, e nao ha aviso', () => {
+    const t = totalEstoqueKg([])
+    expect(t.disponivel).toBe(false)
+    expect(t.linhasSomadas).toBe(0)
+    expect(t.linhasDeFora).toBe(0)
+    expect(t.aviso).toBe('')
+  })
+
+  it('uma linha so de fora: singular, sem plural quebrado', () => {
+    expect(totalEstoqueKg([fora()]).aviso).toContain('1 linha')
+    expect(totalEstoqueKg([fora()]).aviso).not.toContain('1 linhas')
+  })
+
+  it('saldo negativo entra normalmente — o total e uma soma, nao um julgamento', () => {
+    const t = totalEstoqueKg([soma(-30), soma(50)])
+    expect(t.saldo).toBe(20)
+    expect(t.linhasSomadas).toBe(2)
   })
 })

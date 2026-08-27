@@ -120,7 +120,7 @@ describe('autorizacao', () => {
 })
 
 describe('forma da resposta', () => {
-  it('devolve um array com nome, un, entrou, perda, saiu, saldo e peso_medio numericos, em kg', async () => {
+  it('devolve um array com nome, un, entrou, perda, saiu, saldo e peso_medio numericos, na unidade lancada', async () => {
     const res = await pedir('/api/estoque', comoAdmin())
     expect(res.status).toBe(200)
     const corpo = await res.json()
@@ -136,38 +136,38 @@ describe('forma da resposta', () => {
     expect(typeof linha.saldo).toBe('number')
     expect(typeof linha.peso_medio).toBe('number')
     expect(typeof linha.itens_sem_conversao).toBe('number')
-    // `un` continua sendo a unidade LANCADA (a chave da linha); as
-    // quantidades saem em kg: 10 CX de 15 kg = 150, e o perda_kg do item
-    // (1 kg, por contrato) entra como 1 — nunca como 15.
+    // `un` e a unidade LANCADA (a chave da linha) — e agora tambem a unidade
+    // das quantidades: 10 CX entraram, e a linha diz 10, nao 150. O perda_kg
+    // do item (1 kg, por contrato) nao cabe em caixas e viaja separado.
     expect(linha.un).toBe('CX')
-    expect(linha.entrou).toBe(150)
-    expect(linha.perda).toBe(1)
+    expect(linha.entrou).toBe(10)
+    expect(linha.perda).toBe(0)
     expect(linha.saiu).toBe(0)
-    expect(linha.saldo).toBe(149) // 150 - 1 - 0
+    expect(linha.saldo).toBe(10) // 10 - 0 - 0, em CX
+    expect(linha.perda_fora_da_unidade).toBe(1) // 1 kg de coleta, em quilos
     expect(linha.itens_sem_conversao).toBe(0)
   })
 
-  it('expoe equivalente_un quando un != KG e peso_medio > 0, como leitura secundaria em embalagens', async () => {
+  it('expoe em_kg como leitura secundaria — a mesma conta em quilos, para somar entre linhas', async () => {
     const res = await pedir('/api/estoque', comoAdmin())
     const corpo = await res.json()
     const linha = corpo.find((l: { nome: string }) => l.nome === 'Melancia HTTP')
 
-    // Mesmo fator (15 kg por CX), direcao oposta: o kg e o numero principal,
-    // a contagem de embalagens e a leitura secundaria. `entrou` volta exato
-    // ao que foi lancado (10 CX); `perda` e `saldo` saem fracionarios porque
-    // carregam parcelas que nasceram em kg (perda_kg do item).
-    expect(linha.equivalente_un.entrou).toBe(10)
-    expect(linha.equivalente_un.saiu).toBe(0)
-    expect(linha.equivalente_un.perda).toBeCloseTo(1 / 15, 10)
-    expect(linha.equivalente_un.saldo).toBeCloseTo(149 / 15, 10)
-    // A coluna principal continua em kg, nao em CX.
-    expect(linha.entrou).toBe(150)
-    // O campo antigo, que multiplicava o bolo inteiro por peso_medio
-    // (inclusive as parcelas que ja eram kg), nao existe mais.
+    // O kg continua existindo e continua sendo a unica unidade em que a conta
+    // fecha ENTRE linhas — 10 CX de 15 kg = 150, e o perda_kg do item entra
+    // como 1, nunca como 15. Sao exatamente os numeros que a resposta trazia
+    // como principais antes desta mudanca; o que mudou e o alcance deles.
+    expect(linha.em_kg).toEqual({ entrou: 150, perda: 1, saiu: 0, saldo: 149 })
+    // A quantidade da linha nao e essa: ela e exata, em CX.
+    expect(linha.entrou).toBe(10)
+    // Os dois campos antigos sairam: equivalente_kg multiplicava o bolo
+    // inteiro por peso_medio; equivalente_un dividia o kg de volta pelo mesmo
+    // fator para reconstruir aproximadamente o que agora chega exato.
     expect(linha).not.toHaveProperty('equivalente_kg')
+    expect(linha).not.toHaveProperty('equivalente_un')
   })
 
-  it('equivalente_un e null quando un = KG (o numero principal ja e a propria unidade)', async () => {
+  it('linha em KG: quantidade e em_kg sao o MESMO numero (a conversao e no-op)', async () => {
     const [produtoKg] = await admin`
       insert into produtos (tenant_id, nome, un, peso_medio)
       values (${tenantId}, 'Produto KG HTTP', 'KG', 0) returning id`
@@ -180,13 +180,16 @@ describe('forma da resposta', () => {
     const res = await pedir('/api/estoque', comoAdmin())
     const corpo = await res.json()
     const linha = corpo.find((l: { nome: string }) => l.nome === 'Produto KG HTTP')
-    expect(linha.equivalente_un).toBeNull()
-    // No-op: produto so em KG sai com os mesmos numeros de sempre.
+    // Produto so em KG sai com os mesmos numeros de sempre, e a leitura
+    // secundaria e identica a principal — nao ha fator no meio.
     expect(linha.entrou).toBe(5)
+    expect(linha.saldo).toBe(5)
+    expect(linha.em_kg).toEqual({ entrou: 5, perda: 0, saiu: 0, saldo: 5 })
+    expect(linha.perda_fora_da_unidade).toBe(0)
     expect(linha.itens_sem_conversao).toBe(0)
   })
 
-  it('linha em CX sem peso_medio: quantidades ficam de fora, itens_sem_conversao marca a linha', async () => {
+  it('linha em CX sem peso_medio: a quantidade lancada aparece inteira, e em_kg e null', async () => {
     const [produtoSemFator] = await admin`
       insert into produtos (tenant_id, nome, un, peso_medio)
       values (${tenantId}, 'Caixa Sem Fator HTTP', 'CX', 0) returning id`
@@ -199,10 +202,51 @@ describe('forma da resposta', () => {
     const res = await pedir('/api/estoque', comoAdmin())
     const corpo = await res.json()
     const linha = corpo.find((l: { nome: string }) => l.nome === 'Caixa Sem Fator HTTP')
-    expect(linha.entrou).toBe(0)     // fator ausente nao vira 1
-    expect(linha.perda).toBe(2)      // perda_kg do item ja era kg
+    // 12 caixas entraram. Sem peso medio nao ha como dizer quantos quilos
+    // sao, mas as 12 caixas continuam sendo 12 caixas — antes desta mudanca
+    // esta linha exibia 0, apagando a mercadoria da tela.
+    expect(linha.entrou).toBe(12)
+    expect(linha.saldo).toBe(12)
+    expect(linha.perda).toBe(0)                // nao ha perda EM CAIXAS
+    expect(linha.perda_fora_da_unidade).toBe(2) // os 2 kg de coleta, em kg
+    // Fator ausente nao vira 1: a leitura em quilos simplesmente nao existe.
+    // `null`, e nao um objeto de zeros — quem soma entre linhas tem de
+    // decidir o que dizer, em vez de somar zero em silencio.
+    expect(linha.em_kg).toBeNull()
     expect(linha.itens_sem_conversao).toBe(1)
-    expect(linha.equivalente_un).toBeNull()
+  })
+
+  it('o caso real: quatro produtos lancados em UN sem peso medio somam 138 unidades, nao quatro zeros', async () => {
+    // O lancamento que revelou o defeito: entrada com quatro itens, todos em
+    // UN, de produtos cadastrados em KG e sem peso_medio. A tela mostrava
+    // "0 *" nas quatro linhas e nas quatro colunas — 138 unidades de
+    // mercadoria real exibidas como deposito vazio. Alface e rucula se vendem
+    // por unidade ou maco: "quantos quilos" nem e a pergunta certa aqui.
+    const nomes = ['Alface Hidro RE', 'Alface Roxa RE', 'Escarola RE', 'Rucula RE']
+    const qtds = [45, 45, 18, 30]
+    const [entradaReal] = await admin`
+      insert into entradas (tenant_id, numero, data)
+      values (${tenantId}, 'E-HTTP-REAL', '2026-08-25') returning id`
+    for (let i = 0; i < nomes.length; i += 1) {
+      const [p] = await admin`
+        insert into produtos (tenant_id, nome, un, peso_medio)
+        values (${tenantId}, ${nomes[i]}, 'KG', 0) returning id`
+      await admin`
+        insert into entrada_itens (tenant_id, entrada_id, produto_id, un, qtd, preco)
+        values (${tenantId}, ${entradaReal.id}, ${p.id}, 'UN', ${qtds[i]}, 3)`
+    }
+
+    const res = await pedir('/api/estoque', comoAdmin())
+    const corpo = await res.json()
+    const doCaso = nomes.map(n => corpo.find((l: { nome: string }) => l.nome === n))
+
+    doCaso.forEach((linha, i) => {
+      expect(linha.un).toBe('UN')       // a unidade LANCADA, nao produtos.un
+      expect(linha.entrou).toBe(qtds[i])
+      expect(linha.saldo).toBe(qtds[i]) // nada saiu: o deposito tem tudo
+      expect(linha.em_kg).toBeNull()    // e nao ha leitura em quilos, e tudo bem
+    })
+    expect(doCaso.reduce((s, l) => s + l.saldo, 0)).toBe(138)
   })
 
   it('tenant so ve suas proprias linhas (isolamento tambem na camada HTTP)', async () => {
@@ -346,8 +390,9 @@ describe('GET /api/estoque?posicao_em=', () => {
     const corpo = await res.json()
     const linha = corpo.find((l: { nome: string }) => l.nome === 'Melancia HTTP')
     expect(linha).toBeDefined()
-    expect(linha.entrou).toBe(150)
-    expect(linha.saldo).toBe(149)
+    expect(linha.entrou).toBe(10)   // 10 CX, na unidade lancada
+    expect(linha.saldo).toBe(10)
+    expect(linha.em_kg.entrou).toBe(150) // e 150 kg na leitura secundaria
   })
 
   it('parametro vazio conta como ausente (campo limpo = sem corte)', async () => {

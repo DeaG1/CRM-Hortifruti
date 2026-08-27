@@ -294,6 +294,17 @@
   text-overflow: ellipsis;
 }
 
+/* A conversão em quilos de UMA movimentação, ao lado da quantidade lançada —
+   secundária por peso e por cor, como a leitura sob o saldo da linha. Ela
+   acompanha o número em vez de substituí-lo: a quantidade é o que foi
+   digitado, o quilo é a leitura derivada. */
+.estoque-movimentacao-kg {
+  font-family: 'Public Sans', sans-serif;
+  font-weight: 400;
+  font-size: 11px;
+  color: #6a685c;
+}
+
 /* ---------- seção de perdas do depósito ---------- */
 
 .estoque-perdas-secao {

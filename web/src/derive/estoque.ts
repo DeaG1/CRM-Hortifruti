@@ -150,10 +150,16 @@ export interface MovimentacaoEstoque {
   tipo: TipoMovimentacao
   /** ISO 'AAAA-MM-DD'. Movimentação sem data não vem — ver a query. */
   data: string
-  /** Quantidade EM QUILOS, mesma convenção das quatro colunas da tabela.
-   * `null` quando o lançamento não é convertível (unidade ≠ KG sem
-   * `peso_medio` cadastrado): é um dos `itens_sem_conversao` da linha, e
-   * zero fingiria uma quantidade medida. */
+  /** A quantidade COMO FOI LANÇADA, na unidade `un` desta movimentação. Uma
+   * movimentação é UM lançamento, com uma unidade só: aqui não há soma
+   * nenhuma e portanto não há mistura de unidades possível. É o número que o
+   * histórico imprime. */
+  qtd: number
+  /** A mesma quantidade em quilos — leitura secundária. `null` quando o
+   * lançamento não é convertível (unidade ≠ KG sem `peso_medio` cadastrado):
+   * é um dos `itens_sem_conversao` da linha. Null significa "não há leitura
+   * em quilos desta movimentação", nunca "não houve movimentação" — a
+   * quantidade continua em `qtd`. */
   qtd_kg: number | null
   /** Número da entrada/saída, ou o motivo da perda. */
   referencia: string
@@ -193,6 +199,107 @@ export function agruparMovimentacoes(
     else porChave.set(chave, [m])
   })
   return porChave
+}
+
+// ================================================== o total ENTRE linhas (kg)
+
+/** A parte de uma linha de GET /api/estoque que o total entre linhas precisa
+ * — só isto, para a função continuar pura e testável sem montar a linha
+ * inteira. Ver `totalEstoqueKg`. */
+export interface LinhaSomavel {
+  /** A mesma conta da linha EM QUILOS, ou `null` quando não há como
+   * convertê-la (unidade ≠ KG sem peso médio cadastrado). */
+  em_kg: { entrou: number; perda: number; saiu: number; saldo: number } | null
+}
+
+/** O que a tela precisa para exibir um total honesto — ver `totalEstoqueKg`. */
+export interface TotalEstoqueKg {
+  /** As quatro somas em quilos, contando SÓ as linhas convertíveis. */
+  entrou: number
+  perda: number
+  saiu: number
+  saldo: number
+  /** Quantas linhas entraram no total. `0` = não há total nenhum a exibir. */
+  linhasSomadas: number
+  /** Quantas linhas ficaram DE FORA por não converterem. Este é o número que
+   * impede o total de mentir por omissão. */
+  linhasDeFora: number
+  /** `true` quando existe pelo menos uma linha somável — só então há número
+   * a exibir. Com `false`, a tela mostra travessão, nunca "0 kg". */
+  disponivel: boolean
+  /** A frase que acompanha o total quando alguma linha ficou de fora; `''`
+   * quando o total está completo. */
+  aviso: string
+}
+
+/**
+ * O total do depósito EM QUILOS, somando as linhas da tabela.
+ *
+ * ---- por que aqui o quilo é obrigatório ----
+ *
+ * Cada linha da tabela é (produto, unidade lançada) e mostra a quantidade na
+ * unidade dela — 45 UN de alface, 10 CX de melancia, 30 KG de batata —, o que
+ * é exato porque dentro de uma linha não existe mistura de unidades. Somar
+ * essas linhas é outra coisa: "45 + 10 + 30 = 85" não é nada. É exatamente o
+ * defeito que 203fb28/f6374ac/35f3a2e/e2ce7d5 corrigiram, e o raciocínio
+ * deles vale inteiro AQUI — entre linhas o quilo é a única unidade em que a
+ * conta fecha. Por isso o total vem de `em_kg`, e só dele.
+ *
+ * ---- e por que ele conta quantas linhas ficaram de fora ----
+ *
+ * Linha que não converte (unidade ≠ KG sem peso médio) tem `em_kg` nulo e não
+ * pode entrar. Somá-la como zero seria o mesmo erro que a tela acabou de
+ * deixar de cometer, um andar acima: um total afirmado com confiança que
+ * ignora, em silêncio, 138 unidades de mercadoria real. Então ela fica de
+ * fora E é contada, e a tela diz quantas são.
+ *
+ * `disponivel: false` quando NENHUMA linha converte: aí não há total, e o
+ * lugar dele é um travessão com a explicação — nunca "0 kg", que afirmaria um
+ * depósito vazio. É a mesma distinção da tela inteira: ausência não é zero.
+ */
+export function totalEstoqueKg(linhas: readonly LinhaSomavel[]): TotalEstoqueKg {
+  let entrou = 0, perda = 0, saiu = 0, saldo = 0
+  let linhasSomadas = 0, linhasDeFora = 0
+
+  for (const l of linhas) {
+    if (!l.em_kg) { linhasDeFora += 1; continue }
+    entrou += l.em_kg.entrou
+    perda += l.em_kg.perda
+    saiu += l.em_kg.saiu
+    saldo += l.em_kg.saldo
+    linhasSomadas += 1
+  }
+
+  return {
+    entrou, perda, saiu, saldo,
+    linhasSomadas,
+    linhasDeFora,
+    disponivel: linhasSomadas > 0,
+    aviso: avisoLinhasDeFora(linhasDeFora, linhasSomadas),
+  }
+}
+
+/**
+ * O que se diz sobre as linhas que o total em quilos deixou de fora. `''`
+ * quando nenhuma ficou — a tela não explica o que não aconteceu.
+ *
+ * As duas metades do total nunca são omitidas: quantas ficaram de fora e
+ * quantas entraram. "Total de 3 linhas" sem "2 ficaram de fora" é a forma
+ * educada de mentir sobre um depósito.
+ */
+function avisoLinhasDeFora(deFora: number, somadas: number): string {
+  if (deFora <= 0) return ''
+  const quantas = deFora === 1 ? '1 linha' : `${deFora} linhas`
+  const verbo = deFora === 1 ? 'ficou' : 'ficaram'
+  if (somadas === 0) {
+    return `Nenhuma linha pôde ser somada em quilos: ${quantas} ${verbo} de fora por estar em `
+      + 'unidade diferente de KG sem peso médio cadastrado no produto. A quantidade de cada '
+      + 'linha continua exata na tabela, na unidade em que foi lançada.'
+  }
+  const total = deFora + somadas
+  return `${quantas} de ${total} ${verbo} de fora deste total: estão em unidade diferente de KG e `
+    + 'o produto não tem peso médio cadastrado, então não há como somá-las em quilos. '
+    + 'A quantidade delas continua exata na tabela, na unidade em que foi lançada.'
 }
 
 // ============================================ posição num dia passado (corte)

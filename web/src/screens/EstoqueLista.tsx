@@ -7,17 +7,17 @@ import {
   chaveEstoque,
   posicaoEstoque,
   avisoSaidasSemData,
+  totalEstoqueKg,
   type MovimentacaoEstoque,
 } from '../derive/estoque'
 import { PerdasLista } from './PerdasLista'
 import './EstoqueLista.css'
 
-/** Leitura secundária em embalagens (as mesmas quantidades divididas pelo
- * `peso_medio`), quando `un` não é KG e o produto tem peso médio cadastrado.
- * O número principal é o kg — é a única unidade em que a conta fecha, porque
- * duas das parcelas da perda nascem em quilos por contrato. Ver o comentário
- * de `paraJson` em api/src/routes/estoque.ts. */
-interface EquivalenteUn {
+/** A mesma conta da linha EM QUILOS — leitura secundária por linha, e a
+ * única base possível para o total ENTRE linhas (ver `totalEstoqueKg` em
+ * derive/estoque.ts). `null` na linha que não converte: ausência, nunca um
+ * objeto de zeros. Ver `paraJson` em api/src/routes/estoque.ts. */
+interface EmKg {
   entrou: number
   perda: number
   saiu: number
@@ -25,7 +25,8 @@ interface EquivalenteUn {
 }
 
 /** Espelha o corpo de GET /api/estoque (api/src/routes/estoque.ts).
- * `entrou`/`perda`/`saiu`/`saldo` vêm todos EM KG. */
+ * `entrou`/`perda`/`saiu`/`saldo` vêm NA UNIDADE LANÇADA (`un`) — a linha é
+ * (produto, unidade), e dentro dela não há mistura de unidades. */
 interface LinhaEstoque {
   produto_id: string
   nome: string
@@ -35,9 +36,15 @@ interface LinhaEstoque {
   saiu: number
   saldo: number
   peso_medio: number
-  equivalente_un: EquivalenteUn | null
-  /** Lançamentos desta linha que ficaram fora das quantidades por não serem
-   * convertíveis em quilos (unidade ≠ KG sem `peso_medio` cadastrado). */
+  /** A perda que nasce EM QUILOS por contrato (coleta + entrega) e por isso
+   * não cabe na unidade da linha quando `un` ≠ KG. Sempre 0 numa linha em KG,
+   * onde ela já está somada em `perda`. Quando > 0, `perda` e `saldo` desta
+   * linha deixam esses quilos de fora — e a tela diz isso. */
+  perda_fora_da_unidade: number
+  em_kg: EmKg | null
+  /** Lançamentos desta linha sem leitura em quilos (unidade ≠ KG sem
+   * `peso_medio` cadastrado). A quantidade da linha continua exata; o que
+   * falta é poder somá-la com as outras. */
   itens_sem_conversao: number
   /** Itens de saída desta linha que descontam do saldo SEM ter data de
    * entrega. Eles contam em qualquer data escolhida — ver
@@ -68,56 +75,86 @@ const fmtQtd = (n: number) =>
  * neutro (produto zerado não é risco, só não tem estoque agora). Positivo
  * usa o texto padrão. Portado de `saldoColor` em logica-estoque.txt.
  *
- * `incompleta`: linha com lançamento não convertível não recebe a cor de
- * alerta. O vermelho é um julgamento ("está faltando mercadoria"), e o saldo
- * de uma linha incompleta é negativo por construção — as quantidades ficaram
- * de fora e só as perdas em kg entraram. Marcar com `*` conserta a leitura;
- * pintar de vermelho criaria um alarme falso que o `*` não desfaz. */
-function corSaldo(saldo: number, incompleta: boolean): string {
-  if (incompleta) return SUAVE
+ * `perdaDeFora`: linha cujo saldo deixa de fora quilos de perda que não cabem
+ * na unidade dela não recebe a cor de alerta. O vermelho é um julgamento
+ * ("está faltando mercadoria") e esse saldo está incompleto por construção —
+ * ele ignora uma perda real, então erra PARA CIMA e um vermelho ali seria
+ * arbitrário. A marca conserta a leitura; a cor criaria um alarme que a marca
+ * não desfaz. Mesma decisão de 35f3a2e, agora aplicada à condição certa: a
+ * falta de peso médio não deixa mais o saldo incompleto — ele é exato na
+ * unidade lançada —, então ela deixou de suprimir a cor. */
+function corSaldo(saldo: number, perdaDeFora: boolean): string {
+  if (perdaDeFora) return SUAVE
   if (saldo < 0) return VERMELHO
   if (saldo === 0) return SUAVE
   return TEXTO
 }
 
-// ------------------------------------- quantidade incompleta (sem peso médio)
+/** A unidade impressa junto do número: '45 UN'. Ver "os rótulos das colunas"
+ * no comentário do componente — a coluna não tem uma unidade só, cada linha
+ * tem a sua, então ela viaja colada ao valor e não pode divergir dele. */
+const comUn = (n: number, un: string) => `${fmtQtd(n)} ${un}`
+
+// ------------------------------------- sem leitura em quilos (sem peso médio)
 
 /**
- * Texto do aviso — mesma regra e mesma marca das outras telas afetadas
- * (RelatoriosTela.tsx, ProdutosLista.tsx, EntradasLista.tsx), com a
- * consequência desta: aqui o número que fica incompleto é o SALDO, o que o
- * funcionário abre a tela para ver.
+ * O que significa uma linha sem leitura em quilos.
  *
- * As quantidades saem da API em quilos, cada lançamento convertido pela
- * unidade dele; lançamento em unidade diferente de KG cujo produto não tem
- * peso médio cadastrado NÃO é convertível, e a API prefere deixá-lo de fora
- * a inventar um fator (ver `itens_sem_conversao` em
- * api/src/routes/estoque.ts). Como a linha é (produto, unidade lançada), o
- * fator é o mesmo para a linha inteira: ou tudo converte, ou nada converte e
- * sobram só as perdas que já eram kg por contrato — por isso a marca vai nas
- * quatro colunas, nunca em uma só.
+ * ATENÇÃO AO QUE ISTO **NÃO** DIZ MAIS. Até 2026-08-26 esta frase dizia que a
+ * quantidade e o saldo da linha estavam incompletos, e a marca ia nas quatro
+ * colunas — porque as quatro vinham em quilos e um lançamento sem peso médio
+ * saía delas, virando zero. Hoje a quantidade da linha vem na unidade em que
+ * foi lançada e é EXATA: 45 UN são 45 UN com ou sem peso médio. O que falta é
+ * só poder somá-la às outras linhas, que é o que o total em quilos faz.
+ *
+ * Por isso a marca saiu das quantidades e vive no TOTAL (o cartão e a nota de
+ * rodapé): é lá, e só lá, que a ausência de conversão tira algo da conta.
  */
 function avisoSemConversao(n: number): string {
   const itens = n === 1 ? '1 lançamento' : `${n} lançamentos`
-  const verbo = n === 1 ? 'ficou' : 'ficaram'
-  return `${itens} desta linha em unidade diferente de KG, sem peso médio cadastrado no `
-    + `produto, ${verbo} fora das quantidades — sem o peso da embalagem não há como somar `
-    + 'em quilos. O saldo desta linha está incompleto.'
+  const verbo = n === 1 ? 'está' : 'estão'
+  return `${itens} desta linha ${verbo} em unidade diferente de KG, e o produto não tem peso `
+    + 'médio cadastrado — sem o peso da embalagem não há como convertê-lo em quilos. A '
+    + 'quantidade da linha continua exata na unidade lançada; o que ela não faz é entrar no '
+    + 'total em quilos.'
 }
 
-/** O mesmo aviso, no singular de UMA movimentação do histórico: ali não há
- * quantidade nenhuma a exibir (nem zero, que fingiria uma medição), só a
- * marca e a explicação. */
+/**
+ * O que significa a perda que não cabe na unidade da linha.
+ *
+ * A perda na coleta e a perda na entrega são gravadas EM QUILOS por contrato,
+ * para item de qualquer unidade (o nome da coluna, o rótulo em ModalEntrada e
+ * o total do rodapé daquele modal dizem "kg"). Numa linha em KG elas entram na
+ * perda normalmente. Numa linha em CX ou UN não há como somá-las sem dividir
+ * por um peso médio — o fator inverso, a mesma aproximação escondida dentro do
+ * número principal. Então elas ficam de fora, visíveis, em quilos.
+ */
+function avisoPerdaForaDaUnidade(kg: number, un: string): string {
+  return `${fmtQtd(kg)} kg de perda na coleta/entrega não entram nesta conta: são gravados em `
+    + `quilos por contrato e esta linha está em ${un}. Convertê-los exigiria dividir pelo peso `
+    + `médio da embalagem, que é um fator aproximado — a perda e o saldo em ${un} os deixam de `
+    + 'fora de propósito. A leitura em quilos, quando disponível, traz a conta inteira.'
+}
+
+/** O mesmo aviso da linha, no singular de UMA movimentação do histórico: ali
+ * a quantidade lançada continua impressa, e o que falta é só a leitura em
+ * quilos ao lado dela. */
 const AVISO_MOVIMENTACAO_SEM_CONVERSAO =
   'Este lançamento foi feito em unidade diferente de KG, e o produto não tem peso médio '
-  + 'cadastrado — sem o peso da embalagem não há como dizer quantos quilos se moveram. '
-  + 'É um dos lançamentos que ficaram fora das quantidades desta linha.'
+  + 'cadastrado — sem o peso da embalagem não há como dizer quantos quilos se moveram. A '
+  + 'quantidade ao lado é exata; o que falta é a leitura em quilos.'
 
-/** Um número que pode estar incompleto: com `n` = 0 sai limpo (o caso
- * normal); com `n` > 0 ganha o `*` e a explicação no `title`. */
-function NumIncompleto({ texto, n }: { texto: string; n: number }) {
-  if (!n) return <>{texto}</>
-  return <span className="estoque-incompleto" title={avisoSemConversao(n)}>{texto}*</span>
+/** Um número que deixa quilos de perda de fora: com `kg` = 0 sai limpo (o
+ * caso normal); com `kg` > 0 ganha o `‡` e a explicação no `title`.
+ *
+ * A marca é `‡`, deliberadamente diferente do `*` (linha sem leitura em
+ * quilos) e do `†` (saída sem data de entrega): são três problemas distintos,
+ * e a mesma marca para todos ensina o leitor a ignorar todas. */
+function NumPerdaDeFora({ texto, kg, un }: { texto: string; kg: number; un: string }) {
+  if (!kg) return <>{texto}</>
+  return (
+    <span className="estoque-incompleto" title={avisoPerdaForaDaUnidade(kg, un)}>{texto}‡</span>
+  )
 }
 
 /**
@@ -167,6 +204,42 @@ interface EstoqueListaProps {
  * já existia como paliativo nesta tela — trocado aqui pelo saldo de verdade,
  * mas o registro de perdas continua funcionando, agora como a segunda metade
  * da tela de Estoque (mesmo layout do protótipo, tela-estoque.html).
+ *
+ * ---- cada linha na unidade em que foi lançada, e os rótulos das colunas ----
+ *
+ * A linha é (produto, unidade lançada) — é a chave do agregado — e a
+ * quantidade dela vem na unidade dela, exata. Até 2026-08-26 vinha em quilos,
+ * e uma linha sem peso médio cadastrado exibia `0 *` nas quatro colunas: 45 UN
+ * de alface hidropônica apareciam como depósito vazio, quatro vezes seguidas,
+ * com 138 unidades no estoque. A conversão para quilos continua existindo e
+ * continua obrigatória — mas ENTRE linhas, que é onde a mistura de unidades é
+ * real. Ver `totalEstoqueKg` (derive/estoque.ts) e o comentário de `paraJson`
+ * na API.
+ *
+ * OS RÓTULOS DAS COLUNAS MUDARAM POR CAUSA DISSO. Eles diziam "ENTROU (KG)",
+ * "EM ESTOQUE (KG)" — verdade enquanto a coluna inteira estava em quilos,
+ * mentira a partir do momento em que cada linha tem a sua unidade. Havia três
+ * saídas, e a escolhida foi a terceira:
+ *
+ *   1. Manter "(KG)" no cabeçalho — descartada: seria falso na maioria das
+ *      linhas, e um rótulo falso é pior que nenhum.
+ *   2. Rótulo por linha, num cabeçalho que muda — impossível: a tabela tem um
+ *      cabeçalho só para linhas de unidades diferentes.
+ *   3. A UNIDADE COLADA AO NÚMERO, em toda linha: "45 UN", "10 CX", "30 KG".
+ *      É o único rótulo que é verdadeiro em todas elas e que não pode divergir
+ *      do valor que descreve — viaja no mesmo lugar. O cabeçalho fica com o
+ *      nome puro da coluna (ENTROU, PERDAS, SAIU, EM ESTOQUE), que descreve o
+ *      que ela é sem afirmar unidade nenhuma.
+ *
+ * O selo LANÇADO EM continua: ele é a identidade da linha (por que existem
+ * duas linhas do mesmo produto), e agora o número concorda com ele em vez de
+ * contradizê-lo. A leitura em quilos desceu para a linha secundária sob o
+ * saldo, onde antes ficava a leitura em embalagens — mesma posição, direção
+ * oposta, e some quando não é possível em vez de zerar a quantidade.
+ *
+ * ZERO DE VERDADE CONTINUA ZERO. Produto que entrou 45 e saiu 45 tem saldo 0,
+ * cinza, sem marca nenhuma — isso é medição. O que deixou de existir é o outro
+ * zero, o de "não sei converter", que era indistinguível deste.
  *
  * ---- rastreamento de movimentação ----
  *
@@ -351,6 +424,11 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
   }
 
   const comEstoque = linhas.filter(l => l.saldo > 0).length
+  // O total ENTRE linhas — e o único lugar desta tela onde o quilo é
+  // obrigatório: somar 45 UN com 10 CX e 30 KG não dá número nenhum. Ele diz
+  // quantas linhas ficaram de fora, para não afirmar um depósito que ignora
+  // em silêncio a mercadoria que não converte. Ver `totalEstoqueKg`.
+  const totalKg = totalEstoqueKg(linhas)
   const totalSemConversao = linhas.reduce((s, l) => s + (l.itens_sem_conversao || 0), 0)
   // Só interessa quando se está olhando para trás: em hoje, a saída sem data
   // de entrega não tem nada de estranho — ela já é o saldo de agora.
@@ -457,6 +535,35 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
                   {posicao.historica ? ` até ${posicao.texto}` : ''}
                 </div>
               </div>
+
+              {/* O total de todas as linhas junto. Ele é EM QUILOS e não pode
+                  ser outra coisa: aqui as unidades se misturam de verdade. E
+                  ele nunca é afirmado sozinho — o subtítulo diz sempre quantas
+                  linhas entraram e quantas ficaram de fora. */}
+              <div className="estoque-stat">
+                <div className="estoque-stat-label">EM ESTOQUE (TOTAL EM KG)</div>
+                <div className="estoque-stat-valor">
+                  {totalKg.disponivel ? (
+                    totalKg.linhasDeFora > 0 ? (
+                      <span className="estoque-incompleto" title={totalKg.aviso}>
+                        {fmtQtd(totalKg.saldo)} kg*
+                      </span>
+                    ) : (
+                      `${fmtQtd(totalKg.saldo)} kg`
+                    )
+                  ) : (
+                    // Travessão, nunca "0 kg": nenhuma linha pôde ser somada,
+                    // e zero afirmaria um depósito vazio que ninguém mediu.
+                    <span className="estoque-incompleto" title={totalKg.aviso}>—*</span>
+                  )}
+                </div>
+                <div className="estoque-stat-sub">
+                  {totalKg.linhasDeFora > 0
+                    ? `${totalKg.linhasSomadas} de ${linhas.length} linha(s) somadas — `
+                      + `${totalKg.linhasDeFora} sem peso médio`
+                    : `${totalKg.linhasSomadas} linha(s) somadas`}
+                </div>
+              </div>
             </div>
 
             <div className={posicao.historica ? 'estoque-tabela estoque-tabela--historica' : 'estoque-tabela'}>
@@ -464,16 +571,23 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
                 <div>PRODUTO</div>
                 <div>LANÇADO EM</div>
                 <div>ÚLTIMA MOVIMENTAÇÃO</div>
-                <div className="estoque-col-num">ENTROU (KG)</div>
-                <div className="estoque-col-num">PERDAS (KG)</div>
-                <div className="estoque-col-num">SAIU (KG)</div>
-                <div className="estoque-col-num">EM ESTOQUE (KG)</div>
+                {/* Sem "(KG)": a coluna não tem uma unidade só, cada linha tem
+                    a sua e ela viaja colada ao número. Ver "os rótulos das
+                    colunas" no comentário do componente. */}
+                <div className="estoque-col-num">ENTROU</div>
+                <div className="estoque-col-num">PERDAS</div>
+                <div className="estoque-col-num">SAIU</div>
+                <div className="estoque-col-num">EM ESTOQUE</div>
               </div>
 
               {linhas.map(l => {
-                // Linha com lançamento não convertível tem as QUATRO
-                // quantidades erradas na mesma medida — todas saem das mesmas
-                // embalagens. Marcar só uma sugeriria que as outras fecham.
+                // ENTROU e SAIU são exatos SEMPRE — são somas de lançamentos
+                // da mesma unidade, e nada pode tirá-los da conta. Quem pode
+                // ficar incompleto é a PERDA (e por consequência o saldo),
+                // quando a linha não está em KG e carrega perda gravada em
+                // quilos por contrato. Marcar as quatro, como antes, acusaria
+                // de incompleto um número que fecha.
+                const perdaDeFora = l.perda_fora_da_unidade || 0
                 const inc = l.itens_sem_conversao || 0
                 const chave = chaveEstoque(l.produto_id, l.un)
                 const aberto = expandido === chave
@@ -508,27 +622,42 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
                           <span className="estoque-sem-mov" title={AVISO_SEM_MOVIMENTACAO}>—</span>
                         )}
                       </div>
+                      {/* A quantidade lançada, com a unidade colada. Exata:
+                          "45 UN" é 45 UN com ou sem peso médio cadastrado. */}
                       <div className="estoque-col-num estoque-mono">
-                        <NumIncompleto texto={fmtQtd(l.entrou)} n={inc} />
+                        {comUn(l.entrou, l.un)}
                       </div>
                       <div className="estoque-col-num estoque-mono estoque-perda">
-                        <NumIncompleto texto={fmtQtd(l.perda)} n={inc} />
+                        <NumPerdaDeFora texto={comUn(l.perda, l.un)} kg={perdaDeFora} un={l.un} />
                       </div>
                       <div className="estoque-col-num estoque-mono">
                         <NumSemData
-                          texto={fmtQtd(l.saiu)}
+                          texto={comUn(l.saiu, l.un)}
                           n={posicao.historica ? (l.itens_saida_sem_data || 0) : 0}
                         />
-                        {inc > 0 && (
-                          <span className="estoque-incompleto" title={avisoSemConversao(inc)}>*</span>
-                        )}
                       </div>
                       <div className="estoque-col-num estoque-mono estoque-saldo">
-                        <span className="estoque-saldo-valor" style={{ color: corSaldo(l.saldo, inc > 0) }}>
-                          <NumIncompleto texto={fmtQtd(l.saldo)} n={inc} />
+                        <span
+                          className="estoque-saldo-valor"
+                          style={{ color: corSaldo(l.saldo, perdaDeFora > 0) }}
+                        >
+                          <NumPerdaDeFora texto={comUn(l.saldo, l.un)} kg={perdaDeFora} un={l.un} />
                         </span>
-                        {l.equivalente_un && (
-                          <div className="estoque-saldo-kg">≈ {fmtQtd(l.equivalente_un.saldo)} {l.un}</div>
+                        {/* A conversão em quilos, secundária. Aparece quando é
+                            possível; some quando não é — nunca substitui a
+                            quantidade por zero. Numa linha em KG seria a
+                            repetição do número acima, então não aparece. */}
+                        {l.un !== 'KG' && (
+                          l.em_kg ? (
+                            <div className="estoque-saldo-kg">≈ {fmtQtd(l.em_kg.saldo)} kg</div>
+                          ) : (
+                            <div
+                              className="estoque-saldo-kg estoque-incompleto"
+                              title={avisoSemConversao(inc)}
+                            >
+                              sem peso médio*
+                            </div>
+                          )
                         )}
                       </div>
                     </button>
@@ -568,14 +697,26 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
                                 {textoMovimentacao(m.tipo, m.data)}
                               </span>
                               <span className="estoque-movimentacao-ref">{m.referencia || '—'}</span>
+                              {/* A quantidade LANÇADA, sempre — uma
+                                  movimentação é um lançamento só, com uma
+                                  unidade só, e portanto é sempre exata. O
+                                  histórico imprimia "—*" quando não havia peso
+                                  médio, apagando da tela um lançamento de
+                                  45 UN que estava gravado. A leitura em quilos
+                                  vem ao lado quando existe. */}
                               <span className="estoque-col-num estoque-mono">
-                                {m.qtd_kg === null ? (
-                                  <span
-                                    className="estoque-incompleto"
-                                    title={AVISO_MOVIMENTACAO_SEM_CONVERSAO}
-                                  >—*</span>
-                                ) : (
-                                  `${fmtQtd(m.qtd_kg)} kg`
+                                {comUn(m.qtd, m.un)}
+                                {m.un !== 'KG' && (
+                                  m.qtd_kg === null ? (
+                                    <span
+                                      className="estoque-incompleto"
+                                      title={AVISO_MOVIMENTACAO_SEM_CONVERSAO}
+                                    >*</span>
+                                  ) : (
+                                    <span className="estoque-movimentacao-kg">
+                                      {' '}≈ {fmtQtd(m.qtd_kg)} kg
+                                    </span>
+                                  )
                                 )}
                               </span>
                             </div>
@@ -589,10 +730,15 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
             </div>
 
             <div className="estoque-legenda">
-              Estoque = <strong style={{ color: TEXTO }}>entradas − perdas − saídas</strong>, sempre
-              em <strong style={{ color: TEXTO }}>quilos</strong> (caixas convertidas pelo peso médio
-              do produto). <strong style={{ color: TEXTO }}>LANÇADO EM</strong> é a unidade em que a
-              movimentação foi registrada — cada uma tem sua própria linha.
+              Estoque = <strong style={{ color: TEXTO }}>entradas − perdas − saídas</strong>, e cada
+              linha mostra essa conta <strong style={{ color: TEXTO }}>na unidade em que a
+              movimentação foi lançada</strong> — a mesma que aparece em{' '}
+              <strong style={{ color: TEXTO }}>LANÇADO EM</strong> e ao lado de cada número. Um
+              produto lançado em caixas e em quilos tem duas linhas, e cada uma é exata na unidade
+              dela. O <strong style={{ color: TEXTO }}>total em quilos</strong> lá em cima é a soma
+              de todas: aí as unidades se misturam de verdade, e o quilo é a única em que a conta
+              fecha — caixas convertidas pelo peso médio do produto. Linha sem peso médio cadastrado
+              não entra nesse total, mas a quantidade dela continua exata aqui.
             </div>
 
             <div className="estoque-legenda">
@@ -641,14 +787,33 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
               </div>
             )}
 
+            {/* A nota do `‡`: perda gravada em quilos numa linha que não está
+                em KG. Diferente do `*` (linha fora do total em quilos) porque
+                é outro problema — este afeta a PERDA e o SALDO de uma linha
+                específica, aquele afeta só o total. */}
+            {linhas.some(l => (l.perda_fora_da_unidade || 0) > 0) && (
+              <div
+                className="estoque-legenda estoque-legenda--incompleto"
+                role="note"
+                aria-label="Perda fora da unidade da linha"
+              >
+                <strong>‡</strong> A perda na coleta e a perda na entrega são registradas{' '}
+                <strong>em quilos</strong> para item de qualquer unidade. Numa linha que não está em
+                KG elas não cabem na conta — somá-las exigiria dividir pelo peso médio da embalagem,
+                que é aproximado —, então a perda e o saldo dessa linha as deixam de fora, e o valor
+                em quilos aparece ao passar o mouse. A leitura em quilos da linha, quando existe,
+                traz a conta inteira.
+              </div>
+            )}
+
             {totalSemConversao > 0 && (
               <div
                 className="estoque-legenda estoque-legenda--incompleto"
                 role="note"
-                aria-label="Quantidade incompleta"
+                aria-label="Linhas fora do total em quilos"
               >
-                <strong>*</strong> {avisoSemConversao(totalSemConversao)} Cadastre o peso médio da
-                embalagem em Produtos para que entrem na conta.
+                <strong>*</strong> {totalKg.aviso} Cadastre o peso médio da embalagem em Produtos
+                para que essas linhas entrem no total.
               </div>
             )}
           </>

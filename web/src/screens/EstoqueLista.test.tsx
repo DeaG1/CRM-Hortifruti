@@ -14,10 +14,16 @@ vi.mock('../api/client', async (importOriginal) => {
 
 const mockGet = api.get as unknown as ReturnType<typeof vi.fn>
 
+// As quantidades vem NA UNIDADE LANCADA (`un`); `em_kg` e a mesma conta em
+// quilos, `null` quando a linha nao converte. Numa linha em KG as duas sao o
+// mesmo numero — e o caso base deste fixture, de proposito: e o caso que ja
+// funcionava, e ele nao pode mudar.
 const linha = (over: Record<string, unknown> = {}) => ({
   produto_id: 'p-1', nome: 'Tomate', un: 'KG',
   entrou: 100, perda: 15, saiu: 30, saldo: 55,
-  peso_medio: 0, equivalente_un: null, itens_sem_conversao: 0,
+  peso_medio: 0, perda_fora_da_unidade: 0,
+  em_kg: { entrou: 100, perda: 15, saiu: 30, saldo: 55 },
+  itens_sem_conversao: 0,
   // Saidas desta linha que descontam do saldo sem data de entrega — zero no
   // caso comum. Ver a suite "posicao num dia passado" no fim do arquivo.
   itens_saida_sem_data: 0,
@@ -30,7 +36,7 @@ const linha = (over: Record<string, unknown> = {}) => ({
 
 const mov = (over: Record<string, unknown> = {}) => ({
   produto_id: 'p-1', un: 'KG', tipo: 'entrada', data: '2026-08-01',
-  qtd_kg: 100, referencia: 'E-1', total: 1,
+  qtd: 100, qtd_kg: 100, referencia: 'E-1', total: 1,
   ...over,
 })
 
@@ -122,110 +128,168 @@ describe('EstoqueLista — saldo = entradas - perdas - saidas', () => {
     mockRotas([linha({ entrou: 100, perda: 15, saiu: 30, saldo: 55 })])
     render(<EstoqueLista />)
     await screen.findByText('Tomate')
-    expect(screen.getByText('100')).toBeInTheDocument()
-    expect(screen.getByText('15')).toBeInTheDocument()
-    expect(screen.getByText('30')).toBeInTheDocument()
-    expect(screen.getByText('55')).toBeInTheDocument()
+    // A unidade viaja colada ao numero: e o unico rotulo verdadeiro em todas
+    // as linhas, porque cada uma tem a sua. Ver "os rotulos das colunas".
+    expect(screen.getByText('100 KG')).toBeInTheDocument()
+    expect(screen.getByText('15 KG')).toBeInTheDocument()
+    expect(screen.getByText('30 KG')).toBeInTheDocument()
+    expect(screen.getByText('55 KG')).toBeInTheDocument()
   })
 
   it('saldo negativo aparece em vermelho — o alerta que importa nesta tela', async () => {
     mockRotas([linha({ saldo: -15 })])
     render(<EstoqueLista />)
-    const saldo = await screen.findByText('-15')
+    const saldo = await screen.findByText('-15 KG')
     expect(saldo).toHaveStyle({ color: '#c2502f' })
   })
 
   it('saldo positivo usa a cor de texto padrao (nao e alerta)', async () => {
     mockRotas([linha({ saldo: 55 })])
     render(<EstoqueLista />)
-    const saldo = await screen.findByText('55')
+    const saldo = await screen.findByText('55 KG')
     expect(saldo).toHaveStyle({ color: '#2a2a24' })
   })
 
   it('saldo zero usa a cor neutra (sem estoque, mas nao e alerta)', async () => {
     mockRotas([linha({ entrou: 10, perda: 0, saiu: 10, saldo: 0 })])
     render(<EstoqueLista />)
-    const saldos = await screen.findAllByText('0')
+    const saldos = await screen.findAllByText('0 KG')
     // duas colunas podem estar zeradas (perda e saldo) — a do saldo e a que tem a classe estoque-saldo-valor
     const saldoCel = saldos.find(el => el.className.includes('estoque-saldo-valor'))
     expect(saldoCel).toHaveStyle({ color: '#6a685c' })
   })
+
+  it('entrou 45 e saiu 45: o zero e MEDICAO — cinza, sem marca nenhuma', async () => {
+    // O contraste que este arquivo inteiro protege: um zero medido continua
+    // sendo zero; o outro zero, o de "nao sei converter", deixou de existir.
+    mockRotas([linha({
+      nome: 'Rucula', un: 'UN', entrou: 45, perda: 0, saiu: 45, saldo: 0,
+      em_kg: null, itens_sem_conversao: 2,
+    })])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Rucula')
+    expect(screen.getAllByText('45 UN')).toHaveLength(2) // ENTROU e SAIU
+    const saldo = container.querySelector('.estoque-saldo-valor') as HTMLElement
+    expect(saldo).toHaveTextContent('0 UN')
+    expect(saldo.className).not.toContain('estoque-incompleto')
+    expect(saldo).toHaveStyle({ color: '#6a685c' })
+  })
 })
 
-describe('EstoqueLista — as quantidades sao kg, a embalagem e a leitura secundaria', () => {
+describe('EstoqueLista — a quantidade e da unidade lancada, o quilo e a leitura secundaria', () => {
   it('produto em CX e em KG aparece em duas linhas separadas, cada uma com seu proprio saldo', async () => {
     mockRotas([
-      linha({ produto_id: 'p-1', nome: 'Melancia', un: 'CX', entrou: 150, perda: 1, saiu: 0, saldo: 149 }),
+      linha({
+        produto_id: 'p-1', nome: 'Melancia', un: 'CX', entrou: 10, perda: 0, saiu: 0, saldo: 10,
+        peso_medio: 15, em_kg: { entrou: 150, perda: 1, saiu: 0, saldo: 149 },
+      }),
       linha({ produto_id: 'p-1', nome: 'Melancia', un: 'KG', entrou: 20, perda: 0, saiu: 5, saldo: 15 }),
     ])
     render(<EstoqueLista />)
     expect(await screen.findAllByText('Melancia')).toHaveLength(2)
     expect(screen.getByText('CX')).toBeInTheDocument()
     expect(screen.getByText('KG')).toBeInTheDocument()
+    // Cada linha na SUA unidade: 10 caixas de um lado, 15 quilos do outro.
+    // Cada quantidade aparece duas vezes na sua linha (ENTROU e EM ESTOQUE).
+    expect(screen.getAllByText('10 CX')).toHaveLength(2) // ENTROU e EM ESTOQUE
+    expect(screen.getByText('15 KG')).toBeInTheDocument()  // o saldo da linha em KG
   })
 
-  it('as quatro colunas sao rotuladas em KG — o numero principal e o quilo', async () => {
+  it('o cabecalho NAO afirma unidade nenhuma — ela vive colada a cada numero', async () => {
     mockRotas([linha()])
     const { container } = render(<EstoqueLista />)
     await screen.findByText('Tomate')
     const cabecalho = container.querySelector('.estoque-linha--cabecalho') as HTMLElement
-    expect(within(cabecalho).getByText('ENTROU (KG)')).toBeInTheDocument()
-    expect(within(cabecalho).getByText('PERDAS (KG)')).toBeInTheDocument()
-    expect(within(cabecalho).getByText('SAIU (KG)')).toBeInTheDocument()
-    expect(within(cabecalho).getByText('EM ESTOQUE (KG)')).toBeInTheDocument()
+    expect(within(cabecalho).getByText('ENTROU')).toBeInTheDocument()
+    expect(within(cabecalho).getByText('PERDAS')).toBeInTheDocument()
+    expect(within(cabecalho).getByText('SAIU')).toBeInTheDocument()
+    expect(within(cabecalho).getByText('EM ESTOQUE')).toBeInTheDocument()
+    // "(KG)" seria falso em toda linha que nao esta em KG, e a coluna tem
+    // linhas de unidades diferentes por construcao.
+    expect(cabecalho.textContent).not.toContain('(KG)')
     // O selo de unidade continua, dizendo em que unidade foi LANCADO.
     expect(within(cabecalho).getByText('LANÇADO EM')).toBeInTheDocument()
   })
 
-  it('quando peso_medio > 0 e un != KG, mostra a contagem de embalagens junto do saldo (em kg)', async () => {
+  it('quando ha peso medio e un != KG, a conversao em quilos aparece sob o saldo', async () => {
     mockRotas([linha({
-      nome: 'Melancia', un: 'CX', entrou: 150, perda: 1, saiu: 0, saldo: 149,
-      peso_medio: 15, equivalente_un: { entrou: 10, perda: 1 / 15, saiu: 0, saldo: 149 / 15 },
+      nome: 'Melancia', un: 'CX', entrou: 10, perda: 0, saiu: 0, saldo: 10,
+      peso_medio: 15, em_kg: { entrou: 150, perda: 1, saiu: 0, saldo: 149 },
     })])
     render(<EstoqueLista />)
-    // a coluna principal esta em kg...
-    expect(await screen.findByText('149')).toBeInTheDocument()
-    // ...e a leitura em caixas aparece como informacao a parte (149/15 ≈ 9,9)
-    expect(screen.getByText('≈ 9,9 CX')).toBeInTheDocument()
+    // O numero principal e a quantidade lancada, exata (ENTROU e EM ESTOQUE)...
+    expect(await screen.findAllByText('10 CX')).toHaveLength(2)
+    // ...e a conversao em quilos e a leitura secundaria, ao lado — nunca no
+    // lugar dela.
+    expect(screen.getByText('≈ 149 kg')).toBeInTheDocument()
   })
 
-  it('linha em KG nao mostra equivalente nenhum (a unidade principal ja e a dela)', async () => {
-    mockRotas([linha({ un: 'KG', saldo: 55, peso_medio: 0, equivalente_un: null })])
+  it('linha em KG nao repete a conversao (a unidade principal ja e o quilo)', async () => {
+    mockRotas([linha({ un: 'KG', saldo: 55, peso_medio: 0 })])
     render(<EstoqueLista />)
     await screen.findByText('Tomate')
     expect(screen.queryByText(/≈/)).not.toBeInTheDocument()
   })
 })
 
-describe('EstoqueLista — linha incompleta (sem peso medio cadastrado)', () => {
-  const incompleta = () => linha({
-    nome: 'Melancia', un: 'CX', peso_medio: 0, equivalente_un: null,
-    entrou: 0, perda: 2, saiu: 0, saldo: -2, itens_sem_conversao: 3,
+describe('EstoqueLista — linha sem peso medio cadastrado', () => {
+  // O caso real: 45 UN de alface hidroponica, produto cadastrado em KG e sem
+  // peso medio. A tela mostrava "0 *" nas quatro colunas.
+  const semPeso = (over: Record<string, unknown> = {}) => linha({
+    nome: 'Alface Hidro', un: 'UN', peso_medio: 0, em_kg: null,
+    entrou: 45, perda: 0, saiu: 0, saldo: 45, itens_sem_conversao: 1,
+    ...over,
   })
 
-  it('marca as QUATRO quantidades com * — todas saem das mesmas embalagens', async () => {
-    mockRotas([incompleta()])
-    const { container } = render(<EstoqueLista />)
-    await screen.findByText('Melancia')
-    const marcados = container.querySelectorAll('.estoque-incompleto')
-    expect(marcados).toHaveLength(4)
-    expect(marcados[0]).toHaveAttribute('title', expect.stringContaining('3 lançamentos'))
-  })
-
-  it('mostra a nota de rodape explicando o que ficou de fora', async () => {
-    mockRotas([incompleta()])
+  it('mostra a quantidade lancada nas quatro colunas, nunca zero', async () => {
+    mockRotas([semPeso()])
     render(<EstoqueLista />)
-    const nota = await screen.findByRole('note', { name: 'Quantidade incompleta' })
+    await screen.findByText('Alface Hidro')
+    // ENTROU e EM ESTOQUE dizem 45 UN; PERDAS e SAIU dizem 0 UN, que aqui e
+    // medicao de verdade (nao houve perda nem saida).
+    expect(screen.getAllByText('45 UN')).toHaveLength(2)
+    expect(screen.getAllByText('0 UN')).toHaveLength(2)
+  })
+
+  it('a quantidade NAO leva marca: ela e exata — a marca vive na conversao que falta', async () => {
+    mockRotas([semPeso()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Alface Hidro')
+    // O `*` some das quantidades e aparece onde a ausencia de conversao
+    // realmente tira algo: a leitura em quilos da linha e o total da tela.
+    const entrou = container.querySelectorAll('.estoque-linha--dados .estoque-col-num')[0]
+    expect(entrou.textContent).toBe('45 UN')
+    // A marca vive na linha secundaria do saldo, onde a conversao faltou.
+    const secundaria = container.querySelector('.estoque-saldo-kg') as HTMLElement
+    expect(secundaria).toHaveTextContent('sem peso médio*')
+    expect(secundaria.className).toContain('estoque-incompleto')
+  })
+
+  it('mostra a nota de rodape dizendo que a linha ficou fora do TOTAL, nao que a quantidade falta', async () => {
+    mockRotas([semPeso()])
+    render(<EstoqueLista />)
+    const nota = await screen.findByRole('note', { name: 'Linhas fora do total em quilos' })
     expect(nota).toHaveTextContent(/sem peso médio cadastrado/i)
+    expect(nota).toHaveTextContent(/continua exata na tabela/i)
     expect(nota).toHaveTextContent(/Cadastre o peso médio da embalagem em Produtos/i)
   })
 
-  it('saldo negativo de linha incompleta NAO vai a vermelho (seria alarme falso)', async () => {
-    mockRotas([incompleta()])
+  it('perda gravada em quilos numa linha em CX marca perda e saldo, e nao vai a vermelho', async () => {
+    mockRotas([linha({
+      nome: 'Melancia', un: 'CX', peso_medio: 15,
+      entrou: 0, perda: 0, saiu: 0, saldo: 0, perda_fora_da_unidade: 2,
+      em_kg: { entrou: 0, perda: 2, saiu: 0, saldo: -2 },
+    })])
     const { container } = render(<EstoqueLista />)
     await screen.findByText('Melancia')
-    const saldo = container.querySelector('.estoque-saldo-valor')
-    expect(saldo).toHaveStyle({ color: '#6a685c' })
+    const marcados = container.querySelectorAll('.estoque-incompleto')
+    // Duas marcas: PERDAS e EM ESTOQUE. ENTROU e SAIU sao exatos e ficam
+    // limpos — marcar os quatro acusaria de incompleto um numero que fecha.
+    expect(marcados).toHaveLength(2)
+    expect(marcados[0]).toHaveAttribute('title', expect.stringContaining('2 kg de perda'))
+    expect(container.querySelector('.estoque-saldo-valor')).toHaveStyle({ color: '#6a685c' })
+    const nota = screen.getByRole('note', { name: 'Perda fora da unidade da linha' })
+    expect(nota).toHaveTextContent(/registradas em quilos/i)
   })
 
   it('linha completa nao mostra marca nem nota', async () => {
@@ -233,7 +297,76 @@ describe('EstoqueLista — linha incompleta (sem peso medio cadastrado)', () => 
     const { container } = render(<EstoqueLista />)
     await screen.findByText('Tomate')
     expect(container.querySelectorAll('.estoque-incompleto')).toHaveLength(0)
-    expect(screen.queryByRole('note', { name: 'Quantidade incompleta' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('note', { name: 'Linhas fora do total em quilos' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('note', { name: 'Perda fora da unidade da linha' })).not.toBeInTheDocument()
+  })
+})
+
+describe('EstoqueLista — o total ENTRE linhas continua em quilos, e diz quantas ficaram fora', () => {
+  const cartaoTotal = (container: HTMLElement) =>
+    within(secaoSaldo(container)).getByText('EM ESTOQUE (TOTAL EM KG)').parentElement!
+
+  it('todas as linhas convertem: o total sai limpo', async () => {
+    mockRotas([
+      linha({ produto_id: 'p-1', nome: 'Tomate', un: 'KG', saldo: 55 }),
+      linha({
+        produto_id: 'p-2', nome: 'Melancia', un: 'CX', saldo: 10, peso_medio: 15,
+        em_kg: { entrou: 150, perda: 1, saiu: 0, saldo: 149 },
+      }),
+    ])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    const cartao = cartaoTotal(container)
+    expect(cartao).toHaveTextContent('204 kg')      // 55 + 149
+    expect(cartao).toHaveTextContent('2 linha(s) somadas')
+    expect(cartao.textContent).not.toContain('*')
+  })
+
+  it('parte das linhas fora: o total sai marcado e DIZ quantas ficaram de fora', async () => {
+    mockRotas([
+      linha({ produto_id: 'p-1', nome: 'Tomate', un: 'KG', saldo: 55 }),
+      linha({
+        produto_id: 'p-2', nome: 'Alface Hidro', un: 'UN', saldo: 45,
+        em_kg: null, itens_sem_conversao: 1,
+      }),
+    ])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    const cartao = cartaoTotal(container)
+    expect(cartao).toHaveTextContent('55 kg*')
+    expect(cartao).toHaveTextContent('1 de 2 linha(s) somadas — 1 sem peso médio')
+  })
+
+  it('nenhuma linha converte: travessao, nunca "0 kg" — o caso real das 138 unidades', async () => {
+    // As quatro linhas que o dono lancou. Somadas em quilos nao dao numero
+    // nenhum, e a tela diz isso em vez de afirmar um deposito vazio.
+    const un = (id: string, nome: string, qtd: number) => linha({
+      produto_id: id, nome, un: 'UN', peso_medio: 0,
+      entrou: qtd, perda: 0, saiu: 0, saldo: qtd,
+      em_kg: null, itens_sem_conversao: 1,
+    })
+    mockRotas([
+      un('p-1', 'Alface Hidro', 45), un('p-2', 'Alface Roxa', 45),
+      un('p-3', 'Escarola', 18), un('p-4', 'Rucula', 30),
+    ])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Alface Hidro')
+    // As quantidades, que sao o que importa, estao todas la e sao exatas:
+    // ENTROU e EM ESTOQUE de cada uma das quatro linhas.
+    expect(screen.getAllByText('45 UN')).toHaveLength(4)
+    expect(screen.getAllByText('18 UN')).toHaveLength(2)
+    expect(screen.getAllByText('30 UN')).toHaveLength(2)
+    // Somando as quatro: 138 unidades de mercadoria real, que a tela exibia
+    // como quatro zeros com asterisco.
+    expect(45 + 45 + 18 + 30).toBe(138)
+    // E o total nao afirma zero.
+    const cartao = cartaoTotal(container)
+    expect(cartao).toHaveTextContent('—*')
+    expect(cartao.textContent).not.toContain('0 kg')
+    expect(cartao).toHaveTextContent('0 de 4 linha(s) somadas — 4 sem peso médio')
+    // Os itens com estoque continuam sendo contados: quatro, nao zero.
+    expect(within(secaoSaldo(container)).getByText('ITENS COM ESTOQUE').parentElement!)
+      .toHaveTextContent('4')
   })
 })
 
@@ -377,8 +510,8 @@ describe('EstoqueLista — historico por item (custo: uma busca para a tela inte
       [linha({ ultima_entrada: '2026-08-01', ultima_saida: '2026-08-09' })],
       [], [],
       [
-        mov({ tipo: 'saida', data: '2026-08-09', qtd_kg: 40, referencia: 'S-7', total: 2 }),
-        mov({ tipo: 'entrada', data: '2026-08-01', qtd_kg: 100, referencia: 'E-1', total: 2 }),
+        mov({ tipo: 'saida', data: '2026-08-09', qtd: 40, qtd_kg: 40, referencia: 'S-7', total: 2 }),
+        mov({ tipo: 'entrada', data: '2026-08-01', qtd: 100, qtd_kg: 100, referencia: 'E-1', total: 2 }),
       ],
     )
     render(<EstoqueLista />)
@@ -387,8 +520,11 @@ describe('EstoqueLista — historico por item (custo: uma busca para a tela inte
 
     expect(await screen.findByText('S-7')).toBeInTheDocument()
     expect(screen.getByText('E-1')).toBeInTheDocument()
-    expect(screen.getByText('40 kg')).toBeInTheDocument()
-    expect(screen.getByText('100 kg')).toBeInTheDocument()
+    // A quantidade lancada, com a unidade — a linha esta em KG, entao nao ha
+    // conversao a repetir ao lado.
+    expect(screen.getByText('40 KG')).toBeInTheDocument()
+    // "100 KG" aparece duas vezes: na coluna ENTROU da linha e no historico.
+    expect(screen.getAllByText('100 KG')).toHaveLength(2)
     expect(botao).toHaveAttribute('aria-expanded', 'true')
   })
 
@@ -478,21 +614,43 @@ describe('EstoqueLista — historico por item (custo: uma busca para a tela inte
     expect(await screen.findByText(/1 movimentação\(ões\)/)).toBeInTheDocument()
   })
 
-  it('quantidade nao convertivel no historico vira travessao marcado, nunca zero', async () => {
+  it('movimentacao sem conversao mostra a QUANTIDADE LANCADA, nao um travessao', async () => {
+    // O historico imprimia "—*" aqui: apagava da tela um lancamento de 45 UN
+    // que estava gravado e era exato. A movimentacao e UM lancamento, com uma
+    // unidade so — nunca ha nada a reconciliar nela.
     mockRotas(
-      [linha({ un: 'CX', itens_sem_conversao: 1, ultima_entrada: '2026-08-01' })],
+      [linha({ un: 'UN', em_kg: null, itens_sem_conversao: 1, ultima_entrada: '2026-08-01' })],
       [], [],
-      [mov({ un: 'CX', qtd_kg: null, referencia: 'E-1' })],
+      [mov({ un: 'UN', qtd: 45, qtd_kg: null, referencia: 'E-1' })],
     )
     const { container } = render(<EstoqueLista />)
     fireEvent.click(await screen.findByRole('button', { expanded: false }))
     await screen.findByText('E-1')
 
-    const marcado = Array.from(container.querySelectorAll('.estoque-movimentacao .estoque-incompleto'))
+    const celula = container.querySelector('.estoque-movimentacao .estoque-col-num') as HTMLElement
+    expect(celula).toHaveTextContent('45 UN')
+    expect(celula.textContent).not.toContain('—')
+    // A marca continua existindo, mas agora ela diz que falta a LEITURA em
+    // quilos — nao a quantidade.
+    const marcado = container.querySelectorAll('.estoque-movimentacao .estoque-incompleto')
     expect(marcado).toHaveLength(1)
-    expect(marcado[0]).toHaveTextContent('—*')
     expect(marcado[0]).toHaveAttribute('title', expect.stringContaining('peso médio'))
-    expect(screen.queryByText('0 kg')).not.toBeInTheDocument()
+    expect(marcado[0]).toHaveAttribute('title', expect.stringContaining('quantidade ao lado é exata'))
+  })
+
+  it('movimentacao convertivel mostra a quantidade lancada E a leitura em quilos', async () => {
+    mockRotas(
+      [linha({ un: 'CX', peso_medio: 15, ultima_entrada: '2026-08-01' })],
+      [], [],
+      [mov({ un: 'CX', qtd: 4, qtd_kg: 60, referencia: 'E-1' })],
+    )
+    const { container } = render(<EstoqueLista />)
+    fireEvent.click(await screen.findByRole('button', { expanded: false }))
+    await screen.findByText('E-1')
+
+    const celula = container.querySelector('.estoque-movimentacao .estoque-col-num') as HTMLElement
+    expect(celula).toHaveTextContent('4 CX')
+    expect(celula).toHaveTextContent('≈ 60 kg')
   })
 
   it('item sem movimentacao com data: o detalhe explica, nao fica em branco', async () => {
@@ -533,7 +691,7 @@ describe('EstoqueLista — o historico cai SOZINHO', () => {
     const aviso = await screen.findByRole('status')
     expect(aviso).toHaveTextContent(/histórico de movimentação/i)
     // A tela NAO caiu: saldo e ultima movimentacao vem do outro endpoint.
-    expect(screen.getByText('55')).toBeInTheDocument()
+    expect(screen.getByText('55 KG')).toBeInTheDocument()
     expect(screen.getByText('Saída · 14/06')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     // E o detalhe aberto diz o que houve, em vez de fingir lista vazia.
@@ -807,7 +965,7 @@ describe('EstoqueLista — saida sem data de entrega na posicao historica', () =
     })
     // A marca e † — deliberadamente diferente do * de "quantidade incompleta",
     // que e outro problema.
-    expect(marca).toHaveTextContent('30†')
+    expect(marca).toHaveTextContent('30 KG†')
     expect(marca).toHaveAttribute('title', expect.stringContaining('2 saídas'))
 
     const nota = screen.getByRole('note', { name: 'Saídas sem data de entrega' })

@@ -406,6 +406,143 @@ describe('buscarEstoque', () => {
   })
 })
 
+// ============================================ a quantidade da linha (paraJson)
+//
+// A suite acima cobre as somas EM KG da query, e continua valendo palavra por
+// palavra: kg e a unica unidade em que a conta fecha ENTRE linhas. Esta cobre
+// o que `paraJson` PUBLICA por linha — a quantidade na unidade em que ela foi
+// lancada, exata, porque a linha e (produto, un) e ali nao ha mistura de
+// unidades para reconciliar.
+//
+// A distincao que este bloco inteiro existe para provar: ausencia de
+// conversao NAO e zero; zero medido continua sendo zero.
+
+describe('paraJson — a quantidade da linha, na unidade lancada', () => {
+  it('UN sem peso medio: mostra as 45 unidades lancadas, nunca zero', async () => {
+    const produtoId = await criarProduto(tenantA, 'Alface Hidro', { un: 'KG', peso_medio: 0 })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'UN', qtd: 45 }])
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const j = paraJson(linhas.find(l => l.produto_id === produtoId)!)
+    expect(j.un).toBe('UN')
+    // Antes desta correcao: 0, 0, 0, 0 — com asterisco nas quatro colunas.
+    expect(j.entrou).toBe(45)
+    expect(j.perda).toBe(0)
+    expect(j.saiu).toBe(0)
+    expect(j.saldo).toBe(45)
+    // A leitura em quilos nao existe, e isso se diz com ausencia, nao com
+    // zero: uma alface hidroponica se vende por unidade, nao por quilo.
+    expect(j.em_kg).toBeNull()
+    expect(j.itens_sem_conversao).toBe(1)
+  })
+
+  it('o caso real inteiro: 138 unidades de mercadoria, nao quatro zeros', async () => {
+    // A entrada que o dono lancou: quatro itens em UN, produtos cadastrados
+    // em KG e sem peso medio. A tela mostrava "0 *" em ENTROU, PERDAS, SAIU e
+    // EM ESTOQUE nas quatro linhas.
+    const caso = [
+      { nome: 'Alface Hidro Caso', qtd: 45 },
+      { nome: 'Alface Roxa Caso', qtd: 45 },
+      { nome: 'Escarola Caso', qtd: 18 },
+      { nome: 'Rucula Caso', qtd: 30 },
+    ]
+    const ids: string[] = []
+    for (const c of caso) ids.push(await criarProduto(tenantA, c.nome, { un: 'KG', peso_medio: 0 }))
+    await criarEntrada(
+      tenantA,
+      ids.map((id, i) => ({ produto_id: id, un: 'UN', qtd: caso[i].qtd })),
+    )
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const doCaso = ids.map(id => paraJson(linhas.find(l => l.produto_id === id && l.un === 'UN')!))
+
+    doCaso.forEach((j, i) => {
+      expect(j.entrou).toBe(caso[i].qtd)
+      expect(j.saldo).toBe(caso[i].qtd)
+      expect(j.em_kg).toBeNull()
+    })
+    expect(doCaso.reduce((s, j) => s + j.saldo, 0)).toBe(138)
+  })
+
+  it('KG: os quatro numeros sao IDENTICOS as somas em kg da query — nada mudou para quem ja estava certo', async () => {
+    const produtoId = await criarProduto(tenantA, 'Batata Kg Identica', { un: 'KG', peso_medio: 0 })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'KG', qtd: 100, perda_kg: 5 }])
+    await criarPerda(tenantA, produtoId, 10, 'KG')
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, un: 'KG', qtd: 30, perda_kg: 2 }])
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const crua = linhas.find(l => l.produto_id === produtoId)!
+    const j = paraJson(crua)
+
+    // A comparacao e contra as somas EM KG da propria query — as mesmas que
+    // 35f3a2e produziu e que a suite acima verifica. Numa linha em KG as duas
+    // perda_kg (coleta e entrega) ja estao na unidade da linha, entao entram
+    // na perda como sempre entraram: 5 + 10 + 2 = 17.
+    expect(j.entrou).toBe(Number(crua.entrou))
+    expect(j.perda).toBe(Number(crua.perda))
+    expect(j.saiu).toBe(Number(crua.saiu))
+    expect(j.entrou).toBe(100)
+    expect(j.perda).toBe(17)
+    expect(j.saiu).toBe(30)
+    expect(j.saldo).toBe(53)
+    // Nada fica de fora, e a leitura secundaria e o mesmo numero.
+    expect(j.perda_fora_da_unidade).toBe(0)
+    expect(j.em_kg).toEqual({ entrou: 100, perda: 17, saiu: 30, saldo: 53 })
+  })
+
+  it('CX com peso medio: a quantidade sai em caixas e a conversao em quilos vem junto', async () => {
+    const produtoId = await criarProduto(tenantA, 'Melancia Cx Convertivel', { un: 'CX', peso_medio: 10 })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'CX', qtd: 10 }])
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, un: 'CX', qtd: 4 }])
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const j = paraJson(linhas.find(l => l.produto_id === produtoId)!)
+    expect(j.un).toBe('CX')
+    expect(j.entrou).toBe(10)
+    expect(j.saiu).toBe(4)
+    expect(j.saldo).toBe(6)
+    // Aqui a conversao E possivel, entao ela aparece — secundaria, ao lado da
+    // quantidade exata, nunca no lugar dela.
+    expect(j.em_kg).toEqual({ entrou: 100, perda: 0, saiu: 40, saldo: 60 })
+  })
+
+  it('entrou 45 e saiu 45: o saldo e zero DE VERDADE, sem marca nenhuma', async () => {
+    const produtoId = await criarProduto(tenantA, 'Rucula Zerada', { un: 'KG', peso_medio: 0 })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'UN', qtd: 45 }])
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, un: 'UN', qtd: 45 }])
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const j = paraJson(linhas.find(l => l.produto_id === produtoId && l.un === 'UN')!)
+    // Zero aqui e medicao: entrou tudo, saiu tudo, nao sobrou nada. E o
+    // contraste que este commit inteiro existe para preservar — o outro zero,
+    // o de "nao sei converter", deixou de existir.
+    expect(j.entrou).toBe(45)
+    expect(j.saiu).toBe(45)
+    expect(j.saldo).toBe(0)
+    expect(j.perda_fora_da_unidade).toBe(0)
+  })
+
+  it('perda que nasce em quilos numa linha em CX viaja separada, sem virar caixa inventada', async () => {
+    const produtoId = await criarProduto(tenantA, 'Tomate Cx Perda Kg', { un: 'CX', peso_medio: 8 })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'CX', qtd: 20, perda_kg: 3 }])
+    await criarPerda(tenantA, produtoId, 2, 'CX')
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, un: 'CX', qtd: 5, perda_kg: 1 }])
+
+    const linhas = await buscarEstoque(sql, tenantA)
+    const j = paraJson(linhas.find(l => l.produto_id === produtoId)!)
+    // A perda EM CAIXAS e so a de deposito (perdas.qtd, lancada em CX).
+    expect(j.perda).toBe(2)
+    // Os 4 kg de coleta + entrega nao viram 0,5 CX: continuam em quilos, e a
+    // tela usa este numero para dizer que a perda e o saldo em CX os deixam
+    // de fora. Dividir por peso_medio seria o fator inverso que 35f3a2e
+    // recusou, escondido dentro do numero principal.
+    expect(j.perda_fora_da_unidade).toBe(4)
+    expect(j.saldo).toBe(13) // 20 - 2 - 5, em CX
+    // Em quilos a conta fecha inteira, com as tres perdas juntas.
+    expect(j.em_kg).toEqual({ entrou: 160, perda: 20, saiu: 40, saldo: 100 })
+  })
+})
+
 // ============================================================ movimentacao
 //
 // "Quanto tem" a tela ja dizia; estas duas suites cobrem "quando mexeu".
@@ -679,15 +816,39 @@ describe('buscarMovimentacoesEstoque', () => {
 
     const movs = (await buscarMovimentacoesEstoque(sql, tenantA)).filter(m => m.produto_id === produtoId)
     expect(Number(movs[0].qtd_kg)).toBe(60) // 4 CX * 15 kg
+    // E a quantidade lancada continua sendo 4 caixas — a leitura em quilos e
+    // secundaria, nunca substitui o que foi digitado.
+    expect(paraJsonMovimentacao(movs[0]).qtd).toBe(4)
   })
 
-  it('lancamento nao convertivel: qtd_kg vira null, nunca zero nem fator inventado', async () => {
+  it('lancamento nao convertivel: a quantidade lancada aparece; so o qtd_kg vira null', async () => {
     const produtoId = await criarProduto(tenantA, 'Maracuja Hist Sem Peso', { un: 'CX', peso_medio: 0 })
     await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'CX', qtd: 4 }], { data: '2026-05-03' })
 
     const movs = (await buscarMovimentacoesEstoque(sql, tenantA)).filter(m => m.produto_id === produtoId)
+    const j = paraJsonMovimentacao(movs[0])
+    // A movimentacao aconteceu, e foram 4 caixas: o historico dizia "—*", que
+    // apagava da tela um lancamento gravado e exato. Fator ausente continua
+    // nao virando 1 — o que muda e que a ausencia de fator para de apagar a
+    // quantidade.
+    expect(j.qtd).toBe(4)
+    expect(j.un).toBe('CX')
     expect(movs[0].qtd_kg).toBeNull()
-    expect(paraJsonMovimentacao(movs[0]).qtd_kg).toBeNull()
+    expect(j.qtd_kg).toBeNull()
+  })
+
+  it('a quantidade do historico e a do LANCAMENTO, mesmo quando a linha nao converte (45 UN)', async () => {
+    const produtoId = await criarProduto(tenantA, 'Alface Hist Un', { un: 'KG', peso_medio: 0 })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'UN', qtd: 45 }], { data: '2026-05-04' })
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, un: 'UN', qtd: 12 }], { entrega: '2026-05-05' })
+
+    const movs = (await buscarMovimentacoesEstoque(sql, tenantA))
+      .filter(m => m.produto_id === produtoId)
+      .map(paraJsonMovimentacao)
+    expect(movs.map(m => [m.tipo, m.qtd, m.un, m.qtd_kg])).toEqual([
+      ['saida', 12, 'UN', null],
+      ['entrada', 45, 'UN', null],
+    ])
   })
 
   it('agrupa por produto E unidade — CX e KG do mesmo produto sao historicos separados', async () => {

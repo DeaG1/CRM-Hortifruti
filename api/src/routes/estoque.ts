@@ -7,13 +7,26 @@ import { exigirSessao, type Vars } from '../middleware/sessao'
  *   saldo = entradas − perda na coleta − perdas de deposito − perda na
  *           entrega − saidas
  *
- * TODAS as parcelas dessa conta saem EM KG, cada uma convertida pela regra
- * que corresponde a SUA PROPRIA unidade — ver "tudo em kg desde a origem"
- * mais abaixo. Ate 2026-08-24 nao era assim: `entrou` e `saiu` ficavam na
- * unidade do item, `perda` somava tres unidades diferentes na mesma coluna
- * (kg da coleta + unidade da perda de deposito + kg da entrega), `saldo`
- * subtraia kg de caixas e `equivalente_kg` multiplicava o bolo inteiro por
- * peso_medio, convertendo DE NOVO as parcelas que ja estavam em kg.
+ * Essa conta sai daqui DUAS vezes, e as duas sao verdade, cada uma no seu
+ * alcance:
+ *
+ *   POR LINHA, na unidade em que a movimentacao foi LANCADA (`un`) — exata,
+ *   porque a linha e (produto, un) e ali nao ha mistura de unidades nenhuma.
+ *   Ver "cada linha na unidade em que foi lancada".
+ *
+ *   EM KG, para somar ENTRE linhas (totais da tela, painel, relatorios) —
+ *   la a mistura e real e o kg e a unica unidade em que a conta fecha, cada
+ *   parcela convertida pela regra da SUA PROPRIA unidade. Ver "tudo em kg
+ *   desde a origem".
+ *
+ * Ate 2026-08-24 nao havia conversao nenhuma e a conta somava unidades
+ * diferentes na mesma coluna: `entrou` e `saiu` ficavam na unidade do item,
+ * `perda` somava tres unidades (kg da coleta + unidade da perda de deposito +
+ * kg da entrega), `saldo` subtraia kg de caixas e `equivalente_kg`
+ * multiplicava o bolo inteiro por peso_medio, convertendo DE NOVO as parcelas
+ * que ja estavam em kg. Ate 2026-08-26 o conserto daquilo (35f3a2e) valia
+ * tambem DENTRO da linha, onde nao havia mistura a resolver — e ali ele
+ * apagava a quantidade: sem peso_medio, 45 UN de alface viravam "0".
  *
  * Ported com fidelidade de .superpowers/design-telas/logica-estoque.txt
  * (extraido do prototipo, design/CRM Hortifruti.dc.html:2526-2549). La, o
@@ -35,17 +48,38 @@ import { exigirSessao, type Vars } from '../middleware/sessao'
 
 /** Linha crua devolvida pela consulta — numeric do postgres.js vem como
  * string, convertido em paraJson (mesmo padrao de todo o resto da API).
- * `entrou`/`perda`/`saiu` ja saem EM KG da propria query; peso_medio vem
- * junto so para a leitura secundaria em embalagens (`equivalente_un`).
+ *
+ * A linha carrega as quantidades DUAS VEZES, e as duas sao verdade:
+ *
+ *   `entrou_un`/`perda_deposito_un`/`saiu_un` — na unidade LANCADA (`un`),
+ *   exatas, sem fator nenhum no meio. Sao o que `paraJson` publica como
+ *   quantidade da linha. Ver "cada linha na unidade em que foi lancada".
+ *
+ *   `entrou`/`perda`/`saiu` — EM KG, byte a byte o que esta query devolvia
+ *   desde 35f3a2e, para a soma ENTRE linhas (o unico lugar onde a mistura de
+ *   unidades e real). `perda` aqui e a soma das TRES perdas; a fatia que
+ *   nasce em quilos por contrato sai separada em `perda_contrato_kg`, porque
+ *   e justamente ela que nao cabe na unidade da linha quando `un` != 'KG'.
+ *
+ * peso_medio vem junto so para a leitura em embalagens do front.
  * `itens_sem_conversao` e um count() — bigint, tambem string aqui. */
 interface LinhaEstoque {
   produto_id: string
   nome: string
   un: string
   peso_medio: string | number
+  /** EM KG — a soma entre linhas. Ver acima. */
   entrou: string | number
   perda: string | number
   saiu: string | number
+  /** NA UNIDADE LANCADA (`un`) — a quantidade da propria linha, exata. */
+  entrou_un: string | number
+  perda_deposito_un: string | number
+  saiu_un: string | number
+  /** A perda que nasce EM QUILOS por contrato (coleta + entrega), em kg.
+   * Ja esta dentro de `perda`; sai separada porque numa linha em outra
+   * unidade ela e a unica parcela que nao cabe na unidade da linha. */
+  perda_contrato_kg: string | number
   itens_sem_conversao: string | number
   /** Quantos itens de saida desta linha entram em `saiu` SEM data de entrega
    * — ver "posicao num dia passado" no comentario grande abaixo. `count()`,
@@ -70,6 +104,11 @@ interface LinhaMovimentacao {
   un: string
   tipo: string
   data: string
+  /** A quantidade COMO FOI LANCADA, na unidade `un` da propria movimentacao.
+   * Exata: um lancamento tem uma unidade so, e nada aqui e somado a nada. */
+  qtd: string | number
+  /** A mesma quantidade em quilos, ou `null` quando nao ha fator. Leitura
+   * secundaria — nunca substitui `qtd`. */
   qtd_kg: string | number | null
   referencia: string
   total: string | number
@@ -110,10 +149,11 @@ interface LinhaMovimentacao {
  * quantidade movimentada e o indice de perdas incomparaveis"), que a
  * conversao para kg resolve por si; o que a chave (produto, un) ainda diz —
  * e por isso continua — e EM QUE UNIDADE a movimentacao foi lancada, que e o
- * que o selo da tela mostra e o que permite a leitura secundaria em
- * embalagens (`equivalente_un`, em paraJson). Colapsar as linhas de um mesmo
- * produto num total unico em kg passou a ser possivel, mas e outra decisao:
- * mudaria a forma da tela e a chave de linha, sem corrigir numero nenhum.
+ * que o selo da tela mostra e, desde 2026-08-26, a unidade em que a
+ * quantidade da linha e PUBLICADA (ver paraJson). Colapsar as linhas de um
+ * mesmo produto num total unico em kg continua sendo possivel, mas e outra
+ * decisao: mudaria a forma da tela e a chave de linha, e desfaria justamente
+ * a garantia de que dentro de uma linha nao ha mistura de unidades.
  *
  * ---- perda na coleta: cabecalho (entradas.perda_kg) x item (entrada_itens.perda_kg) ----
  *
@@ -207,13 +247,51 @@ interface LinhaMovimentacao {
  * itens_sem_conversao: lancamento em unidade nao-KG cujo produto tem
  * peso_medio = 0 ("nao informado", ver migration 009) nao e convertivel e
  * NAO recebe fator inventado — uma caixa nao pesa um quilo. O `case` nao tem
- * `else`, entao vira NULL, `sum` ignora, e a contribuicao fica FORA da conta;
- * o contador diz quantos ficaram, para a tela marcar a linha em vez de
- * exibir um saldo silenciosamente incompleto. Como `chaves` agrupa por
+ * `else`, entao vira NULL, `sum` ignora, e a contribuicao fica FORA da conta
+ * EM QUILOS; o contador diz quantos ficaram. Como `chaves` agrupa por
  * (produto_id, un), o fator e constante dentro de uma linha: ou a linha
- * inteira converte, ou nenhuma das tres quantidades dela converte e sobram
- * so as parcelas que ja eram kg (as duas perda_kg) — dai a tela marcar a
- * LINHA toda, nunca uma celula so.
+ * inteira converte, ou nenhuma das tres quantidades dela converte. Ou seja,
+ * `itens_sem_conversao > 0` e exatamente `un <> 'KG' e peso_medio = 0` — e
+ * por isso ele decide a linha toda, nunca uma celula so.
+ *
+ * ---- cada linha na unidade em que foi lancada ----
+ *
+ * Ate 2026-08-26 as quantidades PUBLICADAS eram so as tres de cima, em kg, e
+ * uma linha nao convertivel saia com 0 em entrou/perda/saiu/saldo — o
+ * `coalesce(..., 0)` transformava "nao sei converter" em "nao ha nada".
+ * Quatro linhas de 45, 45, 18 e 30 UN de alface, escarola e rucula (produtos
+ * cadastrados em KG, peso_medio 0) apareciam como quatro zeros com asterisco:
+ * 138 unidades de mercadoria real exibidas como deposito vazio.
+ *
+ * A regra de somar em kg (203fb28, f6374ac, 35f3a2e, e2ce7d5) esta certa e
+ * NAO foi desfeita — ela continua inteira nas colunas `entrou`/`perda`/`saiu`
+ * deste select, que e o que a soma ENTRE linhas usa. O que estava errado era o
+ * ALCANCE dela. Somar caixas com quilos so acontece quando se somam LINHAS
+ * DIFERENTES; DENTRO de uma linha nao ha mistura nenhuma, porque a chave e
+ * (produto_id, un) — `ei.un`, `pd.un` e `si.un` sao constantes ali por
+ * construcao do `group by`. `sum(ei.qtd)` de uma linha e uma quantidade exata
+ * numa unidade so, e converte-la a forca destroi informacao em vez de
+ * reconcilia-la: sem peso_medio o resultado nao e "aproximado", e ausente, e
+ * ausencia virou zero.
+ *
+ * Ha ainda um erro de dominio no caso real: alface e rucula se vendem por
+ * unidade ou maco, nao por quilo. "Quantos quilos de alface" nao e so
+ * impossivel sem peso medio — e a pergunta errada para esses produtos.
+ *
+ * Por isso a query passou a devolver TAMBEM `entrou_un`, `perda_deposito_un`
+ * e `saiu_un`: as mesmas tres somas, sem o `case` de conversao. Elas nao
+ * podem ficar NULL nem "fora da conta" — nao ha conta, so a quantidade que
+ * alguem digitou. Zero ali e medicao (ninguem lancou nada, ou entrou e saiu
+ * tudo), nunca falta de fator.
+ *
+ * A UNICA parcela que nao cabe na unidade da linha e a perda que nasce EM
+ * QUILOS por contrato (entrada_itens.perda_kg + saida_itens.perda_kg + o
+ * rateio do cabecalho). Ela sai isolada em `perda_contrato_kg`, e `paraJson`
+ * a soma na perda da linha SO quando `un = 'KG'` — la ela ja esta na unidade
+ * da linha, e o resultado e identico ao de antes desta mudanca. Fora de KG
+ * ela viaja separada, em quilos, em vez de ser dividida pelo peso_medio: essa
+ * divisao e o fator inverso que 35f3a2e recusou com razao, e escondê-la
+ * dentro do numero principal seria repetir o erro na direcao contraria.
  *
  * O rateio proporcional (`ei.qtd / et.qtd_itens`, logo abaixo) NAO foi
  * convertido, de proposito. Ele nao e uma quantidade: e um PESO RELATIVO
@@ -422,6 +500,11 @@ export async function buscarEstoque(
             when coalesce(pe.peso_medio, 0) > 0 then ei.qtd * pe.peso_medio
           end
         ) as entrou,
+        -- A MESMA soma sem o case: a quantidade na unidade LANCADA. Nao ha
+        -- case porque nao ha o que decidir — ei.un e constante dentro do
+        -- group by, entao isto e uma soma de numeros da mesma unidade. Ver
+        -- "cada linha na unidade em que foi lancada" no comentario acima.
+        sum(ei.qtd) as entrou_un,
         count(*) filter (
           where ei.un <> 'KG' and coalesce(pe.peso_medio, 0) = 0
         ) as sem_conversao,
@@ -464,6 +547,10 @@ export async function buscarEstoque(
             when coalesce(pp.peso_medio, 0) > 0 then pd.qtd * pp.peso_medio
           end
         ) as perda_deposito,
+        -- Idem: pd.un e constante dentro do group by, entao a perda de
+        -- deposito TAMBEM tem uma quantidade exata na unidade da linha. E a
+        -- unica das tres perdas que tem — as outras duas nascem em kg.
+        sum(pd.qtd) as perda_deposito_un,
         count(*) filter (
           where pd.un <> 'KG' and coalesce(pp.peso_medio, 0) = 0
         ) as sem_conversao,
@@ -487,6 +574,8 @@ export async function buscarEstoque(
             when coalesce(ps.peso_medio, 0) > 0 then si.qtd * ps.peso_medio
           end
         ) as saiu,
+        -- Idem entrou_un: si.un e constante dentro do group by.
+        sum(si.qtd) as saiu_un,
         count(*) filter (
           where si.un <> 'KG' and coalesce(ps.peso_medio, 0) = 0
         ) as sem_conversao,
@@ -525,10 +614,26 @@ export async function buscarEstoque(
       p.nome,
       k.un,
       p.peso_medio,
+      -- EM KG, para a soma ENTRE linhas. Identicas ao que esta query devolve
+      -- desde 35f3a2e — o coalesce aqui e o de "esta fonte nao tem linha para
+      -- esta chave", nao o de "nao sei converter": quando a linha nao
+      -- converte, quem diz isso e itens_sem_conversao, e paraJson entao NAO
+      -- publica leitura em quilos nenhuma (ver la).
       coalesce(ent.entrou, 0) as entrou,
       coalesce(ent.perda_coleta, 0) + coalesce(perd.perda_deposito, 0)
         + coalesce(said.perda_entrega, 0) as perda,
       coalesce(said.saiu, 0) as saiu,
+      -- NA UNIDADE LANCADA, exatas: a quantidade da propria linha. Zero aqui
+      -- e sempre medicao (nenhum lancamento, ou entrou e saiu tudo) — nunca
+      -- "faltou peso medio". Ver "cada linha na unidade em que foi lancada".
+      coalesce(ent.entrou_un, 0) as entrou_un,
+      coalesce(perd.perda_deposito_un, 0) as perda_deposito_un,
+      coalesce(said.saiu_un, 0) as saiu_un,
+      -- A fatia da perda que nasce EM QUILOS por contrato (coleta + entrega).
+      -- Ja esta somada em perda; sai separada porque e a unica parcela que
+      -- nao cabe na unidade da linha quando un <> 'KG'.
+      coalesce(ent.perda_coleta, 0) + coalesce(said.perda_entrega, 0)
+        as perda_contrato_kg,
       -- Um contador so, das tres fontes: entrou, perda e saiu desta linha
       -- saem todos das mesmas embalagens, entao um lancamento nao
       -- convertivel — de entrada, de perda de deposito ou de saida — deixa a
@@ -553,55 +658,78 @@ export async function buscarEstoque(
 }
 
 /**
- * saldo = entrou - perda - saiu, TUDO EM KG (perda ja soma coleta +
- * deposito + entrega — ver o comentario grande em `buscarEstoque` pra como
- * cada uma entra nessa soma na unidade dela, e por que coleta usa o MAIOR
- * entre cabecalho e itens da entrada, nao a soma dos dois).
+ * saldo = entrou - perda - saiu, NA UNIDADE EM QUE A LINHA FOI LANCADA
+ * (`un`), com a mesma conta em quilos ao lado (`em_kg`) quando ha como
+ * converte-la.
  *
- * ---- por que o kg virou o numero principal, e `equivalente_kg` sumiu ----
+ * ---- por que a quantidade da linha vem na unidade lancada ----
  *
- * Ate 2026-08-24 as quatro colunas ficavam na unidade lancada e `equivalente_kg`
- * era um objeto a parte com as mesmas quatro multiplicadas por peso_medio.
- * Nenhuma das duas leituras estava certa: `perda` somava kg (coleta e
- * entrega) com a unidade da perda de deposito na MESMA coluna, `saldo`
- * subtraia isso de caixas, e `equivalente_kg` multiplicava o bolo inteiro,
- * convertendo DE NOVO as duas parcelas que ja eram kg — 11 kg + 4 CX de 8 kg
- * saiam como "15" e como "120 kg", quando a verdade sao 43 kg.
+ * A linha da tabela E (produto, unidade lancada) — a chave do `group by` em
+ * `buscarEstoque`. Dentro dela nao existe caixa somada com quilo: `ei.un`,
+ * `pd.un` e `si.un` sao constantes por construcao. A quantidade lancada e
+ * exata e nao ambigua ali, e forca-la a virar kg nao reconcilia nada — sem
+ * peso_medio ela simplesmente desaparecia, e o `coalesce` do select
+ * transformava a ausencia em 0. Foi assim que 45 UN de alface viraram "0 *"
+ * na tela, quatro vezes seguidas, com 138 unidades no deposito.
  *
- * O kg nao e uma preferencia estetica: e a UNICA unidade em que essa conta
- * fecha. Duas das cinco parcelas (as duas `perda_kg`) nascem em quilos por
- * contrato, para item de qualquer unidade — nao existe versao delas "em
- * caixas" que nao seja inventada. Um saldo na unidade lancada exigiria
- * dividir esses quilos pelo peso_medio, ou seja, exatamente o fator inverso:
- * a mesma aproximacao, so que escondida dentro do numero principal.
+ * Zero continua sendo zero DE VERDADE: produto que entrou 45 e saiu 45 sai
+ * daqui com saldo 0 e `itens_sem_conversao` 0 — medicao, sem marca nenhuma.
+ * O que nao pode e ausencia de conversao virar zero, e e so isso que muda.
  *
- * Logo `equivalente_kg` deixou de fazer sentido como campo separado: seria
- * uma copia identica de entrou/perda/saiu/saldo. O que NAO some e a
- * distincao que a tela mostrava — um numero exato na unidade da conta e uma
- * leitura aproximada na outra unidade. Ela continua, invertida:
- * `equivalente_un` traz as mesmas quatro quantidades divididas pelo
- * peso_medio, para quem esta na camara fria contando caixas ("≈ 9,6 CX"), e
- * e null exatamente nas mesmas linhas em que `equivalente_kg` era null (un
- * = 'KG', onde nao ha nada a converter, ou peso_medio = 0, onde nao ha fator
- * — e nesse segundo caso `itens_sem_conversao` ja marcou a linha inteira).
- * Mesmo fator, mesma condicao, direcao oposta: o exato passa a ser o
- * principal e o aproximado o secundario, que e a hierarquia correta.
+ * ---- e por que o kg continua existindo, e continua obrigatorio ----
+ *
+ * Somar CX com KG so acontece ENTRE linhas, e la o kg e a unica unidade em
+ * que a conta fecha — todo o raciocinio de 203fb28/f6374ac/35f3a2e/e2ce7d5
+ * segue valendo, intacto, e a query continua produzindo aquelas somas. O que
+ * mudou e o alcance: elas viajam em `em_kg`, para os totais da tela, os
+ * indicadores do painel e os relatorios.
+ *
+ * `em_kg` e `null` — nao um objeto de zeros — quando a linha nao converte
+ * (`itens_sem_conversao > 0`, que numa linha e exatamente
+ * `un <> 'KG' e peso_medio = 0`). Null e o que faz o consumidor ter de
+ * decidir o que dizer; zero deixaria ele somar silenciosamente e voltar a
+ * afirmar um total que ignora a mercadoria. E o que substituiu
+ * `equivalente_un`: aquilo era a quantidade em kg DIVIDIDA pelo peso_medio,
+ * uma aproximacao do numero que agora chega exato como `entrou`/`saiu`.
+ *
+ * ---- a perda e a unica que nao cabe inteira na unidade da linha ----
+ *
+ * Das cinco parcelas, duas nascem EM QUILOS por contrato para item de
+ * qualquer unidade (entrada_itens.perda_kg + o rateio do cabecalho, e
+ * saida_itens.perda_kg). Numa linha em KG elas ja estao na unidade da linha e
+ * entram na perda como sempre entraram — por isso uma linha em KG sai daqui
+ * com os MESMOS quatro numeros de antes desta mudanca, e ha teste disso.
+ *
+ * Fora de KG elas nao cabem, e nao sao divididas pelo peso_medio: essa
+ * divisao e o fator inverso que 35f3a2e recusou com razao. Viajam em
+ * `perda_fora_da_unidade`, em quilos, para a tela poder dizer que a perda e o
+ * saldo daquela linha deixam esses quilos de fora — a informacao que uma
+ * divisao inventada esconderia dentro do numero principal.
  */
 export function paraJson(linha: LinhaEstoque) {
-  const entrou = Number(linha.entrou)
-  const perda = Number(linha.perda)
-  const saiu = Number(linha.saiu)
   const pesoMedio = Number(linha.peso_medio)
+  const itensSemConversao = Number(linha.itens_sem_conversao ?? 0)
+  const ehKg = linha.un === 'KG'
+
+  // ---- a quantidade da linha, na unidade lancada. Exata, sempre.
+  const entrou = Number(linha.entrou_un)
+  const saiu = Number(linha.saiu_un)
+  const perdaContratoKg = Number(linha.perda_contrato_kg)
+  // Numa linha em KG a perda de contrato JA esta na unidade da linha: soma
+  // normalmente, e o resultado e identico ao de antes. Fora de KG, sai a
+  // parte para `perda_fora_da_unidade` em vez de virar um fator inventado.
+  const perda = Number(linha.perda_deposito_un) + (ehKg ? perdaContratoKg : 0)
+  const perdaForaDaUnidade = ehKg ? 0 : perdaContratoKg
   const saldo = entrou - perda - saiu
 
-  const equivalenteUn = linha.un !== 'KG' && pesoMedio > 0
-    ? {
-        entrou: entrou / pesoMedio,
-        perda: perda / pesoMedio,
-        saiu: saiu / pesoMedio,
-        saldo: saldo / pesoMedio,
-      }
-    : null
+  // ---- a mesma conta em quilos, para somar ENTRE linhas. Ver acima por que
+  // e `null`, e nao um objeto de zeros, quando a linha nao converte.
+  const entrouKg = Number(linha.entrou)
+  const perdaKg = Number(linha.perda)
+  const saiuKg = Number(linha.saiu)
+  const emKg = itensSemConversao > 0
+    ? null
+    : { entrou: entrouKg, perda: perdaKg, saiu: saiuKg, saldo: entrouKg - perdaKg - saiuKg }
 
   return {
     produto_id: linha.produto_id,
@@ -612,10 +740,11 @@ export function paraJson(linha: LinhaEstoque) {
     saiu,
     saldo,
     peso_medio: pesoMedio,
-    equivalente_un: equivalenteUn,
+    perda_fora_da_unidade: perdaForaDaUnidade,
+    em_kg: emKg,
     // count() vem como bigint (string no postgres.js) — mesma conversao na
     // borda que os numeric recebem, igual a entradas.ts/saidas.ts.
-    itens_sem_conversao: Number(linha.itens_sem_conversao ?? 0),
+    itens_sem_conversao: itensSemConversao,
     // Idem: bigint do count(). Ver "saida sem entrega" em buscarEstoque —
     // a tela usa este numero para explicar por que a posicao historica
     // carrega uma saida que nao da para posicionar no tempo.
@@ -686,12 +815,21 @@ export const LIMITE_HISTORICO = 12
  * ha o que listar num historico que E uma lista de datas, e o `order by`
  * nao teria por onde ordena-la.
  *
- * `qtd_kg` segue a convencao de quilos de toda a tela: KG conta direto,
- * outra unidade multiplica por `produtos.peso_medio`, e lancamento nao
- * convertivel (unidade != KG com peso_medio = 0) vira NULL — o mesmo `case`
- * sem `else` da agregacao, pelo mesmo motivo: uma caixa nao pesa um quilo, e
- * inventar fator e pior que marcar a linha. NULL aqui significa exatamente
- * "este lancamento e um dos `itens_sem_conversao` da linha".
+ * `qtd` e a quantidade COMO FOI LANCADA, na unidade `un` da propria
+ * movimentacao. Uma movimentacao e UM lancamento: tem uma unidade so e nao e
+ * soma de nada, entao aqui nao existe nem a possibilidade de misturar
+ * unidades — a quantidade e exata e sempre existe. E o numero que o
+ * historico mostra.
+ *
+ * `qtd_kg` e a leitura secundaria, na convencao de quilos que a soma entre
+ * linhas usa: KG conta direto, outra unidade multiplica por
+ * `produtos.peso_medio`, e lancamento nao convertivel (unidade != KG com
+ * peso_medio = 0) vira NULL — o mesmo `case` sem `else` da agregacao, pelo
+ * mesmo motivo: uma caixa nao pesa um quilo. NULL aqui significa "este
+ * lancamento e um dos `itens_sem_conversao` da linha", e o historico
+ * simplesmente NAO mostra quilos nessa movimentacao. Ate 2026-08-26 ele
+ * mostrava "—*" no lugar da quantidade, ou seja, apagava da tela um
+ * lancamento de 45 UN que estava gravado e era exato.
  *
  * ---- ordem e desempate ----
  *
@@ -726,6 +864,7 @@ export async function buscarMovimentacoesEstoque(
         e.data as data,
         e.criado_em as criado_em,
         ei.id as item_id,
+        ei.qtd as qtd,
         case
           when ei.un = 'KG' then ei.qtd
           when coalesce(pe.peso_medio, 0) > 0 then ei.qtd * pe.peso_medio
@@ -744,6 +883,7 @@ export async function buscarMovimentacoesEstoque(
         s.entrega as data,
         s.criado_em as criado_em,
         si.id as item_id,
+        si.qtd as qtd,
         case
           when si.un = 'KG' then si.qtd
           when coalesce(ps.peso_medio, 0) > 0 then si.qtd * ps.peso_medio
@@ -769,6 +909,7 @@ export async function buscarMovimentacoesEstoque(
         pd.data as data,
         pd.criado_em as criado_em,
         pd.id as item_id,
+        pd.qtd as qtd,
         case
           when pd.un = 'KG' then pd.qtd
           when coalesce(pp.peso_medio, 0) > 0 then pd.qtd * pp.peso_medio
@@ -790,7 +931,7 @@ export async function buscarMovimentacoesEstoque(
     select
       produto_id, un, tipo,
       to_char(data, 'YYYY-MM-DD') as data,
-      qtd_kg, referencia, total
+      qtd, qtd_kg, referencia, total
     from ordenado
     where pos <= ${limite}
     order by produto_id, un, pos
@@ -799,8 +940,13 @@ export async function buscarMovimentacoesEstoque(
 
 /**
  * numeric -> number e bigint -> number na borda, igual a `paraJson`.
- * `qtd_kg` mantem `null` (lancamento nao convertivel em quilos) em vez de
- * virar 0: zero seria uma quantidade medida, e esta nao foi.
+ *
+ * `qtd` (na unidade `un` da movimentacao) e o numero do historico: um
+ * lancamento e um so, com uma unidade so, e por isso e sempre exato.
+ * `qtd_kg` e a leitura secundaria e mantem `null` (lancamento nao convertivel
+ * em quilos) em vez de virar 0 — zero seria uma quantidade medida, e esta nao
+ * foi. O que o `null` significa e "nao ha leitura em quilos desta
+ * movimentacao", nunca "nao ha movimentacao".
  */
 export function paraJsonMovimentacao(linha: LinhaMovimentacao) {
   return {
@@ -808,6 +954,7 @@ export function paraJsonMovimentacao(linha: LinhaMovimentacao) {
     un: linha.un,
     tipo: linha.tipo,
     data: linha.data,
+    qtd: Number(linha.qtd ?? 0),
     qtd_kg: linha.qtd_kg === null || linha.qtd_kg === undefined ? null : Number(linha.qtd_kg),
     referencia: linha.referencia ?? '',
     total: Number(linha.total ?? 0),

@@ -85,10 +85,12 @@
 }
 
 /* As quatro colunas numéricas ganharam o "(KG)" no cabeçalho e precisam de
-   um pouco mais de largura que as originais (0.8fr) para não quebrarem. */
+   um pouco mais de largura que as originais (0.8fr) para não quebrarem.
+   A sétima coluna (ÚLTIMA MOVIMENTAÇÃO) entrou logo depois da unidade, do
+   lado do texto — o bloco numérico à direita continua inteiro e alinhado. */
 .estoque-linha {
   display: grid;
-  grid-template-columns: 1.6fr 0.9fr 1fr 1fr 1fr 1.1fr;
+  grid-template-columns: 1.5fr 0.7fr 1.2fr 1fr 1fr 1fr 1.1fr;
   gap: 8px;
   align-items: center;
 }
@@ -103,14 +105,38 @@
   letter-spacing: 0.3px;
 }
 
+/* A linha de dados virou <button> (a linha inteira abre/fecha o histórico,
+   e precisa ser alcançável pelo teclado). Estes resets tiram a cara de botão
+   sem tirar o foco: a aparência da tabela é exatamente a de antes. */
 .estoque-linha--dados {
   padding: 13px 18px;
+  border: none;
   border-bottom: 1px solid #ece8db;
   font-size: 12.5px;
+  width: 100%;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  color: inherit;
 }
 
-.estoque-linha--dados:last-child {
+.estoque-item:last-child .estoque-linha--dados {
   border-bottom: none;
+}
+
+.estoque-item--aberto {
+  background: #faf8f0;
+}
+
+.estoque-linha--dados:hover .estoque-nome {
+  color: #3f6b2f;
+}
+
+.estoque-seta {
+  color: #9a9784;
+  font-size: 12px;
+  margin-right: 7px;
 }
 
 .estoque-col-num {
@@ -179,6 +205,93 @@
 
 .estoque-legenda--incompleto strong {
   color: #8a6a12;
+}
+
+/* ---------- última movimentação e histórico ---------- */
+
+/* O aviso de que o histórico não carregou. Âmbar, não vermelho: a tela não
+   quebrou — os saldos e a última movimentação de cada linha continuam ali,
+   porque vêm do outro endpoint. Mesmo tom do aviso de folha de
+   FuncionariosLista. */
+.estoque-aviso-historico {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  background: #f6efd8;
+  border: 1px solid #e5d6a8;
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: #7a6118;
+}
+
+/* Cada tipo tem sua própria cor, além do rótulo escrito por extenso: perda
+   nunca pode ser lida como saída no meio de uma tabela cheia de números. As
+   cores acompanham as que a tabela já usa — perda no mesmo tom da coluna
+   PERDAS, entrada no verde do selo de unidade. */
+.estoque-mov {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.estoque-mov--entrada {
+  color: #4a6b2e;
+}
+
+.estoque-mov--saida {
+  color: #4a5a7a;
+}
+
+.estoque-mov--perda {
+  color: #9a4a2e;
+}
+
+.estoque-sem-mov {
+  color: #9a9784;
+  cursor: help;
+}
+
+.estoque-detalhe {
+  padding: 0 18px 16px 26px;
+  background: #faf8f0;
+}
+
+.estoque-historico-titulo {
+  font-size: 11px;
+  font-weight: 700;
+  color: #7c7a6a;
+  letter-spacing: 0.3px;
+  margin-bottom: 8px;
+}
+
+.estoque-historico-vazio {
+  background: #fff;
+  border: 1px dashed #ddd8c6;
+  border-radius: 9px;
+  padding: 14px;
+  font-size: 12.5px;
+  color: #9a9784;
+  text-align: center;
+}
+
+/* Mesmo desenho das linhas de histórico de FuncionariosLista (cartão claro,
+   borda suave), sem o :hover/cursor de clique — aqui a linha não abre nada. */
+.estoque-movimentacao {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 0.8fr;
+  gap: 10px;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #eee9da;
+  border-radius: 9px;
+  padding: 9px 13px;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+}
+
+.estoque-movimentacao-ref {
+  color: #5a584a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---------- seção de perdas do depósito ---------- */

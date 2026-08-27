@@ -219,3 +219,96 @@ describe('forma da resposta', () => {
     expect(corpo.some((l: { nome: string }) => l.nome === 'Produto Outro Tenant HTTP')).toBe(false)
   })
 })
+
+// =========================================== movimentacao (camada HTTP)
+
+describe('GET /api/estoque — datas da ultima movimentacao', () => {
+  it('devolve as tres datas como texto AAAA-MM-DD, ou null quando a fonte nunca movimentou', async () => {
+    const res = await pedir('/api/estoque', comoAdmin())
+    const corpo = await res.json()
+    const linha = corpo.find((l: { nome: string }) => l.nome === 'Melancia HTTP')
+
+    // A entrada do beforeAll e de 2026-08-01; nao ha saida nem perda.
+    expect(linha.ultima_entrada).toBe('2026-08-01')
+    expect(linha.ultima_saida).toBeNull()
+    expect(linha.ultima_perda).toBeNull()
+    // Texto puro: um Date serializado pelo Hono chegaria como
+    // '2026-08-01T00:00:00.000Z' e o front teria de reformatar (e errar o
+    // dia em fuso positivo).
+    expect(typeof linha.ultima_entrada).toBe('string')
+    expect(linha.ultima_entrada).not.toContain('T')
+  })
+
+  it('a data da saida e a entrega, e saida Cancelada nao produz data nenhuma', async () => {
+    const [prod] = await admin`
+      insert into produtos (tenant_id, nome, un, peso_medio)
+      values (${tenantId}, 'Giro HTTP', 'KG', 0) returning id`
+    // data_pedido e entrega DIFERENTES: sem isso o teste nao prova nada.
+    const [entregue] = await admin`
+      insert into saidas (tenant_id, numero, data_pedido, entrega, status)
+      values (${tenantId}, 'S-HTTP-1', '2026-07-01', '2026-07-19', 'Entregue') returning id`
+    await admin`
+      insert into saida_itens (tenant_id, saida_id, produto_id, un, qtd, preco)
+      values (${tenantId}, ${entregue.id}, ${prod.id}, 'KG', 4, 2)`
+    const [cancelada] = await admin`
+      insert into saidas (tenant_id, numero, data_pedido, entrega, status)
+      values (${tenantId}, 'S-HTTP-2', '2026-07-20', '2026-12-25', 'Cancelado') returning id`
+    await admin`
+      insert into saida_itens (tenant_id, saida_id, produto_id, un, qtd, preco)
+      values (${tenantId}, ${cancelada.id}, ${prod.id}, 'KG', 4, 2)`
+
+    const res = await pedir('/api/estoque', comoAdmin())
+    const corpo = await res.json()
+    const linha = corpo.find((l: { nome: string }) => l.nome === 'Giro HTTP')
+    expect(linha.ultima_saida).toBe('2026-07-19')
+    expect(linha.ultima_saida).not.toBe('2026-07-01')  // nao e a data_pedido
+    expect(linha.ultima_saida).not.toBe('2026-12-25')  // nem a saida cancelada
+  })
+})
+
+describe('GET /api/estoque/movimentacoes', () => {
+  it('sem cookie -> 401 (mesma exigencia de sessao da listagem)', async () => {
+    const res = await pedir('/api/estoque/movimentacoes')
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ erro: 'nao autenticado' })
+  })
+
+  it('colaborador -> 200: quem ve o saldo ve quando ele mexeu', async () => {
+    const res = await pedir('/api/estoque/movimentacoes', comoColab())
+    expect(res.status).toBe(200)
+  })
+
+  it('devolve as movimentacoes com tipo, data, quantidade em kg e total, tudo numerico na borda', async () => {
+    const res = await pedir('/api/estoque/movimentacoes', comoAdmin())
+    expect(res.status).toBe(200)
+    const corpo = await res.json()
+    expect(Array.isArray(corpo)).toBe(true)
+
+    type Mov = { produto_id: string; un: string; tipo: string; data: string; qtd_kg: number | null; total: number }
+    const daMelancia = corpo.filter((m: Mov) => m.un === 'CX' && m.qtd_kg === 150)
+    expect(daMelancia.length).toBe(1)
+    const mov = daMelancia[0] as Mov
+    expect(mov.tipo).toBe('entrada')
+    expect(mov.data).toBe('2026-08-01')
+    expect(typeof mov.qtd_kg).toBe('number')  // 10 CX * 15 kg
+    expect(typeof mov.total).toBe('number')
+    expect(mov).not.toHaveProperty('tenant_id')
+  })
+
+  it('lancamento nao convertivel chega com qtd_kg null, nunca zero', async () => {
+    const res = await pedir('/api/estoque/movimentacoes', comoAdmin())
+    const corpo = await res.json()
+    // 'Caixa Sem Fator HTTP': 12 CX sem peso_medio (criado na suite acima).
+    type Mov = { referencia: string; qtd_kg: number | null }
+    const mov = corpo.find((m: Mov) => m.referencia === 'E-HTTP-3')
+    expect(mov).toBeDefined()
+    expect(mov.qtd_kg).toBeNull()
+  })
+
+  it('tenant so ve as proprias movimentacoes', async () => {
+    const res = await pedir('/api/estoque/movimentacoes', comoAdmin())
+    const corpo = await res.json()
+    type Mov = { referencia: string }
+    expect(corpo.some((m: Mov) => m.referencia === 'E-HTTP-OUTRO')).toBe(false)
+  })
+})

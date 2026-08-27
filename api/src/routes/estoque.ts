@@ -47,6 +47,26 @@ interface LinhaEstoque {
   perda: string | number
   saiu: string | number
   itens_sem_conversao: string | number
+  /** Datas da movimentacao mais recente de cada uma das TRES fontes, ja em
+   * texto 'AAAA-MM-DD' (ver `to_char` na query). `null` quando aquela fonte
+   * nunca movimentou esta linha — nunca uma data inventada, nunca a de hoje.
+   * Qual das tres e "a ultima movimentacao" e decidido no front por
+   * `ultimaMovimentacao` (web/src/derive/estoque.ts), funcao pura e testada:
+   * aqui so saem os tres maximos crus. */
+  ultima_entrada: string | null
+  ultima_saida: string | null
+  ultima_perda: string | null
+}
+
+/** Uma movimentacao do historico por item — ver `buscarMovimentacoesEstoque`. */
+interface LinhaMovimentacao {
+  produto_id: string
+  un: string
+  tipo: string
+  data: string
+  qtd_kg: string | number | null
+  referencia: string
+  total: string | number
 }
 
 /**
@@ -203,6 +223,74 @@ interface LinhaEstoque {
  * rateio identico de relatorios.ts ao mesmo tempo, sob pena de as duas telas
  * divergirem de novo.
  *
+ * ---- quando a linha mexeu pela ultima vez ----
+ *
+ * As tres datas (`ultima_entrada`, `ultima_saida`, `ultima_perda`) NAO
+ * custam consulta nova: sao um `max(...)` dentro das MESMAS tres CTEs que ja
+ * varrem essas tabelas para somar as quantidades. Nenhum join, nenhuma
+ * varredura e nenhum endpoint a mais — a agregacao ja passava por cada
+ * linha; passou a levar a maior data junto.
+ *
+ * DE QUE COLUNA SAI A DATA DE CADA FONTE:
+ *
+ *   entrada -> entradas.data   (a coleta; not null)
+ *   perda   -> perdas.data     (a baixa no deposito; not null)
+ *   saida   -> saidas.ENTREGA  (nao data_pedido; NULLABLE — ver abaixo)
+ *
+ * `saidas.entrega`, e nao `saidas.data_pedido`, porque a mercadoria sai do
+ * deposito quando e ENTREGUE — `data_pedido` e quando o preco foi acordado
+ * (a propria saidas.ts diz isso na memoria de preco: "e quando o preco foi
+ * acordado"). Todo o resto do projeto ja le o fluxo de saida por `entrega`,
+ * nunca por `data_pedido`: receita e custo do periodo
+ * (derive/financeiro.ts, `noPeriodo(saidas, periodo, s => s.entrega)`),
+ * dias de recebimento (`data_pag − entrega`), ultima compra do cliente e
+ * ticket (derive/clientes.ts), os relatorios de vendas/inadimplencia
+ * (derive/relatorios.ts) e o recorte em SQL do relatorio de produtos
+ * (relatorios.ts, `to_char(s.entrega, 'YYYY-MM')`). Usar data_pedido aqui
+ * faria a tela de giro discordar de todas elas — e mentir: um pedido
+ * lancado em maio e entregue em agosto teria "saido" em maio.
+ *
+ * `entrega` e nullable, e NAO ha fallback para `data_pedido`. Saida ainda
+ * sem data de entrega registrada nao produz data de movimentacao nenhuma
+ * (o `max` ignora NULL) — mesma leitura de `diasRecebimento` e
+ * `ultimaCompraCliente`, que tratam entrega ausente como "ainda nao
+ * aconteceu" em vez de substituir por outra data. A QUANTIDADE dessa saida
+ * continua descontada do saldo (fidelidade ao prototipo, que so exclui
+ * Cancelado/Devolvido); o que falta e saber QUANDO, e "nao sei" se diz com
+ * travessao, nao com a data do pedido.
+ *
+ * MESMO FILTRO DE STATUS DA QUANTIDADE. `max(s.entrega)` mora dentro da CTE
+ * `said`, que ja tem `where s.status not in ('Cancelado','Devolvido')` —
+ * entao a data herda o filtro de graca, e nao ha como as duas divergirem
+ * numa alteracao futura sem que alguem mexa nessa linha de proposito. Sem
+ * isso, a tela diria "saiu ontem" de mercadoria que nunca saiu.
+ *
+ * PERDA E MOVIMENTACAO. `ultima_perda` sai da CTE `perd` (tabela `perdas`, a
+ * baixa de deposito) porque perda tambem tira mercadoria do estoque e tem
+ * data propria. Ficam de fora as outras duas perdas — a de coleta
+ * (entrada_itens.perda_kg + rateio do cabecalho) e a de entrega
+ * (saida_itens.perda_kg): elas nao sao eventos com data propria, acontecem
+ * DENTRO de uma entrada ou de uma saida, na mesma data que ja esta em
+ * `ultima_entrada`/`ultima_saida`. Emiti-las a parte duplicaria o mesmo
+ * evento no historico.
+ *
+ * `to_char(..., 'YYYY-MM-DD')` em vez de devolver a coluna `date` crua: o
+ * postgres.js entrega `date` como objeto `Date` do JS, que o JSON.stringify
+ * do Hono serializa como timestamp UTC completo
+ * ("2026-08-20T00:00:00.000Z") — e converter de volta com `toISOString()`
+ * troca o dia em fuso positivo. O Postgres formata a data como ela e, sem
+ * fuso no meio, e sem precisar de um segundo formatador de data no
+ * TypeScript (mesmo motivo de `to_char(s.entrega, 'YYYY-MM')` em
+ * relatorios.ts).
+ *
+ * O FILTRO DE PERIODO GLOBAL CONTINUA SEM SE APLICAR. Ver o comentario de
+ * EstoqueLista.tsx e o commit eae52e0: saldo e POSICAO, nao fluxo, e a tela
+ * declara isso numa nota. "Ultima movimentacao" tem exatamente a mesma
+ * natureza — recortada por julho, responderia "a ultima vez que mexeu em
+ * julho", que nao e a pergunta e faria um item parado desde maio parecer
+ * nunca movimentado. Por isso nenhuma das duas funcoes deste arquivo aceita
+ * parametro de periodo, e nao devem ganhar um.
+ *
  * RLS cuida do isolamento por tenant em cada tabela referenciada — nenhuma
  * dessas queries filtra tenant_id explicitamente porque tudo roda dentro de
  * withTenant (mesmo padrao das outras rotas).
@@ -260,7 +348,11 @@ export async function buscarEstoque(sql: Sql, tenantId: string): Promise<LinhaEs
               then (greatest(e.perda_kg, et.perda_itens) - et.perda_itens) * ei.qtd / et.qtd_itens
             else 0
           end
-        ) as perda_coleta
+        ) as perda_coleta,
+        -- A coleta mais recente desta linha. Um max na CTE que ja estava
+        -- varrendo estas mesmas linhas — sem consulta nova. entradas.data
+        -- e not null, entao toda linha com entrada tem esta data.
+        to_char(max(e.data), 'YYYY-MM-DD') as ultima_entrada
       from entrada_itens ei
       join entradas e on e.id = ei.entrada_id
       join entrada_totais et on et.entrada_id = ei.entrada_id
@@ -279,7 +371,12 @@ export async function buscarEstoque(sql: Sql, tenantId: string): Promise<LinhaEs
         ) as perda_deposito,
         count(*) filter (
           where pd.un <> 'KG' and coalesce(pp.peso_medio, 0) = 0
-        ) as sem_conversao
+        ) as sem_conversao,
+        -- Perda de deposito e movimentacao de verdade: tira mercadoria e tem
+        -- data propria (perdas.data, not null). As perdas de coleta e de
+        -- entrega nao entram aqui — acontecem dentro de uma entrada/saida, na
+        -- data que ja esta em ultima_entrada/ultima_saida.
+        to_char(max(pd.data), 'YYYY-MM-DD') as ultima_perda
       from perdas pd
       join produtos pp on pp.id = pd.produto_id
       group by pd.produto_id, pd.un
@@ -297,7 +394,15 @@ export async function buscarEstoque(sql: Sql, tenantId: string): Promise<LinhaEs
         count(*) filter (
           where si.un <> 'KG' and coalesce(ps.peso_medio, 0) = 0
         ) as sem_conversao,
-        sum(si.perda_kg) as perda_entrega
+        sum(si.perda_kg) as perda_entrega,
+        -- ENTREGA, nao data_pedido: a mercadoria sai do deposito quando e
+        -- entregue (ver "quando a linha mexeu pela ultima vez" acima). Mora
+        -- DENTRO desta CTE de proposito, para herdar o mesmo
+        -- where s.status not in ('Cancelado','Devolvido') que a quantidade
+        -- — data e quantidade nunca podem discordar sobre o que saiu.
+        -- max ignora NULL, entao saida ainda sem entrega registrada nao
+        -- inventa data: a linha cai no travessao se nao houver outra fonte.
+        to_char(max(s.entrega), 'YYYY-MM-DD') as ultima_saida
       from saida_itens si
       join saidas s on s.id = si.saida_id
       join produtos ps on ps.id = si.produto_id
@@ -319,7 +424,13 @@ export async function buscarEstoque(sql: Sql, tenantId: string): Promise<LinhaEs
       -- LINHA inteira incompleta, nunca uma celula so. Mesmo padrao de
       -- relatorios.ts (GET /api/relatorios/produtos).
       coalesce(ent.sem_conversao, 0) + coalesce(perd.sem_conversao, 0)
-        + coalesce(said.sem_conversao, 0) as itens_sem_conversao
+        + coalesce(said.sem_conversao, 0) as itens_sem_conversao,
+      -- SEM coalesce, de proposito: fonte que nunca movimentou esta linha sai
+      -- NULL e vira travessao na tela. Um coalesce para 'hoje' ou para a
+      -- epoch afirmaria uma movimentacao que ninguem registrou.
+      ent.ultima_entrada,
+      said.ultima_saida,
+      perd.ultima_perda
     from chaves k
     join produtos p on p.id = k.produto_id
     left join ent  on ent.produto_id  = k.produto_id and ent.un  = k.un
@@ -393,6 +504,185 @@ export function paraJson(linha: LinhaEstoque) {
     // count() vem como bigint (string no postgres.js) — mesma conversao na
     // borda que os numeric recebem, igual a entradas.ts/saidas.ts.
     itens_sem_conversao: Number(linha.itens_sem_conversao ?? 0),
+    // As tres datas ja saem como texto 'AAAA-MM-DD' da propria query
+    // (`to_char`) — nao ha Date nem fuso no caminho, entao passam direto.
+    // `?? null` normaliza o `undefined` que o LEFT JOIN nunca produz mas que
+    // um chamador de teste montando a linha na mao poderia.
+    ultima_entrada: linha.ultima_entrada ?? null,
+    ultima_saida: linha.ultima_saida ?? null,
+    ultima_perda: linha.ultima_perda ?? null,
+  }
+}
+
+/**
+ * Quantas movimentacoes por (produto, unidade) o historico devolve — as mais
+ * recentes. O teto existe porque o corpo da resposta e proporcional a
+ * (linhas da tela x este numero): um item com anos de giro diario teria
+ * centenas de movimentacoes, e ninguem abre um historico para rolar ate
+ * 2024. `total` (abaixo) diz quantas existem de verdade, para a tela nunca
+ * truncar em silencio.
+ */
+export const LIMITE_HISTORICO = 12
+
+/**
+ * O historico por item: as datas de cada entrada, saida e perda daquela
+ * linha da tela, para acompanhar o giro.
+ *
+ * ---- por que UMA consulta para a tela inteira, e nao uma por item ----
+ *
+ * O desenho obvio — buscar o historico do item quando ele e expandido —
+ * custa uma requisicao por expansao. Numa tela com dezenas de produtos (e
+ * cada produto podendo ter mais de uma linha, uma por unidade lancada), quem
+ * esta conferindo o giro abre varios: sao dezenas de invocacoes do Worker,
+ * dezenas de `withTenant` (cada transacao custou ~594ms medidos em producao
+ * — ver o comentario no fim de src/db.ts) e dezenas de idas ao banco, todas
+ * para montar a mesma tabela. Este projeto roda em Cloudflare Workers, onde
+ * o custo por invocacao nao e teorico: foi o teto de subrequisicoes por
+ * invocacao que obrigou a adotar o Hyperdrive (ver `criarPoolDoEnv`).
+ *
+ * Entao esta funcao devolve o historico de TODAS as linhas de uma vez, e a
+ * tela busca UMA vez — na primeira expansao — e reusa para todas as
+ * seguintes. O custo passa a ser O(1) na quantidade de itens expandidos, em
+ * vez de O(n).
+ *
+ * ---- e por que sob demanda, e nao junto de GET /api/estoque ----
+ *
+ * Duas razoes, as duas de custo:
+ *
+ *   1. Quem so abre a tela para ver os saldos — o caso comum — nao paga
+ *      nada: nenhuma requisicao a mais, nenhum byte a mais no corpo do
+ *      agregado. Junto da listagem, todo mundo pagaria o historico inteiro
+ *      sempre, expandindo ou nao.
+ *   2. ISOLACAO DE FALHA. Junto da listagem, um erro no historico derrubaria
+ *      os saldos — o numero que o funcionario abre a tela para ver.
+ *      Separado, ele cai sozinho: a tabela continua inteira, com as
+ *      quantidades e a ultima movimentacao (que vem do agregado, nao daqui),
+ *      e um aviso diz o que faltou. Mesmo padrao da segunda busca de
+ *      ClientesLista/FornecedoresLista.
+ *
+ * ---- o que entra, e com que data ----
+ *
+ * As mesmas tres fontes e as mesmas datas da agregacao (ver o comentario
+ * grande de `buscarEstoque`), inclusive o filtro de status das saidas e a
+ * escolha de `entrega` em vez de `data_pedido`. Duas consequencias diretas:
+ * saida Cancelada/Devolvida nao aparece no historico (nunca saiu), e saida
+ * sem `entrega` tambem nao (`where s.entrega is not null`) — sem data, nao
+ * ha o que listar num historico que E uma lista de datas, e o `order by`
+ * nao teria por onde ordena-la.
+ *
+ * `qtd_kg` segue a convencao de quilos de toda a tela: KG conta direto,
+ * outra unidade multiplica por `produtos.peso_medio`, e lancamento nao
+ * convertivel (unidade != KG com peso_medio = 0) vira NULL — o mesmo `case`
+ * sem `else` da agregacao, pelo mesmo motivo: uma caixa nao pesa um quilo, e
+ * inventar fator e pior que marcar a linha. NULL aqui significa exatamente
+ * "este lancamento e um dos `itens_sem_conversao` da linha".
+ *
+ * ---- ordem e desempate ----
+ *
+ * `data desc` primeiro (mais recente no topo, igual ao historico de
+ * FuncionariosLista), depois `criado_em desc` e por fim `id desc`. O
+ * desempate e explicito porque DUAS MOVIMENTACOES NO MESMO DIA sao comuns
+ * (o fornecedor que entrega de manha e de tarde; a mesma rota com duas
+ * saidas) e `data` sozinha deixaria a ordem por conta do plano de execucao,
+ * que pode mudar entre carregamentos — o defeito exato que f8e2954 corrigiu
+ * em `maisRecentePrimeiro` (derive/fornecedores.ts). `criado_em` e
+ * timestamptz e desempata pelo que foi registrado depois, que e a leitura
+ * certa dentro do mesmo dia; `id` fecha o caso de dois registros gravados no
+ * mesmo instante, so para a ordem ser total e estavel.
+ *
+ * `total` (count sobre a mesma particao) viaja em cada linha para a tela
+ * poder dizer "12 de 47" em vez de truncar calada.
+ */
+export async function buscarMovimentacoesEstoque(
+  sql: Sql,
+  tenantId: string,
+  limite: number = LIMITE_HISTORICO,
+): Promise<LinhaMovimentacao[]> {
+  return withTenant(sql, tenantId, tx => tx<LinhaMovimentacao[]>`
+    with mov as (
+      select
+        ei.produto_id, ei.un,
+        'entrada' as tipo,
+        e.data as data,
+        e.criado_em as criado_em,
+        ei.id as item_id,
+        case
+          when ei.un = 'KG' then ei.qtd
+          when coalesce(pe.peso_medio, 0) > 0 then ei.qtd * pe.peso_medio
+        end as qtd_kg,
+        e.numero as referencia
+      from entrada_itens ei
+      join entradas e on e.id = ei.entrada_id
+      join produtos pe on pe.id = ei.produto_id
+
+      union all
+
+      select
+        si.produto_id, si.un,
+        'saida' as tipo,
+        s.entrega as data,
+        s.criado_em as criado_em,
+        si.id as item_id,
+        case
+          when si.un = 'KG' then si.qtd
+          when coalesce(ps.peso_medio, 0) > 0 then si.qtd * ps.peso_medio
+        end as qtd_kg,
+        s.numero as referencia
+      from saida_itens si
+      join saidas s on s.id = si.saida_id
+      join produtos ps on ps.id = si.produto_id
+      where s.status not in ('Cancelado', 'Devolvido')
+        and s.entrega is not null
+
+      union all
+
+      select
+        pd.produto_id, pd.un,
+        'perda' as tipo,
+        pd.data as data,
+        pd.criado_em as criado_em,
+        pd.id as item_id,
+        case
+          when pd.un = 'KG' then pd.qtd
+          when coalesce(pp.peso_medio, 0) > 0 then pd.qtd * pp.peso_medio
+        end as qtd_kg,
+        pd.motivo as referencia
+      from perdas pd
+      join produtos pp on pp.id = pd.produto_id
+    ),
+    ordenado as (
+      select mov.*,
+        row_number() over (
+          partition by produto_id, un
+          order by data desc, criado_em desc, item_id desc
+        ) as pos,
+        count(*) over (partition by produto_id, un) as total
+      from mov
+    )
+    select
+      produto_id, un, tipo,
+      to_char(data, 'YYYY-MM-DD') as data,
+      qtd_kg, referencia, total
+    from ordenado
+    where pos <= ${limite}
+    order by produto_id, un, pos
+  `)
+}
+
+/**
+ * numeric -> number e bigint -> number na borda, igual a `paraJson`.
+ * `qtd_kg` mantem `null` (lancamento nao convertivel em quilos) em vez de
+ * virar 0: zero seria uma quantidade medida, e esta nao foi.
+ */
+export function paraJsonMovimentacao(linha: LinhaMovimentacao) {
+  return {
+    produto_id: linha.produto_id,
+    un: linha.un,
+    tipo: linha.tipo,
+    data: linha.data,
+    qtd_kg: linha.qtd_kg === null || linha.qtd_kg === undefined ? null : Number(linha.qtd_kg),
+    referencia: linha.referencia ?? '',
+    total: Number(linha.total ?? 0),
   }
 }
 
@@ -410,4 +700,15 @@ estoque.use('*', exigirSessao)
 estoque.get('/', async (c) => {
   const linhas = await buscarEstoque(c.get('sql'), c.get('tenantId'))
   return c.json(linhas.map(paraJson))
+})
+
+/**
+ * O historico de movimentacao de TODAS as linhas de uma vez — ver
+ * `buscarMovimentacoesEstoque` para o porque de ser uma consulta so e sob
+ * demanda. Mesma exigencia de sessao da listagem (o router inteiro): quem ve
+ * o saldo ve quando ele mexeu.
+ */
+estoque.get('/movimentacoes', async (c) => {
+  const linhas = await buscarMovimentacoesEstoque(c.get('sql'), c.get('tenantId'))
+  return c.json(linhas.map(paraJsonMovimentacao))
 })

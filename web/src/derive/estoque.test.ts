@@ -6,6 +6,9 @@ import {
   chaveEstoque,
   ROTULO_MOVIMENTACAO,
   TIPOS_MOVIMENTACAO,
+  posicaoEstoque,
+  avisoSaidasSemData,
+  PARAM_POSICAO,
   type MovimentacaoEstoque,
 } from './estoque'
 
@@ -164,5 +167,96 @@ describe('agruparMovimentacoes', () => {
 
   it('chaveEstoque distingue unidades do mesmo produto', () => {
     expect(chaveEstoque('p-1', 'KG')).not.toBe(chaveEstoque('p-1', 'CX'))
+  })
+})
+
+// =========================================== posicao num dia passado (corte)
+
+describe('posicaoEstoque', () => {
+  const HOJE = '2026-08-27'
+
+  it('hoje e SEM CORTE: a busca sai sem parametro nenhum', () => {
+    const p = posicaoEstoque(HOJE, HOJE)
+    expect(p.corte).toBeNull()
+    expect(p.historica).toBe(false)
+    expect(p.query).toBe('')
+    expect(p.texto).toBe('hoje')
+    expect(p.aviso).toBe('')
+  })
+
+  it('data passada vira corte, e a query leva a data escolhida', () => {
+    const p = posicaoEstoque('2026-08-15', HOJE)
+    expect(p.corte).toBe('2026-08-15')
+    expect(p.historica).toBe(true)
+    expect(p.query).toBe('?posicao_em=2026-08-15')
+  })
+
+  it('o rotulo curto usa dataBrCurta — o ano fica no corte, nao no texto', () => {
+    const p = posicaoEstoque('2024-03-09', HOJE)
+    expect(p.texto).toBe('09/03')
+    expect(p.corte).toBe('2024-03-09')
+  })
+
+  it('a vespera de hoje ja e historica (o corte comeca no dia anterior)', () => {
+    expect(posicaoEstoque('2026-08-26', HOJE).historica).toBe(true)
+  })
+
+  it('data FUTURA vira a posicao atual — amanha nao pode inventar nada', () => {
+    const p = posicaoEstoque('2026-08-28', HOJE)
+    expect(p.corte).toBeNull()
+    expect(p.historica).toBe(false)
+    expect(p.query).toBe('')
+  })
+
+  it('vazio, nulo ou fora do formato tambem viram a posicao atual, nunca um corte quebrado', () => {
+    for (const v of ['', null, undefined, '15/08/2026', '2026-8-1', 'ontem']) {
+      const p = posicaoEstoque(v, HOJE)
+      expect(p.corte).toBeNull()
+      expect(p.query).toBe('')
+    }
+  })
+
+  it('hojeIso invalido nao declara nada como passado — sem saber que dia e, a resposta e "agora"', () => {
+    expect(posicaoEstoque('2020-01-01', 'nao-e-data').historica).toBe(false)
+  })
+
+  it('o aviso nomeia a data e diz que NAO e o estoque de agora', () => {
+    const p = posicaoEstoque('2026-08-15', HOJE)
+    expect(p.aviso).toContain('15/08')
+    expect(p.aviso).toMatch(/não é o estoque de agora/i)
+  })
+
+  it('a query e montada com o mesmo nome de parametro que a API le', () => {
+    expect(posicaoEstoque('2026-01-02', HOJE).query).toBe(`?${PARAM_POSICAO}=2026-01-02`)
+    // E NAO e o de/ate do filtro de periodo global: aquele e intervalo, este
+    // e ponto no tempo.
+    expect(PARAM_POSICAO).not.toBe('de')
+    expect(PARAM_POSICAO).not.toBe('ate')
+  })
+})
+
+describe('avisoSaidasSemData', () => {
+  it('sem nenhuma, nao ha aviso — a tela nao explica o que nao aconteceu', () => {
+    expect(avisoSaidasSemData(0)).toBe('')
+    expect(avisoSaidasSemData(-1)).toBe('')
+    expect(avisoSaidasSemData(Number.NaN)).toBe('')
+  })
+
+  it('uma saida: singular, e diz que ela conta em todas as datas', () => {
+    const texto = avisoSaidasSemData(1)
+    expect(texto).toContain('1 saída')
+    expect(texto).toMatch(/está descontada/)
+    expect(texto).toMatch(/em todas/)
+    expect(texto).toMatch(/anteriores ao pedido/)
+  })
+
+  it('varias saidas: plural', () => {
+    const texto = avisoSaidasSemData(3)
+    expect(texto).toContain('3 saídas')
+    expect(texto).toMatch(/estão descontadas/)
+  })
+
+  it('diz o que fazer a respeito, nao so o que aconteceu', () => {
+    expect(avisoSaidasSemData(2)).toMatch(/Preencha a entrega/i)
   })
 })

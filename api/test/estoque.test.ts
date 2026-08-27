@@ -653,7 +653,7 @@ describe('buscarMovimentacoesEstoque', () => {
     await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 1 }], { data: '2026-01-03' })
     await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 1 }], { data: '2026-01-04' })
 
-    const movs = (await buscarMovimentacoesEstoque(sql, tenantA, 2)).filter(m => m.produto_id === produtoId)
+    const movs = (await buscarMovimentacoesEstoque(sql, tenantA, null, 2)).filter(m => m.produto_id === produtoId)
     expect(movs.map(m => m.data)).toEqual(['2026-01-04', '2026-01-03'])
     // O total nao e o que veio: e o que existe, para a tela dizer "2 de 4"
     // em vez de truncar calada.
@@ -721,5 +721,246 @@ describe('buscarMovimentacoesEstoque', () => {
     expect(json.qtd_kg).toBe(33)
     expect(json.total).toBe(1)
     expect(json.data).toBe('2026-07-08')
+  })
+})
+
+// ================================================ posicao num dia passado
+//
+// O corte e um PONTO no tempo ("como o deposito estava no fim do dia 15/08"),
+// nao um intervalo — nada a ver com o filtro de periodo global, que esta tela
+// continua sem seguir. Ver "posicao num dia passado" no comentario grande de
+// src/routes/estoque.ts.
+
+describe('buscarEstoque — posicao num dia passado', () => {
+  it('data anterior a TUDO: a posicao e vazia — nenhuma linha, nenhum saldo zero inventado', async () => {
+    // tenantB so tem movimentacao de 2026 (as suites de isolamento acima).
+    // Produto que ainda nao existia na data nao vira "0 kg": a linha nem
+    // nasce, porque o corte tambem se aplica a CTE `chaves`.
+    const linhas = await buscarEstoque(sql, tenantB, '2000-01-01')
+    expect(linhas).toEqual([])
+  })
+
+  it('so conta o que aconteceu ATE a data — o que veio depois ainda nao existe', async () => {
+    const produtoId = await criarProduto(tenantA, 'Corte Meio')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 100 }], { data: '2026-03-05' })
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, qtd: 30 }], { entrega: '2026-03-09' })
+    await criarPerda(tenantA, produtoId, 5, 'KG', '2026-03-20')
+    // Depois do corte — nada disto pode aparecer na posicao de marco.
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 999 }], { data: '2026-06-01' })
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, qtd: 777 }], { entrega: '2026-06-02' })
+    await criarPerda(tenantA, produtoId, 111, 'KG', '2026-06-03')
+
+    const l = (await buscarEstoque(sql, tenantA, '2026-03-31')).find(x => x.produto_id === produtoId)!
+    expect(Number(l.entrou)).toBe(100)
+    expect(Number(l.saiu)).toBe(30)
+    expect(Number(l.perda)).toBe(5)
+    expect(Number(l.entrou) - Number(l.perda) - Number(l.saiu)).toBe(65)
+
+    // NAO e "o movimento de marco": e tudo desde sempre ATE marco. Sem corte,
+    // a mesma linha soma as duas metades.
+    const semCorte = (await buscarEstoque(sql, tenantA)).find(x => x.produto_id === produtoId)!
+    expect(Number(semCorte.entrou)).toBe(1099)
+    expect(Number(semCorte.saiu)).toBe(807)
+    expect(Number(semCorte.perda)).toBe(116)
+  })
+
+  it('movimentacao EXATAMENTE na data escolhida entra — o corte e inclusivo (<=, nao <)', async () => {
+    const produtoId = await criarProduto(tenantA, 'Corte Borda')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 40 }], { data: '2026-02-10' })
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, qtd: 4 }], { entrega: '2026-02-10' })
+    await criarPerda(tenantA, produtoId, 2, 'KG', '2026-02-10')
+
+    // As TRES fontes na borda: um `<` em qualquer uma delas cai aqui.
+    const naData = (await buscarEstoque(sql, tenantA, '2026-02-10')).find(x => x.produto_id === produtoId)!
+    expect(Number(naData.entrou)).toBe(40)
+    expect(Number(naData.saiu)).toBe(4)
+    expect(Number(naData.perda)).toBe(2)
+
+    // E a vespera nao ve nada: sem movimentacao ate ali, a linha nao nasce.
+    const vespera = (await buscarEstoque(sql, tenantA, '2026-02-09')).find(x => x.produto_id === produtoId)
+    expect(vespera).toBeUndefined()
+  })
+
+  it('as datas da ultima movimentacao respeitam o corte (as tres fontes)', async () => {
+    const produtoId = await criarProduto(tenantA, 'Corte Ultima')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 10 }], { data: '2026-01-15' })
+    await criarPerda(tenantA, produtoId, 1, 'KG', '2026-01-16')
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, qtd: 2 }], { entrega: '2026-01-20' })
+    // Tres movimentacoes mais recentes, todas fora do corte.
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 10 }], { data: '2026-07-08' })
+    await criarPerda(tenantA, produtoId, 1, 'KG', '2026-07-08')
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, qtd: 2 }], { entrega: '2026-07-08' })
+
+    const l = (await buscarEstoque(sql, tenantA, '2026-02-01')).find(x => x.produto_id === produtoId)!
+    expect(l.ultima_entrada).toBe('2026-01-15')
+    expect(l.ultima_perda).toBe('2026-01-16')
+    expect(l.ultima_saida).toBe('2026-01-20')
+
+    const semCorte = (await buscarEstoque(sql, tenantA)).find(x => x.produto_id === produtoId)!
+    expect(semCorte.ultima_entrada).toBe('2026-07-08')
+  })
+
+  it('posicao em HOJE e identica ao resultado SEM corte — o caso normal nao muda', async () => {
+    const produtoId = await criarProduto(tenantA, 'Corte Hoje')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 90, perda_kg: 3 }], { data: '2026-02-25' })
+    await criarPerda(tenantA, produtoId, 6, 'KG', '2026-02-27')
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, qtd: 20 }], { entrega: '2026-03-01' })
+    // Inclusive a saida SEM data de entrega, que e o caso que divergiria se
+    // ela fosse excluida da posicao historica.
+    await criarSaida(tenantA, 'Pendente', [{ produto_id: produtoId, qtd: 4 }], { entrega: null })
+
+    const hoje = new Date().toISOString().slice(0, 10)
+    const comCorte = (await buscarEstoque(sql, tenantA, hoje)).find(x => x.produto_id === produtoId)!
+    const semCorte = (await buscarEstoque(sql, tenantA)).find(x => x.produto_id === produtoId)!
+    expect(paraJson(comCorte)).toEqual(paraJson(semCorte))
+  })
+
+  it('corte no futuro distante devolve o resultado inteiro, linha por linha, igual ao sem corte', async () => {
+    // A prova de que o corte nao perde nada do caso normal: o tenant INTEIRO,
+    // todas as linhas, todos os campos. Se qualquer um dos quatro `where`
+    // novos derrubar uma linha que nao devia, e aqui que aparece.
+    const semCorte = (await buscarEstoque(sql, tenantA)).map(paraJson)
+    const comCorte = (await buscarEstoque(sql, tenantA, '2999-12-31')).map(paraJson)
+    expect(comCorte).toEqual(semCorte)
+    expect(semCorte.length).toBeGreaterThan(0)
+  })
+
+  it('saida sem data de entrega conta em QUALQUER corte, e a linha diz quantas sao', async () => {
+    const produtoId = await criarProduto(tenantA, 'Corte Saida Sem Data')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 50 }], { data: '2026-02-14' })
+    await criarSaida(tenantA, 'Em rota', [{ produto_id: produtoId, qtd: 8 }], {
+      data_pedido: '2026-07-05', entrega: null,
+    })
+
+    // Corte ANTERIOR ao pedido: a saida continua descontada. E o preco
+    // assumido para a posicao em hoje ser identica a posicao atual — e por
+    // isso a linha carrega o contador que a tela usa para explicar.
+    const antes = (await buscarEstoque(sql, tenantA, '2026-02-20')).find(x => x.produto_id === produtoId)!
+    expect(Number(antes.saiu)).toBe(8)
+    expect(Number(antes.itens_saida_sem_data)).toBe(1)
+    // Sem data, ela nao vira data de movimentacao em corte nenhum.
+    expect(antes.ultima_saida).toBeNull()
+
+    const semCorte = (await buscarEstoque(sql, tenantA)).find(x => x.produto_id === produtoId)!
+    expect(Number(semCorte.saiu)).toBe(8)
+    expect(paraJson(semCorte).itens_saida_sem_data).toBe(1)
+  })
+
+  it('linha cuja UNICA movimentacao e uma saida sem data aparece ate num corte anterior a ela', async () => {
+    const produtoId = await criarProduto(tenantA, 'Corte So Saida Sem Data')
+    await criarSaida(tenantA, 'Pendente', [{ produto_id: produtoId, qtd: 6 }], { entrega: null })
+
+    const l = (await buscarEstoque(sql, tenantA, '2025-01-01')).find(x => x.produto_id === produtoId)
+    expect(l).toBeDefined()
+    expect(Number(l!.saiu)).toBe(6)
+    expect(Number(l!.itens_saida_sem_data)).toBe(1)
+  })
+
+  it('itens_saida_sem_data e zero quando toda saida da linha tem entrega', async () => {
+    const produtoId = await criarProduto(tenantA, 'Corte Saida Com Data')
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, qtd: 3 }], { entrega: '2026-02-14' })
+
+    const l = (await buscarEstoque(sql, tenantA)).find(x => x.produto_id === produtoId)!
+    expect(Number(l.itens_saida_sem_data)).toBe(0)
+    expect(paraJson(l).itens_saida_sem_data).toBe(0)
+  })
+
+  it('saida Cancelada sem entrega nao entra em nada — nem na quantidade, nem no contador', async () => {
+    const produtoId = await criarProduto(tenantA, 'Corte Cancelada Sem Data')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 20 }], { data: '2026-02-14' })
+    await criarSaida(tenantA, 'Cancelado', [{ produto_id: produtoId, qtd: 9 }], { entrega: null })
+
+    const l = (await buscarEstoque(sql, tenantA, '2026-02-20')).find(x => x.produto_id === produtoId)!
+    expect(Number(l.saiu)).toBe(0)
+    expect(Number(l.itens_saida_sem_data)).toBe(0)
+  })
+
+  it('o rateio da perda de coleta continua correto dentro do corte (a entrada entra inteira)', async () => {
+    // entrada_totais nao e recortada de proposito: entradas.data vale para a
+    // entrada toda, entao ela entra ou sai do corte como um bloco.
+    const a = await criarProduto(tenantA, 'Corte Rateio A')
+    const b = await criarProduto(tenantA, 'Corte Rateio B')
+    await criarEntrada(tenantA, [
+      { produto_id: a, qtd: 30 },
+      { produto_id: b, qtd: 10 },
+    ], { perda_kg: 8, data: '2026-02-14' })
+
+    const linhas = await buscarEstoque(sql, tenantA, '2026-02-14')
+    // 8 kg de cabecalho rateados por peso: 30/40 e 10/40.
+    expect(Number(linhas.find(l => l.produto_id === a)!.perda)).toBeCloseTo(6, 10)
+    expect(Number(linhas.find(l => l.produto_id === b)!.perda)).toBeCloseTo(2, 10)
+  })
+
+  it('isolamento entre tenants continua valendo com corte', async () => {
+    const pA = await criarProduto(tenantA, 'Corte Iso A')
+    const pB = await criarProduto(tenantB, 'Corte Iso B')
+    await criarEntrada(tenantA, [{ produto_id: pA, qtd: 10 }], { data: '2026-01-01' })
+    await criarEntrada(tenantB, [{ produto_id: pB, qtd: 10 }], { data: '2026-01-01' })
+
+    const linhasA = await buscarEstoque(sql, tenantA, '2026-01-01')
+    expect(linhasA.some(l => l.produto_id === pB)).toBe(false)
+    expect(linhasA.some(l => l.produto_id === pA)).toBe(true)
+  })
+})
+
+describe('buscarMovimentacoesEstoque — o historico respeita o mesmo corte', () => {
+  it('lista so o que aconteceu ate a data, inclusive a movimentacao do proprio dia', async () => {
+    const produtoId = await criarProduto(tenantA, 'Corte Hist')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 10 }], { data: '2026-02-02' })
+    await criarPerda(tenantA, produtoId, 1, 'KG', '2026-02-05')
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, qtd: 2 }], { entrega: '2026-02-06' })
+
+    const ate = (await buscarMovimentacoesEstoque(sql, tenantA, '2026-02-05'))
+      .filter(m => m.produto_id === produtoId)
+    // A perda cai EXATAMENTE na data escolhida e tem de entrar (<=, nao <).
+    expect(ate.map(m => m.data)).toEqual(['2026-02-05', '2026-02-02'])
+    expect(ate.map(m => m.tipo)).toEqual(['perda', 'entrada'])
+
+    const tudo = (await buscarMovimentacoesEstoque(sql, tenantA))
+      .filter(m => m.produto_id === produtoId)
+    expect(tudo.map(m => m.data)).toEqual(['2026-02-06', '2026-02-05', '2026-02-02'])
+  })
+
+  it('o total ("N de M") tambem e o do corte — nao conta o que o corte excluiu', async () => {
+    const produtoId = await criarProduto(tenantA, 'Corte Hist Total')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 1 }], { data: '2026-01-01' })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 1 }], { data: '2026-01-02' })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 1 }], { data: '2026-09-01' })
+
+    const ate = (await buscarMovimentacoesEstoque(sql, tenantA, '2026-01-02'))
+      .filter(m => m.produto_id === produtoId)
+    expect(ate).toHaveLength(2)
+    expect(ate.every(m => Number(m.total) === 2)).toBe(true)
+  })
+
+  it('o teto por linha continua valendo dentro do corte', async () => {
+    const produtoId = await criarProduto(tenantA, 'Corte Hist Teto')
+    for (let i = 1; i <= 5; i += 1) {
+      await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 1 }], {
+        data: '2026-02-0' + i,
+      })
+    }
+    const movs = (await buscarMovimentacoesEstoque(sql, tenantA, '2026-02-04', 2))
+      .filter(m => m.produto_id === produtoId)
+    expect(movs.map(m => m.data)).toEqual(['2026-02-04', '2026-02-03'])
+    expect(movs.every(m => Number(m.total) === 4)).toBe(true)
+  })
+
+  it('saida sem entrega continua fora do historico em qualquer corte (e uma lista de datas)', async () => {
+    const produtoId = await criarProduto(tenantA, 'Corte Hist Sem Data')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 10 }], { data: '2026-02-02' })
+    await criarSaida(tenantA, 'Em rota', [{ produto_id: produtoId, qtd: 3 }], { entrega: null })
+
+    const movs = (await buscarMovimentacoesEstoque(sql, tenantA, '2026-02-28'))
+      .filter(m => m.produto_id === produtoId)
+    expect(movs.map(m => m.tipo)).toEqual(['entrada'])
+  })
+
+  it('corte no futuro distante devolve o mesmo historico que sem corte', async () => {
+    const semCorte = (await buscarMovimentacoesEstoque(sql, tenantA)).map(paraJsonMovimentacao)
+    const comCorte = (await buscarMovimentacoesEstoque(sql, tenantA, '2999-12-31'))
+      .map(paraJsonMovimentacao)
+    expect(comCorte).toEqual(semCorte)
+    expect(semCorte.length).toBeGreaterThan(0)
   })
 })

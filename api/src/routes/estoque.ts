@@ -47,6 +47,12 @@ interface LinhaEstoque {
   perda: string | number
   saiu: string | number
   itens_sem_conversao: string | number
+  /** Quantos itens de saida desta linha entram em `saiu` SEM data de entrega
+   * — ver "posicao num dia passado" no comentario grande abaixo. `count()`,
+   * logo bigint/string aqui. Eles contam em QUALQUER corte (inclusive num
+   * anterior a existirem), e por isso a tela precisa poder dizer quantos sao:
+   * um numero que muda sem explicacao destroi a confianca na tela inteira. */
+  itens_saida_sem_data: string | number
   /** Datas da movimentacao mais recente de cada uma das TRES fontes, ja em
    * texto 'AAAA-MM-DD' (ver `to_char` na query). `null` quando aquela fonte
    * nunca movimentou esta linha — nunca uma data inventada, nunca a de hoje.
@@ -289,23 +295,105 @@ interface LinhaMovimentacao {
  * natureza — recortada por julho, responderia "a ultima vez que mexeu em
  * julho", que nao e a pergunta e faria um item parado desde maio parecer
  * nunca movimentado. Por isso nenhuma das duas funcoes deste arquivo aceita
- * parametro de periodo, e nao devem ganhar um.
+ * parametro de PERIODO, e nao devem ganhar um.
+ *
+ * ---- posicao num dia passado (`posicaoEm`) ----
+ *
+ * O que as duas funcoes ganharam, e coisa diferente: um CORTE NO TEMPO, nao
+ * um intervalo. `posicaoEm` = 'AAAA-MM-DD' responde "como o deposito estava
+ * no fim daquele dia" — tudo que aconteceu DESDE SEMPRE ATE aquela data,
+ * inclusive ela. Nao e "o movimento de junho" (isso e o filtro global, que
+ * continua fora daqui): recortar por mes daria saldo negativo em todo mes de
+ * venda forte e ignoraria o que sobrou do mes anterior. E por ser corte, e
+ * nao intervalo, ele nao tem limite inferior — nao existe `de`.
+ *
+ * `posicaoEm = null` (o default, e o que a tela manda quando esta em hoje) e
+ * SEM CORTE: a query sai byte a byte com o mesmo resultado de antes desta
+ * mudanca. "Voltar para hoje" e literalmente voltar ao comportamento de
+ * sempre, e nenhum caminho da tela paga por uma funcionalidade que nao usou.
+ *
+ * A COMPARACAO E `<=`, INCLUSIVA. "Posicao em 15/08" inclui o que se moveu
+ * NO dia 15/08 — o dia inteiro ja aconteceu quando se olha para tras. Um `<`
+ * faria a entrada do proprio dia escolhido sumir, o erro classico que so
+ * aparece quando a movimentacao cai exatamente na borda.
+ *
+ * CADA FONTE PELA SUA PROPRIA DATA — as mesmas de 4bee3f0, sem reabrir:
+ *   entrada -> entradas.data     (a coleta)
+ *   perda   -> perdas.data       (a baixa no deposito)
+ *   saida   -> saidas.entrega    (a mercadoria sai quando e ENTREGUE)
+ *
+ * O corte da entrada e por ENTRADA, nao por item: `entradas.data` vale para
+ * a entrada inteira, entao ela entra ou sai do corte como um todo. Por isso
+ * a CTE `entrada_totais` (que so compara o cabecalho com a soma dos itens
+ * DELA MESMA) continua sem filtro: o join com `ent`, ja recortado, decide
+ * quais entradas contam, e filtrar de novo la dentro seria um no-op — mesmo
+ * racional do `et` sem periodo em relatorios.ts.
+ *
+ * SAIDA SEM `entrega` — O CASO DIFICIL. Ela desconta do saldo (4bee3f0: so
+ * Cancelado/Devolvido saem da conta) mas nao tem data, entao nao ha como
+ * dizer se ja tinha saido em 15/08. As duas saidas possiveis eram exclui-la
+ * da posicao historica ou inclui-la sempre; a escolha e INCLUIR SEMPRE
+ * (`s.entrega is null or s.entrega <= posicaoEm`), por tres motivos:
+ *
+ *   1. Excluir quebraria a unica invariante que sustenta a tela: a posicao
+ *      em hoje tem de ser identica a posicao atual. Com exclusao, a MESMA
+ *      data daria dois numeros diferentes conforme o usuario tivesse
+ *      escolhido hoje no seletor ou apenas aberto a tela — o pior resultado
+ *      possivel para a confianca no numero.
+ *   2. Incluir mantem a DIFERENCA entre duas datas correta: a saida sem data
+ *      e uma constante presente em todos os cortes, entao o delta entre
+ *      15/08 e hoje continua sendo exatamente a movimentacao datada entre as
+ *      duas. Excluindo, o delta ficaria contaminado so na borda.
+ *   3. A saida EXISTE e, pelo proprio modelo do projeto, a mercadoria dela ja
+ *      saiu do deposito — o que falta e a data, nao o fato. Exclui-la de um
+ *      corte afirmaria "ainda nao tinha saido", que e justamente o tipo de
+ *      data inventada que 4bee3f0 recusou a produzir.
+ *
+ * O preco e real: essa saida aparece tambem em cortes anteriores a ela ter
+ * sido registrada. Por isso `itens_saida_sem_data` sai em cada linha — a tela
+ * marca a linha e explica, em vez de deixar um numero mudar sem motivo
+ * visivel. O HISTORICO nao a lista (e uma lista de datas, e ela nao tem),
+ * exatamente como ja acontecia antes deste corte.
+ *
+ * PRODUTO QUE AINDA NAO EXISTIA NA DATA nao vira "0 kg": o corte se aplica
+ * tambem a CTE `chaves`, entao a linha simplesmente NAO NASCE. E a mesma
+ * regra que ja valia para produto sem nenhuma movimentacao (ver `chaves`
+ * acima) — ausencia, nao saldo zero: zero seria uma medicao, e ninguem mediu
+ * um produto que nao tinha sido comprado ainda.
  *
  * RLS cuida do isolamento por tenant em cada tabela referenciada — nenhuma
  * dessas queries filtra tenant_id explicitamente porque tudo roda dentro de
  * withTenant (mesmo padrao das outras rotas).
  */
-export async function buscarEstoque(sql: Sql, tenantId: string): Promise<LinhaEstoque[]> {
+export async function buscarEstoque(
+  sql: Sql,
+  tenantId: string,
+  /** Corte no tempo: 'AAAA-MM-DD' = a posicao no FIM daquele dia (inclusivo);
+   * `null` = a posicao atual, sem corte nenhum. Ver "posicao num dia passado"
+   * no comentario acima. */
+  posicaoEm: string | null = null,
+): Promise<LinhaEstoque[]> {
   return withTenant(sql, tenantId, tx => tx<LinhaEstoque[]>`
     with chaves as (
-      select produto_id, un from entrada_itens
+      -- O corte entra AQUI tambem, e nao so nas somas: linha sem nenhuma
+      -- movimentacao ate a data escolhida nao nasce, em vez de aparecer
+      -- zerada. Zero seria uma medicao; ausencia e a verdade.
+      select ei.produto_id, ei.un
+      from entrada_itens ei
+      join entradas e on e.id = ei.entrada_id
+      where (${posicaoEm}::date is null or e.data <= ${posicaoEm}::date)
       union
-      select produto_id, un from perdas
+      select pd.produto_id, pd.un
+      from perdas pd
+      where (${posicaoEm}::date is null or pd.data <= ${posicaoEm}::date)
       union
       select si.produto_id, si.un
       from saida_itens si
       join saidas s on s.id = si.saida_id
       where s.status not in ('Cancelado', 'Devolvido')
+        and (${posicaoEm}::date is null
+             or s.entrega is null
+             or s.entrega <= ${posicaoEm}::date)
     ),
     entrada_totais as (
       -- Por ENTRADA (nao por produto): soma dos itens dela mesma, usada na
@@ -313,6 +401,11 @@ export async function buscarEstoque(sql: Sql, tenantId: string): Promise<LinhaEs
       -- (entradas.perda_kg) acrescenta alguma perda que os itens ainda nao
       -- mostram. Ver o comentario grande acima ("perda na coleta") pro
       -- raciocinio completo.
+      --
+      -- SEM CORTE DE DATA, de proposito: e o total da entrada INTEIRA, e a
+      -- entrada entra ou sai do corte como um todo (entradas.data vale para
+      -- ela toda). Quem decide o que conta e o where de 'ent' logo abaixo;
+      -- filtrar aqui seria no-op. Mesmo racional do 'et' de relatorios.ts.
       select entrada_id,
         sum(perda_kg) as perda_itens,
         sum(qtd) as qtd_itens
@@ -357,6 +450,8 @@ export async function buscarEstoque(sql: Sql, tenantId: string): Promise<LinhaEs
       join entradas e on e.id = ei.entrada_id
       join entrada_totais et on et.entrada_id = ei.entrada_id
       join produtos pe on pe.id = ei.produto_id
+      -- Corte inclusivo (<=): a coleta do proprio dia escolhido conta.
+      where (${posicaoEm}::date is null or e.data <= ${posicaoEm}::date)
       group by ei.produto_id, ei.un
     ),
     perd as (
@@ -379,6 +474,7 @@ export async function buscarEstoque(sql: Sql, tenantId: string): Promise<LinhaEs
         to_char(max(pd.data), 'YYYY-MM-DD') as ultima_perda
       from perdas pd
       join produtos pp on pp.id = pd.produto_id
+      where (${posicaoEm}::date is null or pd.data <= ${posicaoEm}::date)
       group by pd.produto_id, pd.un
     ),
     said as (
@@ -395,6 +491,13 @@ export async function buscarEstoque(sql: Sql, tenantId: string): Promise<LinhaEs
           where si.un <> 'KG' and coalesce(ps.peso_medio, 0) = 0
         ) as sem_conversao,
         sum(si.perda_kg) as perda_entrega,
+        -- Quantos itens desta linha entram em 'saiu' SEM data de entrega.
+        -- Eles contam em QUALQUER corte (ver "saida sem entrega" acima), e
+        -- este contador e o que permite a tela dizer isso em vez de deixar
+        -- um numero mudar sem explicacao. Nao depende de posicaoEm de
+        -- proposito: o que a tela precisa saber e quantos sao, esteja ela
+        -- olhando hoje ou 15/08.
+        count(*) filter (where s.entrega is null) as itens_saida_sem_data,
         -- ENTREGA, nao data_pedido: a mercadoria sai do deposito quando e
         -- entregue (ver "quando a linha mexeu pela ultima vez" acima). Mora
         -- DENTRO desta CTE de proposito, para herdar o mesmo
@@ -407,6 +510,14 @@ export async function buscarEstoque(sql: Sql, tenantId: string): Promise<LinhaEs
       join saidas s on s.id = si.saida_id
       join produtos ps on ps.id = si.produto_id
       where s.status not in ('Cancelado', 'Devolvido')
+        -- Saida sem entrega entra em TODO corte, inclusive num anterior a
+        -- ela existir — a mercadoria ja saiu, so nao se sabe quando, e
+        -- exclui-la afirmaria "ainda nao tinha saido". Ver o comentario
+        -- grande acima para os tres motivos; itens_saida_sem_data (logo
+        -- acima) e o que faz a tela dizer isso.
+        and (${posicaoEm}::date is null
+             or s.entrega is null
+             or s.entrega <= ${posicaoEm}::date)
       group by si.produto_id, si.un
     )
     select
@@ -425,6 +536,7 @@ export async function buscarEstoque(sql: Sql, tenantId: string): Promise<LinhaEs
       -- relatorios.ts (GET /api/relatorios/produtos).
       coalesce(ent.sem_conversao, 0) + coalesce(perd.sem_conversao, 0)
         + coalesce(said.sem_conversao, 0) as itens_sem_conversao,
+      coalesce(said.itens_saida_sem_data, 0) as itens_saida_sem_data,
       -- SEM coalesce, de proposito: fonte que nunca movimentou esta linha sai
       -- NULL e vira travessao na tela. Um coalesce para 'hoje' ou para a
       -- epoch afirmaria uma movimentacao que ninguem registrou.
@@ -504,6 +616,10 @@ export function paraJson(linha: LinhaEstoque) {
     // count() vem como bigint (string no postgres.js) — mesma conversao na
     // borda que os numeric recebem, igual a entradas.ts/saidas.ts.
     itens_sem_conversao: Number(linha.itens_sem_conversao ?? 0),
+    // Idem: bigint do count(). Ver "saida sem entrega" em buscarEstoque —
+    // a tela usa este numero para explicar por que a posicao historica
+    // carrega uma saida que nao da para posicionar no tempo.
+    itens_saida_sem_data: Number(linha.itens_saida_sem_data ?? 0),
     // As tres datas ja saem como texto 'AAAA-MM-DD' da propria query
     // (`to_char`) — nao ha Date nem fuso no caminho, entao passam direto.
     // `?? null` normaliza o `undefined` que o LEFT JOIN nunca produz mas que
@@ -596,6 +712,10 @@ export const LIMITE_HISTORICO = 12
 export async function buscarMovimentacoesEstoque(
   sql: Sql,
   tenantId: string,
+  /** O MESMO corte de `buscarEstoque` (ver "posicao num dia passado" la), pelo
+   * mesmo motivo: um historico que mostrasse movimentacoes posteriores a data
+   * escolhida contradiria o saldo exibido logo acima dele, na mesma tela. */
+  posicaoEm: string | null = null,
   limite: number = LIMITE_HISTORICO,
 ): Promise<LinhaMovimentacao[]> {
   return withTenant(sql, tenantId, tx => tx<LinhaMovimentacao[]>`
@@ -614,6 +734,7 @@ export async function buscarMovimentacoesEstoque(
       from entrada_itens ei
       join entradas e on e.id = ei.entrada_id
       join produtos pe on pe.id = ei.produto_id
+      where (${posicaoEm}::date is null or e.data <= ${posicaoEm}::date)
 
       union all
 
@@ -633,6 +754,12 @@ export async function buscarMovimentacoesEstoque(
       join produtos ps on ps.id = si.produto_id
       where s.status not in ('Cancelado', 'Devolvido')
         and s.entrega is not null
+        -- Aqui NAO ha o ramo "entrega is null" que a agregacao tem: saida sem
+        -- entrega ja ficava fora do historico antes deste corte (sem data,
+        -- nao ha o que listar numa lista de datas nem por onde ordenar). A
+        -- quantidade dela continua no saldo — e o que itens_saida_sem_data
+        -- faz a tela explicar.
+        and (${posicaoEm}::date is null or s.entrega <= ${posicaoEm}::date)
 
       union all
 
@@ -649,6 +776,7 @@ export async function buscarMovimentacoesEstoque(
         pd.motivo as referencia
       from perdas pd
       join produtos pp on pp.id = pd.produto_id
+      where (${posicaoEm}::date is null or pd.data <= ${posicaoEm}::date)
     ),
     ordenado as (
       select mov.*,
@@ -686,6 +814,36 @@ export function paraJsonMovimentacao(linha: LinhaMovimentacao) {
   }
 }
 
+/**
+ * `?posicao_em=AAAA-MM-DD` — o corte no tempo das duas rotas. O nome NAO e
+ * `de`/`ate` de proposito: aquele par (relatorios.ts) e um INTERVALO de meses
+ * ligado ao filtro de periodo global, e esta tela continua fora dele. Aqui e
+ * um PONTO no tempo, e o nome tem de deixar isso obvio para quem ler a URL.
+ */
+const DATA_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * Ausente e valido (= sem corte, a posicao atual). Presente tem de ser uma
+ * data que EXISTE no calendario — o regex sozinho aceita '2026-02-31', que
+ * derrubaria o `::date` da query com erro de banco (500) por causa de uma
+ * entrada do usuario, que e 400. O round-trip por Date.UTC so devolve os
+ * mesmos tres numeros quando o dia existe de fato.
+ */
+function posicaoValida(v: string | undefined): v is string | undefined {
+  if (v === undefined) return true
+  if (!DATA_RE.test(v)) return false
+  const [ano, mes, dia] = v.split('-').map(Number)
+  const d = new Date(Date.UTC(ano, mes - 1, dia))
+  return d.getUTCFullYear() === ano && d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia
+}
+
+/** O corte pedido na URL, ou `undefined` quando nao ha nenhum. String vazia
+ * (`?posicao_em=`) conta como ausente: e o que um formulario manda quando o
+ * campo foi limpo, e "sem data" e exatamente "sem corte". */
+function corteDaUrl(v: string | undefined): string | undefined {
+  return v ? v : undefined
+}
+
 export const estoque = new Hono<{
   Bindings: EnvBanco
   Variables: Vars
@@ -698,7 +856,11 @@ export const estoque = new Hono<{
 estoque.use('*', exigirSessao)
 
 estoque.get('/', async (c) => {
-  const linhas = await buscarEstoque(c.get('sql'), c.get('tenantId'))
+  const em = corteDaUrl(c.req.query('posicao_em'))
+  if (!posicaoValida(em)) {
+    return c.json({ erro: 'posicao_em invalida (use AAAA-MM-DD)' }, 400)
+  }
+  const linhas = await buscarEstoque(c.get('sql'), c.get('tenantId'), em ?? null)
   return c.json(linhas.map(paraJson))
 })
 
@@ -707,8 +869,15 @@ estoque.get('/', async (c) => {
  * `buscarMovimentacoesEstoque` para o porque de ser uma consulta so e sob
  * demanda. Mesma exigencia de sessao da listagem (o router inteiro): quem ve
  * o saldo ve quando ele mexeu.
+ *
+ * Aceita o MESMO `?posicao_em=` da listagem — a tela manda o corte nas duas
+ * buscas, senao o historico contradiria o saldo logo acima dele.
  */
 estoque.get('/movimentacoes', async (c) => {
-  const linhas = await buscarMovimentacoesEstoque(c.get('sql'), c.get('tenantId'))
+  const em = corteDaUrl(c.req.query('posicao_em'))
+  if (!posicaoValida(em)) {
+    return c.json({ erro: 'posicao_em invalida (use AAAA-MM-DD)' }, 400)
+  }
+  const linhas = await buscarMovimentacoesEstoque(c.get('sql'), c.get('tenantId'), em ?? null)
   return c.json(linhas.map(paraJsonMovimentacao))
 })

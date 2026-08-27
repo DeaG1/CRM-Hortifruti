@@ -312,3 +312,123 @@ describe('GET /api/estoque/movimentacoes', () => {
     expect(corpo.some((m: Mov) => m.referencia === 'E-HTTP-OUTRO')).toBe(false)
   })
 })
+
+// ============================== posicao num dia passado (camada HTTP)
+//
+// `?posicao_em=AAAA-MM-DD` e um PONTO no tempo, nao o intervalo `de`/`ate` do
+// filtro de periodo global (relatorios.ts) — esta tela continua fora dele. O
+// calculo em si esta coberto em estoque.test.ts; aqui cobrimos a borda HTTP:
+// validacao do parametro e o corte chegando de fato na resposta.
+
+describe('GET /api/estoque?posicao_em=', () => {
+  it('sem o parametro devolve a posicao atual (comportamento de sempre)', async () => {
+    const res = await pedir('/api/estoque', comoAdmin())
+    const corpo = await res.json()
+    expect(corpo.some((l: { nome: string }) => l.nome === 'Melancia HTTP')).toBe(true)
+  })
+
+  it('corte antes da entrada: a linha NAO aparece — nem com saldo zero', async () => {
+    // 'Melancia HTTP' so tem a entrada de 2026-08-01 (beforeAll). Em 31/07
+    // ela ainda nao existia no deposito, e ausencia nao e "0 kg".
+    const res = await pedir('/api/estoque?posicao_em=2026-07-31', comoAdmin())
+    expect(res.status).toBe(200)
+    const corpo = await res.json()
+    expect(corpo.some((l: { nome: string }) => l.nome === 'Melancia HTTP')).toBe(false)
+    // ...e a linha que JA existia em 31/07 continua la, com o numero dela.
+    const giro = corpo.find((l: { nome: string }) => l.nome === 'Giro HTTP')
+    expect(giro).toBeDefined()
+    expect(giro.saiu).toBe(4)
+    expect(giro.ultima_saida).toBe('2026-07-19')
+  })
+
+  it('corte NA data da entrada ja a inclui — o corte e inclusivo', async () => {
+    const res = await pedir('/api/estoque?posicao_em=2026-08-01', comoAdmin())
+    const corpo = await res.json()
+    const linha = corpo.find((l: { nome: string }) => l.nome === 'Melancia HTTP')
+    expect(linha).toBeDefined()
+    expect(linha.entrou).toBe(150)
+    expect(linha.saldo).toBe(149)
+  })
+
+  it('parametro vazio conta como ausente (campo limpo = sem corte)', async () => {
+    const vazio = await pedir('/api/estoque?posicao_em=', comoAdmin())
+    expect(vazio.status).toBe(200)
+    const semParam = await pedir('/api/estoque', comoAdmin())
+    expect(await vazio.json()).toEqual(await semParam.json())
+  })
+
+  it('data fora do formato -> 400, nao 500', async () => {
+    const res = await pedir('/api/estoque?posicao_em=ontem', comoAdmin())
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'posicao_em invalida (use AAAA-MM-DD)' })
+  })
+
+  it('data que casa com o formato mas nao existe no calendario -> 400, nao erro de banco', async () => {
+    // 31 de fevereiro passa no regex e derrubaria o ::date da query com um
+    // 500 por causa de uma entrada do usuario, que e 400.
+    const res = await pedir('/api/estoque?posicao_em=2026-02-31', comoAdmin())
+    expect(res.status).toBe(400)
+  })
+
+  it('a linha traz itens_saida_sem_data numerico, para a tela poder explicar o corte', async () => {
+    const res = await pedir('/api/estoque', comoAdmin())
+    const corpo = await res.json()
+    const linha = corpo.find((l: { nome: string }) => l.nome === 'Melancia HTTP')
+    expect(typeof linha.itens_saida_sem_data).toBe('number')
+    expect(linha.itens_saida_sem_data).toBe(0)
+  })
+
+  it('saida sem entrega desconta do saldo tambem num corte anterior a ela, e a linha diz quantas sao', async () => {
+    const [prod] = await admin`
+      insert into produtos (tenant_id, nome, un, peso_medio)
+      values (${tenantId}, 'Sem Entrega HTTP', 'KG', 0) returning id`
+    const [entrada] = await admin`
+      insert into entradas (tenant_id, numero, data)
+      values (${tenantId}, 'E-HTTP-SD', '2026-06-01') returning id`
+    await admin`
+      insert into entrada_itens (tenant_id, entrada_id, produto_id, un, qtd, preco)
+      values (${tenantId}, ${entrada.id}, ${prod.id}, 'KG', 40, 2)`
+    const [saida] = await admin`
+      insert into saidas (tenant_id, numero, data_pedido, entrega, status)
+      values (${tenantId}, 'S-HTTP-SD', '2026-08-20', null, 'Em rota') returning id`
+    await admin`
+      insert into saida_itens (tenant_id, saida_id, produto_id, un, qtd, preco)
+      values (${tenantId}, ${saida.id}, ${prod.id}, 'KG', 7, 3)`
+
+    const res = await pedir('/api/estoque?posicao_em=2026-06-30', comoAdmin())
+    const linha = (await res.json()).find((l: { nome: string }) => l.nome === 'Sem Entrega HTTP')
+    // Junho e ANTERIOR ao pedido, e a quantidade continua descontada: sem
+    // data nao da para posiciona-la, e exclui-la afirmaria que ela nao tinha
+    // saido. O contador e o que a tela usa para nao deixar isso sem resposta.
+    expect(linha.saiu).toBe(7)
+    expect(linha.saldo).toBe(33)
+    expect(linha.itens_saida_sem_data).toBe(1)
+    expect(linha.ultima_saida).toBeNull()
+  })
+})
+
+describe('GET /api/estoque/movimentacoes?posicao_em=', () => {
+  it('o historico respeita o mesmo corte da listagem', async () => {
+    const res = await pedir('/api/estoque/movimentacoes?posicao_em=2026-07-31', comoAdmin())
+    expect(res.status).toBe(200)
+    const corpo = await res.json()
+    type Mov = { referencia: string }
+    // A entrada de 2026-08-01 fica fora...
+    expect(corpo.some((m: Mov) => m.referencia === 'E-HTTP-1')).toBe(false)
+    // ...e a saida entregue em 19/07 continua dentro.
+    expect(corpo.some((m: Mov) => m.referencia === 'S-HTTP-1')).toBe(true)
+  })
+
+  it('sem corte, a entrada de agosto volta a aparecer', async () => {
+    const res = await pedir('/api/estoque/movimentacoes', comoAdmin())
+    const corpo = await res.json()
+    type Mov = { referencia: string }
+    expect(corpo.some((m: Mov) => m.referencia === 'E-HTTP-1')).toBe(true)
+  })
+
+  it('data invalida -> 400 (mesma validacao da listagem)', async () => {
+    const res = await pedir('/api/estoque/movimentacoes?posicao_em=15-08-2026', comoAdmin())
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'posicao_em invalida (use AAAA-MM-DD)' })
+  })
+})

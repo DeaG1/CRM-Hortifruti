@@ -18,6 +18,9 @@ const linha = (over: Record<string, unknown> = {}) => ({
   produto_id: 'p-1', nome: 'Tomate', un: 'KG',
   entrou: 100, perda: 15, saiu: 30, saldo: 55,
   peso_medio: 0, equivalente_un: null, itens_sem_conversao: 0,
+  // Saidas desta linha que descontam do saldo sem data de entrega — zero no
+  // caso comum. Ver a suite "posicao num dia passado" no fim do arquivo.
+  itens_saida_sem_data: 0,
   // As tres datas vem do MESMO GET /api/estoque das quantidades (um max()
   // nas CTEs que ja existiam). Por padrao null aqui — cada teste de
   // movimentacao preenche o que precisa.
@@ -43,10 +46,14 @@ function mockRotas(
   movimentacoes: unknown[] | Promise<unknown> = [],
 ) {
   mockGet.mockImplementation((url: string) => {
-    if (url === '/api/estoque') return estoque instanceof Promise ? estoque : Promise.resolve(estoque)
-    if (url === '/api/perdas') return Promise.resolve(perdas)
-    if (url === '/api/produtos') return Promise.resolve(produtos)
-    if (url === '/api/estoque/movimentacoes') {
+    // O caminho sem a query: a tela manda `?posicao_em=` nas duas rotas de
+    // estoque quando se olha uma data passada, e o mock casa pela ROTA. Quem
+    // precisa checar a data lida `mockGet.mock.calls` — ver `urlsDe`.
+    const caminho = url.split('?')[0]
+    if (caminho === '/api/estoque') return estoque instanceof Promise ? estoque : Promise.resolve(estoque)
+    if (caminho === '/api/perdas') return Promise.resolve(perdas)
+    if (caminho === '/api/produtos') return Promise.resolve(produtos)
+    if (caminho === '/api/estoque/movimentacoes') {
       return movimentacoes instanceof Promise ? movimentacoes : Promise.resolve(movimentacoes)
     }
     return Promise.reject(new Error('rota nao mockada: ' + url))
@@ -556,5 +563,334 @@ describe('EstoqueLista — o historico cai SOZINHO', () => {
     render(<EstoqueLista />)
     await screen.findByRole('alert')
     expect(mockGet).not.toHaveBeenCalledWith('/api/estoque/movimentacoes')
+  })
+})
+
+// ==================================== posicao num dia passado ("Posicao em")
+
+/** AAAA-MM-DD no fuso local, igual ao `hojeIsoLocal()` da tela. */
+function isoLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Uma data relativa ao relogio REAL: a tela le `new Date()` na montagem, e o
+ * teste nao pode depender de hoje ser um dia especifico do calendario.
+ * `setDate` respeita o fuso local (nao soma 86400000 as cegas). */
+function diasDeHoje(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() + n)
+  return isoLocal(d)
+}
+
+const HOJE = isoLocal(new Date())
+const ONTEM = diasDeHoje(-1)
+const AMANHA = diasDeHoje(1)
+const PASSADO = diasDeHoje(-12)
+
+/** As URLs pedidas a `api.get`, na ordem — e onde se ve se o corte foi junto. */
+function urlsDe(rota: string): string[] {
+  return mockGet.mock.calls
+    .map(c => String(c[0]))
+    .filter(u => u.split('?')[0] === rota)
+}
+
+function seletorDeData(container: HTMLElement): HTMLInputElement {
+  const el = container.querySelector('#estoque-posicao-em')
+  if (!el) throw new Error('seletor de data nao encontrado')
+  return el as HTMLInputElement
+}
+
+describe('EstoqueLista — o seletor "Posicao em"', () => {
+  it('o controle existe, rotulado, e comeca em HOJE', async () => {
+    mockRotas([linha()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(screen.getByLabelText('Posição em')).toBeInTheDocument()
+    expect(seletorDeData(container).value).toBe(HOJE)
+  })
+
+  it('em hoje, a busca sai SEM parametro — o caso normal nao muda em nada', async () => {
+    mockRotas([linha()])
+    render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(urlsDe('/api/estoque')).toEqual(['/api/estoque'])
+  })
+
+  it('escolher uma data passada refaz a busca com o corte', async () => {
+    mockRotas([linha()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    fireEvent.change(seletorDeData(container), { target: { value: PASSADO } })
+    await vi.waitFor(() => {
+      expect(urlsDe('/api/estoque')).toEqual(['/api/estoque', `/api/estoque?posicao_em=${PASSADO}`])
+    })
+  })
+
+  it('a vespera ja e uma posicao historica (o corte comeca no dia anterior)', async () => {
+    mockRotas([linha()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    fireEvent.change(seletorDeData(container), { target: { value: ONTEM } })
+    await screen.findByRole('status')
+    expect(urlsDe('/api/estoque')).toContain(`/api/estoque?posicao_em=${ONTEM}`)
+  })
+
+  it('o seletor e limitado a hoje: amanha nao esta na oferta', async () => {
+    mockRotas([linha()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(seletorDeData(container)).toHaveAttribute('max', HOJE)
+  })
+
+  it('data FUTURA digitada nao vira corte — a tela nunca pede uma posicao no futuro', async () => {
+    mockRotas([linha()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    fireEvent.change(seletorDeData(container), { target: { value: AMANHA } })
+    // Nenhuma busca nova com corte, e nenhum aviso de posicao historica.
+    await vi.waitFor(() => expect(seletorDeData(container).value).toBe(AMANHA))
+    expect(urlsDe('/api/estoque').some(u => u.includes('posicao_em'))).toBe(false)
+    expect(screen.queryByText(/não é o estoque de agora/i)).not.toBeInTheDocument()
+  })
+
+  it('o controle continua na tela quando a busca FALHA — da para voltar para hoje sem recarregar', async () => {
+    mockGet.mockImplementation((url: string) =>
+      url.split('?')[0] === '/api/estoque' ? Promise.reject(new Error('falha')) : Promise.resolve([]),
+    )
+    const { container } = render(<EstoqueLista />)
+    await screen.findByRole('alert')
+    expect(seletorDeData(container)).toBeInTheDocument()
+  })
+})
+
+describe('EstoqueLista — a tela diz quando NAO se esta olhando hoje', () => {
+  it('em hoje nao ha aviso de posicao historica nem botao de voltar', async () => {
+    mockRotas([linha()])
+    render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(screen.queryByText(/não é o estoque de agora/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /voltar para hoje/i })).not.toBeInTheDocument()
+  })
+
+  it('numa data passada, um aviso role=status nomeia a data e diz que nao e o estoque de agora', async () => {
+    mockRotas([linha()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    fireEvent.change(seletorDeData(container), { target: { value: '2026-03-09' } })
+    const aviso = await screen.findByRole('status')
+    expect(aviso).toHaveTextContent(/posição histórica/i)
+    expect(aviso).toHaveTextContent('09/03')
+    expect(aviso).toHaveTextContent(/não é o estoque de agora/i)
+    // O `title` carrega a data por extenso — o rotulo curto nao mostra o ano.
+    expect(aviso).toHaveAttribute('title', 'Posição do depósito em 2026-03-09')
+  })
+
+  it('a tabela muda de cara na posicao historica — nao so o aviso', async () => {
+    mockRotas([linha()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(container.querySelector('.estoque-tabela--historica')).toBeNull()
+    fireEvent.change(seletorDeData(container), { target: { value: PASSADO } })
+    await vi.waitFor(() => {
+      expect(container.querySelector('.estoque-tabela--historica')).not.toBeNull()
+    })
+    expect(container.querySelector('.estoque-saldo-secao--historica')).not.toBeNull()
+  })
+
+  it('o botao "Voltar para hoje" aparece e devolve a posicao atual, sem corte na URL', async () => {
+    mockRotas([linha()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    fireEvent.change(seletorDeData(container), { target: { value: PASSADO } })
+    const voltar = await screen.findByRole('button', { name: /voltar para hoje/i })
+    fireEvent.click(voltar)
+    await vi.waitFor(() => expect(seletorDeData(container).value).toBe(HOJE))
+    expect(urlsDe('/api/estoque').at(-1)).toBe('/api/estoque')
+    expect(screen.queryByText(/não é o estoque de agora/i)).not.toBeInTheDocument()
+  })
+
+  it('SAIR E VOLTAR A TELA volta para hoje — a data escolhida nao sobrevive a remontagem', async () => {
+    // A decisao: quem perde a data escolhida clica de novo; quem volta a tela
+    // achando ver o estoque de agora e esta vendo o de 12 dias atras compra
+    // errado. So um dos dois erros custa mercadoria.
+    mockRotas([linha()])
+    const primeira = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    fireEvent.change(seletorDeData(primeira.container), { target: { value: PASSADO } })
+    await screen.findByRole('status')
+    primeira.unmount()
+
+    const segunda = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(seletorDeData(segunda.container).value).toBe(HOJE)
+    expect(urlsDe('/api/estoque').at(-1)).toBe('/api/estoque')
+    expect(screen.queryByText(/não é o estoque de agora/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('EstoqueLista — o historico segue o mesmo corte', () => {
+  it('expandir numa data passada busca o historico COM o corte', async () => {
+    mockRotas([linha()], [], [], [mov()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    fireEvent.change(seletorDeData(container), { target: { value: PASSADO } })
+    await screen.findByRole('status')
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    await vi.waitFor(() => {
+      expect(urlsDe('/api/estoque/movimentacoes'))
+        .toEqual([`/api/estoque/movimentacoes?posicao_em=${PASSADO}`])
+    })
+  })
+
+  it('trocar a data INVALIDA o historico ja buscado — ele nao pode contradizer o saldo', async () => {
+    mockRotas([linha()], [], [], [mov()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    await vi.waitFor(() => expect(urlsDe('/api/estoque/movimentacoes')).toHaveLength(1))
+
+    fireEvent.change(seletorDeData(container), { target: { value: PASSADO } })
+    await screen.findByRole('status')
+    // A linha recolheu (o corte e outro) e a proxima expansao busca de novo.
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    await vi.waitFor(() => {
+      expect(urlsDe('/api/estoque/movimentacoes')).toEqual([
+        '/api/estoque/movimentacoes',
+        `/api/estoque/movimentacoes?posicao_em=${PASSADO}`,
+      ])
+    })
+  })
+})
+
+describe('EstoqueLista — produto que ainda nao existia na data', () => {
+  it('lista vazia numa data passada nao manda "lance uma entrada" — o deposito pode estar cheio hoje', async () => {
+    mockRotas([linha()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    mockRotas([])
+    fireEvent.change(seletorDeData(container), { target: { value: '2026-03-09' } })
+
+    expect(await screen.findByText(/nada em estoque em 09\/03/i)).toBeInTheDocument()
+    expect(screen.queryByText(/nada em estoque ainda/i)).not.toBeInTheDocument()
+    // E diz o motivo: ausencia, nao saldo zero.
+    expect(screen.getByText(/fora da lista/i)).toBeInTheDocument()
+  })
+
+  it('em hoje, a lista vazia continua com a mensagem de sempre', async () => {
+    mockRotas([])
+    render(<EstoqueLista />)
+    expect(await screen.findByText(/nada em estoque ainda/i)).toBeInTheDocument()
+  })
+})
+
+describe('EstoqueLista — saida sem data de entrega na posicao historica', () => {
+  const comSaidaSemData = () => linha({ saiu: 30, itens_saida_sem_data: 2 })
+
+  it('em HOJE nao marca nem explica — ali essa saida ja e o saldo de agora', async () => {
+    mockRotas([comSaidaSemData()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(container.querySelector('.estoque-sem-data')).toBeNull()
+    expect(screen.queryByRole('note', { name: 'Saídas sem data de entrega' })).not.toBeInTheDocument()
+  })
+
+  it('numa data passada, marca a coluna SAIU e explica no rodape', async () => {
+    mockRotas([comSaidaSemData()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    fireEvent.change(seletorDeData(container), { target: { value: PASSADO } })
+
+    const marca = await vi.waitFor(() => {
+      const el = container.querySelector('.estoque-sem-data')
+      if (!el) throw new Error('marca nao apareceu')
+      return el as HTMLElement
+    })
+    // A marca e † — deliberadamente diferente do * de "quantidade incompleta",
+    // que e outro problema.
+    expect(marca).toHaveTextContent('30†')
+    expect(marca).toHaveAttribute('title', expect.stringContaining('2 saídas'))
+
+    const nota = screen.getByRole('note', { name: 'Saídas sem data de entrega' })
+    expect(nota).toHaveTextContent(/2 saídas sem data de entrega/i)
+    expect(nota).toHaveTextContent(/em todas/i)
+    expect(nota).toHaveTextContent(/Preencha a entrega/i)
+  })
+
+  it('linha sem nenhuma saida sem data nao ganha marca, mesmo na posicao historica', async () => {
+    mockRotas([linha({ itens_saida_sem_data: 0 })])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    fireEvent.change(seletorDeData(container), { target: { value: PASSADO } })
+    await screen.findByRole('status')
+    expect(container.querySelector('.estoque-sem-data')).toBeNull()
+    expect(screen.queryByRole('note', { name: 'Saídas sem data de entrega' })).not.toBeInTheDocument()
+  })
+})
+
+describe('EstoqueLista — a nota de escopo passou a cobrir a data propria', () => {
+  it('continua dizendo que a tela nao segue o filtro de periodo global', async () => {
+    mockRotas([linha()])
+    render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    const nota = screen.getByRole('note', { name: 'Escopo do estoque' })
+    expect(nota).toHaveTextContent(/não segue o filtro de período/i)
+  })
+
+  it('e passou a dizer que a tela tem data propria, e que ela e um CORTE ate a data', async () => {
+    mockRotas([linha()])
+    render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    const nota = screen.getByRole('note', { name: 'Escopo do estoque' })
+    expect(nota).toHaveTextContent(/data própria/i)
+    expect(nota).toHaveTextContent(/Posição em/i)
+    expect(nota).toHaveTextContent(/corte/i)
+    // A distincao que e o ponto inteiro da funcionalidade.
+    expect(nota).toHaveTextContent(/intervalo/i)
+  })
+
+  it('diz que item sem movimentacao ate a data fica FORA da lista — travessao nunca vira zero', async () => {
+    mockRotas([linha()])
+    render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    const nota = screen.getByRole('note', { name: 'Escopo do estoque' })
+    expect(nota).toHaveTextContent(/não aparece na lista/i)
+    expect(nota).toHaveTextContent(/não é saldo zero/i)
+  })
+})
+
+describe('EstoqueLista — trocar a data e um recarregamento, nao um filtro no cliente', () => {
+  it('enquanto a nova posicao carrega, a tabela ANTIGA sai da tela', async () => {
+    // Sem isto, o aviso "posição em 09/03" apareceria por cima dos números de
+    // hoje — a combinação exata que faz alguém decidir com o número errado.
+    let resolver: (v: unknown) => void = () => {}
+    const pendente = new Promise(res => { resolver = res })
+    mockGet.mockImplementation((url: string) => {
+      const caminho = url.split('?')[0]
+      if (caminho === '/api/estoque') {
+        return url.includes('posicao_em') ? pendente : Promise.resolve([linha()])
+      }
+      return Promise.resolve([])
+    })
+
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    fireEvent.change(seletorDeData(container), { target: { value: PASSADO } })
+
+    expect(within(secaoSaldo(container)).getByText('Carregando…')).toBeInTheDocument()
+    expect(screen.queryByText('Tomate')).not.toBeInTheDocument()
+
+    resolver([])
+    expect(await screen.findByText(/nada em estoque em/i)).toBeInTheDocument()
+  })
+
+  it('escolher uma data que da o MESMO corte nao trava a tela em "Carregando…"', async () => {
+    // Amanhã e hoje dão a mesma posição (a atual), então não há busca nova
+    // para desligar o carregamento — ligá-lo aqui deixaria a tela pendurada.
+    mockRotas([linha()])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    fireEvent.change(seletorDeData(container), { target: { value: AMANHA } })
+    expect(within(secaoSaldo(container)).queryByText('Carregando…')).toBeNull()
+    expect(screen.getByText('Tomate')).toBeInTheDocument()
   })
 })

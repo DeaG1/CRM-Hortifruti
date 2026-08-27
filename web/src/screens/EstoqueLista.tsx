@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, ErroApi } from '../api/client'
 import {
   ultimaMovimentacao,
   textoMovimentacao,
   agruparMovimentacoes,
   chaveEstoque,
+  posicaoEstoque,
+  avisoSaidasSemData,
   type MovimentacaoEstoque,
 } from '../derive/estoque'
 import { PerdasLista } from './PerdasLista'
@@ -37,6 +39,10 @@ interface LinhaEstoque {
   /** Lançamentos desta linha que ficaram fora das quantidades por não serem
    * convertíveis em quilos (unidade ≠ KG sem `peso_medio` cadastrado). */
   itens_sem_conversao: number
+  /** Itens de saída desta linha que descontam do saldo SEM ter data de
+   * entrega. Eles contam em qualquer data escolhida — ver
+   * `avisoSaidasSemData` (derive/estoque.ts) e o comentário da API. */
+  itens_saida_sem_data: number
   /** Data da movimentação mais recente de cada fonte, ISO 'AAAA-MM-DD' ou
    * `null`. Vêm do MESMO agregado das quantidades (um `max()` nas CTEs que
    * já existiam), então nunca ficam indisponíveis sem a tabela toda ficar —
@@ -114,6 +120,21 @@ function NumIncompleto({ texto, n }: { texto: string; n: number }) {
   return <span className="estoque-incompleto" title={avisoSemConversao(n)}>{texto}*</span>
 }
 
+/**
+ * A coluna SAIU numa posição HISTÓRICA, quando parte do que saiu não tem data
+ * de entrega. Marca de rodapé `†` — deliberadamente DIFERENTE do `*` de
+ * `NumIncompleto`, que significa outra coisa (quantidade que ficou de fora por
+ * falta de peso médio). Dois problemas distintos com a mesma marca fariam o
+ * usuário ler um pelo outro.
+ *
+ * Só aparece na posição histórica: em hoje essa saída já é o saldo de agora e
+ * não há nada de estranho a explicar.
+ */
+function NumSemData({ texto, n }: { texto: string; n: number }) {
+  if (!n) return <>{texto}</>
+  return <span className="estoque-sem-data" title={avisoSaidasSemData(n)}>{texto}†</span>
+}
+
 /** O que a coluna ÚLTIMA MOVIMENTAÇÃO diz quando não há nenhuma — o
  * travessão precisa dizer o que significa, senão vira "a tela está
  * quebrada". O caso é real: uma linha cuja única movimentação é uma saída
@@ -121,6 +142,14 @@ function NumIncompleto({ texto, n }: { texto: string; n: number }) {
 const AVISO_SEM_MOVIMENTACAO =
   'Nenhuma movimentação com data registrada. Saídas ainda sem data de entrega preenchida '
   + 'contam na quantidade, mas não dizem quando a mercadoria saiu.'
+
+/** AAAA-MM-DD de hoje, no fuso local — mesmo padrão de `hojeIsoLocal()` em
+ * Shell.tsx e SaldoCaixa.tsx. Fica no componente porque toca `new Date()`;
+ * `posicaoEstoque` continua pura recebendo a data como argumento. */
+function hojeIsoLocal(): string {
+  const n = new Date()
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
+}
 
 interface EstoqueListaProps {
   /** Sessão expirou (401 da API) — a tela volta ao login em vez de mostrar erro. */
@@ -164,27 +193,74 @@ interface EstoqueListaProps {
  * cada linha —, e um aviso `role="status"` diz o que faltou. Mesmo padrão de
  * ClientesLista.tsx, onde a queda de /api/saidas não leva o cadastro junto.
  *
- * ESTA É A TELA QUE NÃO SEGUE O PERÍODO GLOBAL (achado S-3), e é de
- * propósito. Estoque é uma POSIÇÃO acumulada — o que existe no depósito
- * agora —, não um fluxo do mês: "o estoque de junho" não é a soma das
+ * ESTA É A TELA QUE NÃO SEGUE O PERÍODO GLOBAL (achado S-3), e continua sendo
+ * de propósito. Estoque é uma POSIÇÃO — o que existe no depósito num
+ * instante —, não um fluxo do mês: "o estoque de junho" não é a soma das
  * movimentações de junho (isso daria saldo negativo em todo mês que se vende
- * mais do que se compra, e ignoraria o que sobrou de maio). Seria "o saldo
- * ATÉ o fim de junho", uma pergunta diferente de "quanto vendi em junho" que
- * todas as outras telas respondem, e que exigiria um recorte "até" no
- * endpoint agregado (GET /api/estoque não tem, e nem deveria ganhar um por
- * causa do cabeçalho). O RASTREAMENTO SEGUE A MESMA REGRA, pela mesma razão:
- * "a última vez que este item mexeu" é uma posição no tempo, não um fluxo —
- * recortada por julho ela responderia "a última vez que mexeu em julho", e um
- * item parado desde maio apareceria como nunca movimentado. Pelo mesmo motivo
- * o saldo em caixa também é sempre acumulado — ver derive/caixa.ts. A nota
- * abaixo da tabela diz isso ao usuário, para o número não parecer estar
- * ignorando o filtro por defeito.
+ * mais do que se compra, e ignoraria o que sobrou de maio). Pelo mesmo motivo
+ * o saldo em caixa também é sempre acumulado — ver derive/caixa.ts.
  *
- * A lista de perdas do depósito, embutida abaixo, acompanha essa decisão: é
- * ela que produz a coluna PERDAS do saldo, e filtrar uma sem a outra faria a
- * tabela não fechar com a lista logo abaixo dela, na mesma tela.
+ * ---- data própria: "posição em" ----
+ *
+ * O que faltava era a pergunta certa: não "o movimento de junho", e sim
+ * QUANTO HAVIA NO DEPÓSITO NUM DIA. Essa é a data própria desta tela, e ela
+ * é um CORTE, não um intervalo: soma tudo que aconteceu DESDE SEMPRE ATÉ a
+ * data escolhida, inclusive ela. Sem `de`, porque não existe início — o
+ * depósito não começa em junho. O recorte roda no mesmo endpoint agregado
+ * (`?posicao_em=`, ver api/src/routes/estoque.ts): as CTEs que já existiam
+ * ganharam um `where`, sem tabela nova e sem migration.
+ *
+ * PADRÃO É HOJE, E HOJE É SEM CORTE. Abrir a tela mostra a posição atual, com
+ * a mesma requisição de sempre (`posicaoEstoque` devolve `query: ''`). Isso
+ * garante a invariante que sustenta a tela: a posição em hoje é idêntica à
+ * posição atual, por construção e não por coincidência.
+ *
+ * SAIR E VOLTAR À TELA VOLTA PARA HOJE. A data é estado local deste
+ * componente (`useState`), e a troca de tela desmonta o componente — então
+ * voltar já reinicia em hoje, e nada é gravado em sessão/localStorage de
+ * propósito. O critério é o dano de cada erro: quem perdeu a data escolhida
+ * clica de novo e perde cinco segundos; quem volta à tela achando ver o
+ * estoque de agora e está vendo o de 15/08 compra errado. Só um dos dois erros
+ * custa mercadoria, e é o que esta decisão impede.
+ *
+ * DATA FUTURA NÃO EXISTE. O seletor é limitado a hoje (`max`), porque escolher
+ * amanhã não pode inventar nada — nada aconteceu ainda. Como `max` de
+ * `<input type="date">` não impede digitação, `posicaoEstoque` normaliza
+ * qualquer data posterior a hoje para a posição atual: a tela nunca pede ao
+ * servidor uma posição no futuro, por nenhum caminho.
+ *
+ * QUANDO NÃO É HOJE, A TELA MUDA DE CARA. Um aviso `role="status"`, um botão
+ * "Voltar para hoje" e a tabela marcada — um estoque histórico com a mesma
+ * aparência do atual é um convite a decidir com o número errado.
+ *
+ * O RASTREAMENTO SEGUE O MESMO CORTE: a última movimentação e o histórico de
+ * cada item respeitam a data escolhida, senão o histórico contradiria o saldo
+ * logo acima dele, na mesma tela. O que eles continuam não seguindo é o
+ * PERÍODO global — recortada por julho, "a última vez que este item mexeu"
+ * responderia "a última vez que mexeu em julho", e um item parado desde maio
+ * apareceria como nunca movimentado.
+ *
+ * PRODUTO QUE AINDA NÃO EXISTIA NA DATA não aparece na lista — não vira "0 kg
+ * em estoque". Zero seria uma medição, e ninguém mediu um produto que não
+ * tinha sido comprado. Isso vem da própria API (a linha não nasce), pela mesma
+ * regra que já valia para produto sem nenhuma movimentação.
+ *
+ * A lista de perdas do depósito, embutida abaixo, NÃO recebe o corte: ela é o
+ * cadastro/CRUD das perdas (registrar, editar, excluir), não uma leitura da
+ * posição — esconder as perdas mais recentes da lista de trabalho por causa
+ * de uma consulta histórica tiraria da tela o que o usuário precisa editar.
+ * A nota da tabela diz isso.
  */
 export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
+  // Hoje é lido UMA vez por montagem: a data escolhida é comparada com ele o
+  // tempo todo, e um `new Date()` a cada render faria a tela mudar de estado
+  // sozinha na virada da meia-noite, no meio de uma leitura.
+  const hoje = useMemo(() => hojeIsoLocal(), [])
+  // Começa em hoje — e desmontar a tela (trocar de tela no menu) devolve
+  // exatamente este valor. Ver "sair e voltar à tela volta para hoje" acima.
+  const [dataEscolhida, setDataEscolhida] = useState(hoje)
+  const posicao = posicaoEstoque(dataEscolhida, hoje)
+
   const [linhas, setLinhas] = useState<LinhaEstoque[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
@@ -204,9 +280,35 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
   const montado = useRef(true)
   useEffect(() => () => { montado.current = false }, [])
 
+  /**
+   * Trocar a data escolhida — pelo seletor ou pelo botão "Voltar para hoje".
+   *
+   * A limpeza mora AQUI, no evento que causou a mudança, e não dentro do
+   * efeito: o histórico já buscado é o do corte ANTERIOR e a tabela na tela é
+   * a da data anterior. Sem isto, a linha expandida mostraria movimentações
+   * posteriores à data escolhida, contradizendo o saldo logo acima dela.
+   *
+   * O `return` antecipado é o que impede a tela de travar em "Carregando…":
+   * datas diferentes podem dar o MESMO corte (hoje e qualquer data futura dão
+   * `query: ''`), e aí não há busca nova para desligar o carregando.
+   */
+  function escolherData(valor: string) {
+    setDataEscolhida(valor)
+    if (posicaoEstoque(valor, hoje).query === posicao.query) return
+    setCarregando(true)
+    setErro('')
+    historicoPedido.current = false
+    setMovimentacoes(null)
+    setErroHistorico('')
+    setExpandido(null)
+  }
+
+  // Depende de `posicao.query` (uma string, estável entre renders com a mesma
+  // data), não do objeto `posicao`, que é recriado a cada render e dispararia
+  // a busca em loop.
   useEffect(() => {
     let cancelado = false
-    api.get<LinhaEstoque[]>('/api/estoque')
+    api.get<LinhaEstoque[]>(`/api/estoque${posicao.query}`)
       .then(ls => { if (!cancelado) setLinhas(ls) })
       .catch((err: unknown) => {
         if (cancelado) return
@@ -218,7 +320,7 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
       })
       .finally(() => { if (!cancelado) setCarregando(false) })
     return () => { cancelado = true }
-  }, [onSessaoExpirada])
+  }, [onSessaoExpirada, posicao.query])
 
   /**
    * Abre/fecha uma linha e, na primeira vez, busca o histórico de TODAS as
@@ -231,7 +333,9 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
     if (historicoPedido.current) return
     historicoPedido.current = true
     setCarregandoHistorico(true)
-    api.get<MovimentacaoEstoque[]>('/api/estoque/movimentacoes')
+    // O MESMO corte da listagem: as duas buscas têm de concordar sobre o que
+    // já tinha acontecido na data escolhida.
+    api.get<MovimentacaoEstoque[]>(`/api/estoque/movimentacoes${posicao.query}`)
       .then(ms => { if (montado.current) setMovimentacoes(ms) })
       .catch((err: unknown) => {
         if (!montado.current) return
@@ -248,25 +352,90 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
 
   const comEstoque = linhas.filter(l => l.saldo > 0).length
   const totalSemConversao = linhas.reduce((s, l) => s + (l.itens_sem_conversao || 0), 0)
+  // Só interessa quando se está olhando para trás: em hoje, a saída sem data
+  // de entrega não tem nada de estranho — ela já é o saldo de agora.
+  const totalSaidasSemData = posicao.historica
+    ? linhas.reduce((s, l) => s + (l.itens_saida_sem_data || 0), 0)
+    : 0
   const historicoPorChave = movimentacoes ? agruparMovimentacoes(movimentacoes) : null
 
   return (
     <div className="estoque-modulo">
-      <section className="estoque-saldo-secao">
+      <section
+        className={
+          posicao.historica ? 'estoque-saldo-secao estoque-saldo-secao--historica' : 'estoque-saldo-secao'
+        }
+      >
+        {/* FORA dos estados de carregando/erro/vazio, de propósito: se a busca
+            de uma data passada falhar ou vier vazia, o usuário precisa
+            continuar podendo voltar para hoje sem recarregar a página. */}
+        <div className="estoque-posicao">
+          <label className="estoque-posicao-rotulo" htmlFor="estoque-posicao-em">Posição em</label>
+          <input
+            id="estoque-posicao-em"
+            className="estoque-posicao-data"
+            type="date"
+            value={dataEscolhida}
+            // Amanhã não pode inventar nada: nada aconteceu ainda. `max` é a
+            // primeira barreira; `posicaoEstoque` normaliza o que passar por
+            // ela (digitação) para a posição atual.
+            max={hoje}
+            onChange={e => escolherData(e.target.value)}
+          />
+          {posicao.historica && (
+            <button
+              type="button"
+              className="estoque-posicao-hoje"
+              onClick={() => escolherData(hoje)}
+            >
+              Voltar para hoje
+            </button>
+          )}
+        </div>
+
+        {/* role="status": é um aviso sobre o que está sendo exibido, não um
+            erro. Fica junto do controle e antes da tabela, para não haver
+            como ler os números sem ter passado por ele. O `title` carrega a
+            data por extenso — o rótulo curto não mostra o ano. */}
+        {posicao.historica && (
+          <p
+            className="estoque-posicao-aviso"
+            role="status"
+            title={`Posição do depósito em ${posicao.corte}`}
+          >
+            <strong>Posição histórica:</strong> {posicao.aviso}
+          </p>
+        )}
+
         {carregando && <p className="estoque-estado">Carregando…</p>}
 
         {!carregando && erro && (
           <p className="estoque-estado estoque-estado--erro" role="alert">{erro}</p>
         )}
 
+        {/* Duas mensagens diferentes para o mesmo "lista vazia": em hoje, o
+            depósito nunca recebeu nada e o caminho é lançar uma entrada; numa
+            data passada, ele podia estar vazio naquele dia e continuar cheio
+            hoje — sugerir "lance uma entrada" ali seria conselho errado. */}
         {!carregando && !erro && linhas.length === 0 && (
-          <div className="estado-vazio estoque-vazio">
-            <div className="estoque-vazio-titulo">Nada em estoque ainda</div>
-            <div className="estoque-vazio-sub">
-              O estoque se preenche sozinho: lance uma <strong>Entrada (compra)</strong> e a
-              quantidade aparece aqui.
+          posicao.historica ? (
+            <div className="estado-vazio estoque-vazio">
+              <div className="estoque-vazio-titulo">Nada em estoque em {posicao.texto}</div>
+              <div className="estoque-vazio-sub">
+                Nenhuma movimentação registrada até essa data. Produto comprado depois dela ainda
+                não existia no depósito — por isso fica <strong>fora da lista</strong>, e não com
+                saldo zero.
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="estado-vazio estoque-vazio">
+              <div className="estoque-vazio-titulo">Nada em estoque ainda</div>
+              <div className="estoque-vazio-sub">
+                O estoque se preenche sozinho: lance uma <strong>Entrada (compra)</strong> e a
+                quantidade aparece aqui.
+              </div>
+            </div>
+          )
         )}
 
         {!carregando && !erro && linhas.length > 0 && (
@@ -279,13 +448,18 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
 
             <div className="estoque-stats">
               <div className="estoque-stat">
-                <div className="estoque-stat-label">ITENS COM ESTOQUE</div>
+                <div className="estoque-stat-label">
+                  ITENS COM ESTOQUE{posicao.historica ? ` EM ${posicao.texto}` : ''}
+                </div>
                 <div className="estoque-stat-valor">{comEstoque}</div>
-                <div className="estoque-stat-sub">{linhas.length} item(ns) movimentados</div>
+                <div className="estoque-stat-sub">
+                  {linhas.length} item(ns) movimentados
+                  {posicao.historica ? ` até ${posicao.texto}` : ''}
+                </div>
               </div>
             </div>
 
-            <div className="estoque-tabela">
+            <div className={posicao.historica ? 'estoque-tabela estoque-tabela--historica' : 'estoque-tabela'}>
               <div className="estoque-linha estoque-linha--cabecalho">
                 <div>PRODUTO</div>
                 <div>LANÇADO EM</div>
@@ -341,7 +515,13 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
                         <NumIncompleto texto={fmtQtd(l.perda)} n={inc} />
                       </div>
                       <div className="estoque-col-num estoque-mono">
-                        <NumIncompleto texto={fmtQtd(l.saiu)} n={inc} />
+                        <NumSemData
+                          texto={fmtQtd(l.saiu)}
+                          n={posicao.historica ? (l.itens_saida_sem_data || 0) : 0}
+                        />
+                        {inc > 0 && (
+                          <span className="estoque-incompleto" title={avisoSemConversao(inc)}>*</span>
+                        )}
                       </div>
                       <div className="estoque-col-num estoque-mono estoque-saldo">
                         <span className="estoque-saldo-valor" style={{ color: corSaldo(l.saldo, inc > 0) }}>
@@ -425,16 +605,41 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
             </div>
 
             {/* Sem esta linha, um usuário que trocou o período no cabeçalho e
-                viu o estoque não mudar concluiria que o filtro está quebrado. */}
+                viu o estoque não mudar concluiria que o filtro está quebrado.
+                Ela passou a ter uma segunda metade: a tela continua fora do
+                filtro global, mas ganhou data própria, e a nota antiga (só
+                "não segue o filtro") ficaria incompleta a ponto de enganar. */}
             <div className="estoque-legenda" role="note" aria-label="Escopo do estoque">
               Esta tela mostra a <strong style={{ color: TEXTO }}>posição acumulada</strong> do
               depósito e <strong style={{ color: TEXTO }}>não segue o filtro de período</strong> do
-              cabeçalho: o que sobrou de um mês continua no estoque no mês seguinte. A{' '}
+              cabeçalho — aquele é um <em>intervalo</em> (o movimento de um mês), e aqui a pergunta é
+              outra: quanto havia no depósito num dia. Para isso a tela tem{' '}
+              <strong style={{ color: TEXTO }}>data própria</strong>, o “Posição em” lá em cima: um{' '}
+              <strong style={{ color: TEXTO }}>corte</strong> que soma tudo que aconteceu{' '}
+              <strong style={{ color: TEXTO }}>até</strong> a data escolhida, nunca só o que
+              aconteceu dentro dela — o que sobrou de um mês continua no estoque no mês seguinte. A{' '}
               <strong style={{ color: TEXTO }}>última movimentação</strong> e o histórico de cada item
-              também são absolutos — recortados por um mês, um item parado desde maio apareceria como
-              nunca movimentado. Para o movimento de um período, veja Entradas, Saídas ou
-              Relatórios ▸ Perdas.
+              seguem o mesmo corte, e continuam fora do filtro de período: recortados por um mês, um
+              item parado desde maio apareceria como nunca movimentado. Item sem nenhuma movimentação
+              até a data escolhida <strong style={{ color: TEXTO }}>não aparece na lista</strong> —
+              ele ainda não tinha sido comprado, e isso não é saldo zero. O registro de perdas do
+              depósito, abaixo, continua mostrando tudo: ele é a lista de trabalho, não a posição.
+              Para o movimento de um período, veja Entradas, Saídas ou Relatórios ▸ Perdas.
             </div>
+
+            {/* Só quando há o que explicar: em hoje a saída sem data de
+                entrega já é o saldo de agora e não surpreende ninguém. Numa
+                data passada ela aparece antes de existir, e um número que muda
+                sem explicação destrói a confiança na tela inteira. */}
+            {totalSaidasSemData > 0 && (
+              <div
+                className="estoque-legenda estoque-legenda--incompleto"
+                role="note"
+                aria-label="Saídas sem data de entrega"
+              >
+                {avisoSaidasSemData(totalSaidasSemData)}
+              </div>
+            )}
 
             {totalSemConversao > 0 && (
               <div

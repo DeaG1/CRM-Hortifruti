@@ -300,3 +300,84 @@
   padding-top: 20px;
   border-top: 1px solid #d8d3c2;
 }
+
+/* ---------- posição num dia passado ---------- */
+
+/* O controle "Posição em". Fica no topo da seção de saldo, antes de qualquer
+   número — a data em que se está olhando é a primeira coisa a saber, não uma
+   nota de rodapé. */
+.estoque-posicao {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.estoque-posicao-rotulo {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6a685c;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.estoque-posicao-data {
+  font-family: inherit;
+  font-size: 13px;
+  color: #2a2a24;
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 8px;
+  padding: 6px 9px;
+}
+
+.estoque-posicao-hoje {
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #2a2a24;
+  background: #fffefa;
+  border: 1px solid #d8d3c2;
+  border-radius: 8px;
+  padding: 6px 11px;
+  cursor: pointer;
+}
+
+.estoque-posicao-hoje:hover {
+  background: #f2ede0;
+}
+
+/* O aviso de que NÃO se está olhando hoje. Âmbar e com borda à esquerda, para
+   ser impossível passar por ele sem ver — uma tela de estoque histórico com a
+   mesma cara da atual é um convite a decidir com o número errado. */
+.estoque-posicao-aviso {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  background: #f6efd8;
+  border: 1px solid #e5d6a8;
+  border-left: 4px solid #c79320;
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: #7a6118;
+}
+
+.estoque-posicao-aviso strong {
+  color: #7a6118;
+}
+
+/* A tabela histórica muda de fundo, junto do aviso acima: dois sinais, porque
+   o aviso pode sair do campo de visão quando a lista é longa e a rolagem
+   desce — e é justamente rolando a lista que se lê o número. */
+.estoque-tabela--historica {
+  background: #fbf7ec;
+  border-color: #e5d6a8;
+}
+
+/* A marca † da coluna SAIU: saída sem data de entrega, que conta em qualquer
+   data escolhida. Deliberadamente diferente do * de .estoque-incompleto (que
+   é outro problema) — mesma gramática visual, símbolo distinto. */
+.estoque-sem-data {
+  border-bottom: 1px dotted #7a6118;
+  cursor: help;
+}

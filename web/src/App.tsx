@@ -448,9 +448,11 @@ function Conteudo(
     // Estoque nao guarda dado proprio: e o saldo por produto+unidade
     // (entradas - perdas - saidas, GET /api/estoque) mais o registro de
     // perdas do deposito, que vive dentro de Estoque no design.
-    // Estoque nao recebe periodo: o saldo e uma POSICAO acumulada (o que ha
-    // no deposito agora), nao um fluxo do mes — ver o comentario e a nota na
-    // propria tela (EstoqueLista.tsx).
+    // Estoque continua sem receber periodo: o saldo e uma POSICAO (o que ha
+    // no deposito num instante), nao um fluxo do mes. A tela ganhou data
+    // PROPRIA — "posicao em", um corte "ate a data" que nao e o intervalo do
+    // cabecalho —, e ela mora inteira dentro do componente, sem passar por
+    // aqui. Ver o comentario e a nota na propria tela (EstoqueLista.tsx).
     case 'estoque':       return <EstoqueLista onSessaoExpirada={onSessaoExpirada} />
     default:              return <TelaPlaceholder tela={tela} />
   }

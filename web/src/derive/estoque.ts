@@ -194,3 +194,126 @@ export function agruparMovimentacoes(
   })
   return porChave
 }
+
+// ============================================ posição num dia passado (corte)
+
+/**
+ * O nome do parâmetro na URL das duas buscas — `api/src/routes/estoque.ts`
+ * lê exatamente este. NÃO é `de`/`ate`: aquele par é o INTERVALO de meses do
+ * filtro de período global (derive/periodo.ts, relatórios), e esta tela
+ * continua fora dele. Aqui é um PONTO no tempo, e o nome tem de deixar isso
+ * claro para quem lê a URL — ver `posicaoEstoque` logo abaixo.
+ */
+export const PARAM_POSICAO = 'posicao_em'
+
+const DATA_ISO_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** O que a tela precisa saber sobre a data escolhida — ver `posicaoEstoque`. */
+export interface PosicaoEstoque {
+  /** ISO 'AAAA-MM-DD' do corte, ou `null` quando é hoje. `null` significa
+   * literalmente SEM CORTE: a busca sai sem parâmetro nenhum, e a API
+   * responde exatamente o que respondia antes desta funcionalidade existir. */
+  corte: string | null
+  /** `true` só quando se está olhando um dia PASSADO. A tela usa isto para
+   * mudar de cara — um estoque histórico com a mesma aparência do atual é um
+   * convite a decidir com o número errado. */
+  historica: boolean
+  /** O sufixo das DUAS buscas (`/api/estoque` e `/api/estoque/movimentacoes`):
+   * `''` ou `'?posicao_em=AAAA-MM-DD'`. As duas recebem o mesmo corte, senão
+   * o histórico contradiria o saldo logo acima dele, na mesma tela. */
+  query: string
+  /** Rótulo curto: `'hoje'` ou `'15/08'` (via `dataBrCurta`, o formatador
+   * único do projeto). O ano fica no `corte`, que a tela imprime no `title` —
+   * mesma divisão de `UltimaMovimentacao` (`texto` curto, `data` inteira). */
+  texto: string
+  /** A frase de alerta a exibir quando não se está olhando hoje; `''` em
+   * hoje. */
+  aviso: string
+}
+
+/**
+ * A data escolhida no controle "Posição em", normalizada no que a tela e a
+ * API precisam.
+ *
+ * ---- é CORTE, não intervalo ----
+ *
+ * "Posição em 15/08" é tudo que aconteceu DESDE SEMPRE ATÉ 15/08, não o que
+ * aconteceu DENTRO de agosto. A diferença é a funcionalidade inteira: um
+ * recorte por mês daria saldo negativo em todo mês de venda forte e ignoraria
+ * o que sobrou do mês anterior. Por isso não existe `de` aqui — só o `até`.
+ * O filtro de período global (`Periodo`, derive/periodo.ts) continua sem se
+ * aplicar a esta tela; são perguntas diferentes, e a nota da tela diz as duas.
+ *
+ * ---- hoje é SEM CORTE, de propósito ----
+ *
+ * Escolher hoje (ou abrir a tela, que começa em hoje) devolve `corte: null` e
+ * `query: ''` — a busca sai sem parâmetro e a API responde o mesmo de sempre.
+ * Isso garante a única invariante que sustenta a tela: a posição em hoje é
+ * IDÊNTICA à posição atual. Se hoje virasse um corte como outro qualquer, a
+ * mesma data poderia dar dois números conforme o usuário tivesse escolhido
+ * hoje ou apenas aberto a tela.
+ *
+ * ---- data futura ----
+ *
+ * Amanhã não pode inventar nada: nada aconteceu ainda. O controle da tela já
+ * é limitado a hoje (`max`), mas `max` de `<input type="date">` não impede o
+ * usuário de digitar — então aqui qualquer data POSTERIOR a hoje cai em
+ * `null`, ou seja, vira a posição atual. A tela nunca pede ao servidor uma
+ * posição no futuro, por nenhum caminho.
+ *
+ * Data fora do formato também cai em `null` (a posição atual) em vez de virar
+ * um corte quebrado: quando não dá para saber que dia é, a resposta segura é
+ * "agora", nunca uma data inventada. Vale para `hojeIso` também — se ele não
+ * for uma data ISO, nada pode ser declarado "passado" com segurança.
+ *
+ * `hojeIso` é parâmetro (não `new Date()` interno) para a função continuar
+ * pura e testável sem mockar relógio — mesmo padrão de `situacaoExibidaSaida`
+ * (derive/pagamento.ts) e `opcoesDePeriodo` (derive/periodo.ts).
+ */
+export function posicaoEstoque(
+  escolhida: string | null | undefined,
+  hojeIso: string,
+): PosicaoEstoque {
+  const valor = String(escolhida ?? '')
+  const ehPassado = DATA_ISO_RE.test(valor) && DATA_ISO_RE.test(hojeIso) && valor < hojeIso
+  if (!ehPassado) {
+    return { corte: null, historica: false, query: '', texto: 'hoje', aviso: '' }
+  }
+  const texto = curta(valor)
+  return {
+    corte: valor,
+    historica: true,
+    query: `?${PARAM_POSICAO}=${valor}`,
+    texto,
+    aviso: `Você está vendo o depósito como ele estava no fim de ${texto} — `
+      + 'não é o estoque de agora.',
+  }
+}
+
+/**
+ * O que a tela diz sobre as saídas SEM data de entrega quando se está olhando
+ * uma data passada — `itens_saida_sem_data`, que vem em cada linha de
+ * GET /api/estoque.
+ *
+ * A saída sem `entrega` desconta do saldo (decisão de 4bee3f0: só
+ * Cancelado/Devolvido saem da conta) mas não tem data, então não dá para
+ * dizer se ela já tinha saído em 15/08. A API escolheu INCLUÍ-LA em qualquer
+ * corte — ver o raciocínio completo em api/src/routes/estoque.ts —, e o preço
+ * dessa escolha é que ela aparece até numa data anterior ao pedido existir.
+ * Isso pode surpreender, e número que muda sem explicação destrói a confiança
+ * na tela inteira; por isso a tela imprime esta frase em vez de deixar a
+ * diferença sem resposta.
+ *
+ * `''` quando não há nenhuma (o caso comum) — a tela não mostra aviso de
+ * coisa que não aconteceu.
+ */
+export function avisoSaidasSemData(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return ''
+  const um = n === 1
+  const quantas = um ? '1 saída' : `${n} saídas`
+  return `${quantas} sem data de entrega ${um ? 'está descontada' : 'estão descontadas'} `
+    + `${um ? 'desta' : 'destas'} posição. Sem a data não dá para saber se `
+    + `${um ? 'ela já tinha' : 'elas já tinham'} saído do depósito na data escolhida, então `
+    + `${um ? 'ela conta' : 'elas contam'} em todas — inclusive nas anteriores ao pedido. `
+    + 'Preencha a entrega na tela de Saídas para a posição histórica ficar exata.'
+}

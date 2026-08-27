@@ -1,5 +1,6 @@
 import { periodoDe } from './periodo'
 import { CATEGORIA_ADIANTAMENTO, CATEGORIA_SALARIO, type Lancamento } from './lancamentos'
+import type { Desconto } from './descontos'
 
 /** Funcionario como a API devolve (api/src/routes/funcionarios.ts). */
 export interface Funcionario {
@@ -165,10 +166,17 @@ export function ultimoSalarioPago(lancamentos: LancamentoParaFuncionario[], func
 /* ======================= dinheiro por funcionário ======================= */
 
 /**
- * As três somas do período e o que sobra delas, pra UM funcionário. Porta a
- * conta do protótipo (design/CRM Hortifruti.dc.html:2554-2557 e a nota de
- * rodapé da linha 779): `a pagar = salário − adiantamentos − salários pagos
- * no período`.
+ * As somas do período e o que sobra delas, pra UM funcionário. Porta a conta
+ * do protótipo (design/CRM Hortifruti.dc.html:2554-2557 e a nota de rodapé da
+ * linha 779), com uma parcela a mais que o protótipo não tinha:
+ * `a pagar = salário − adiantamentos − salários pagos − descontos, no
+ * período`.
+ *
+ * O DESCONTO ENTRA AQUI E NÃO NO FINANCEIRO. Ele não é um lançamento — nada
+ * se move quando a falta é registrada, a empresa é que vai pagar menos
+ * depois. Somá-lo como custo (que é o que o Financeiro faz com todo
+ * lançamento) inverteria o sinal: o desconto AUMENTARIA o custo da folha em
+ * vez de reduzi-lo. Ver derive/descontos.ts e a migration 016.
  */
 export interface SaldoFuncionario {
   /** Salário do cadastro — a base da conta, não vem de lançamento. */
@@ -177,10 +185,13 @@ export interface SaldoFuncionario {
   adiantado: number
   /** Soma dos lançamentos de 'Salário' do período. */
   pagoSalario: number
+  /** Soma dos descontos por falta do período (tabela própria, não lançamento). */
+  descontado: number
   /**
-   * `salário − adiantado − pago` SEM piso: fica negativo quando se adiantou
-   * mais do que o salário. É o número cru, exposto pra quem precisar dele
-   * (o excedente abaixo sai daqui) — não é o que a coluna A PAGAR mostra.
+   * `salário − adiantado − pago − descontado` SEM piso: fica negativo quando
+   * as parcelas somam mais que o salário do período. É o número cru, exposto
+   * pra quem precisar dele (o excedente abaixo sai daqui) — não é o que a
+   * coluna A PAGAR mostra.
    */
   saldoBruto: number
   /**
@@ -191,7 +202,9 @@ export interface SaldoFuncionario {
    * perder no clamp).
    */
   aPagar: number
-  /** Quanto passou do salário (`-saldoBruto` quando negativo, senão 0). */
+  /** Quanto passou do salário (`-saldoBruto` quando negativo, senão 0). Pode
+   * vir de adiantamento, de salário já pago, de desconto ou de qualquer
+   * combinação deles — `sujeitoDoExcedente` diz qual. */
   excedente: number
   /** Protótipo: `podePagar: aPagar>0` — só oferece "Pagar salário" se há o que pagar. */
   podePagar: boolean
@@ -200,16 +213,24 @@ export interface SaldoFuncionario {
 }
 
 /**
- * Soma os lançamentos JÁ FILTRADOS de um funcionário (ver
- * `lancamentosDoFuncionario`) e devolve o saldo. Categorias fora das duas de
- * folha são ignoradas: a API já zera `funcionario_id` fora delas
- * (api/src/routes/lancamentos.ts), mas somar por categoria — e não por "tem
- * funcionário" — mantém a conta certa mesmo se um dia outra categoria
- * passar a aceitar vínculo.
+ * Soma os lançamentos e os descontos JÁ FILTRADOS de um funcionário (ver
+ * `lancamentosDoFuncionario` e `descontosDoFuncionario`) e devolve o saldo.
+ * Categorias fora das duas de folha são ignoradas: a API já zera
+ * `funcionario_id` fora delas (api/src/routes/lancamentos.ts), mas somar por
+ * categoria — e não por "tem funcionário" — mantém a conta certa mesmo se um
+ * dia outra categoria passar a aceitar vínculo.
+ *
+ * Os descontos entram como uma lista SEPARADA, e não misturados aos
+ * lançamentos, porque são coisas diferentes no banco e no significado: os
+ * lançamentos vêm de `GET /api/lancamentos` (dinheiro que se moveu) e os
+ * descontos de `GET /api/descontos` (dinheiro que deixará de se mover).
+ * Fundi-los num array só antes de chegar aqui só criaria um lugar onde a
+ * distinção pode se perder.
  */
 export function saldoFuncionario(
   salario: number,
   lancamentosDoPeriodo: LancamentoParaFuncionario[],
+  descontosDoPeriodo: Desconto[],
 ): SaldoFuncionario {
   let adiantado = 0
   let pagoSalario = 0
@@ -218,19 +239,61 @@ export function saldoFuncionario(
     if (l.categoria === CATEGORIA_ADIANTAMENTO) adiantado += v
     else if (l.categoria === CATEGORIA_SALARIO) pagoSalario += v
   }
+  let descontado = 0
+  for (const d of descontosDoPeriodo) descontado += Number(d.valor) || 0
+
   const base = Number(salario) || 0
-  const saldoBruto = base - adiantado - pagoSalario
+  const saldoBruto = base - adiantado - pagoSalario - descontado
   const aPagar = Math.max(0, saldoBruto)
   return {
     salario: base,
     adiantado,
     pagoSalario,
+    descontado,
     saldoBruto,
     aPagar,
     excedente: Math.max(0, -saldoBruto),
     podePagar: aPagar > 0,
     quitado: aPagar <= 0,
   }
+}
+
+/**
+ * QUEM causou o excedente, para a frase da tela dizer a verdade.
+ *
+ * A mensagem exibida quando o saldo estoura era fixa — "Adiantado R$ X além
+ * do salário do período" — e nasceu num mundo onde só havia duas parcelas.
+ * Com o desconto entrando na conta ela passa a poder mentir: um funcionário
+ * com salário de R$ 2.000 e R$ 2.300 de desconto tem excedente de R$ 300 sem
+ * ter recebido um centavo adiantado. (Aliás, ela já podia mentir antes, no
+ * caso raro de um salário pago acima do salário do cadastro.)
+ *
+ * Devolve o SUJEITO da frase — 'Adiantado', 'Descontado', 'Adiantado e
+ * descontado'… — e não a frase inteira, porque a formatação do dinheiro é da
+ * tela (`money`), não daqui. A ordem é fixa (adiantado, pago, descontado)
+ * para o texto não dançar entre renders.
+ *
+ * `null` quando não há excedente — e também no caso impossível de haver
+ * excedente sem nenhuma parcela positiva (só aconteceria com salário
+ * negativo, que o banco recusa): melhor não desenhar frase nenhuma do que
+ * afirmar uma causa que não se sabe.
+ */
+export function sujeitoDoExcedente(saldo: SaldoFuncionario): string | null {
+  if (saldo.excedente <= 0) return null
+  const partes: string[] = []
+  if (saldo.adiantado > 0) partes.push('adiantado')
+  if (saldo.pagoSalario > 0) partes.push('pago')
+  if (saldo.descontado > 0) partes.push('descontado')
+  if (partes.length === 0) return null
+  // 'adiantado' / 'adiantado e pago' / 'adiantado, pago e descontado'
+  const frase = partes.length === 1
+    ? partes[0]
+    : partes.slice(0, -1).join(', ') + ' e ' + partes[partes.length - 1]
+  // Maiúscula só no fim, e não em cada parte: a frase começa com qualquer uma
+  // das três (um excedente só de desconto começa em "Descontado"), e escrever
+  // 'Adiantado' com maiúscula na origem produzia "pago e descontado" em
+  // minúscula abrindo o parágrafo.
+  return frase.charAt(0).toUpperCase() + frase.slice(1)
 }
 
 /**
@@ -250,6 +313,72 @@ export function lancamentosDoFuncionario(
     .filter(l => periodo === 'all' || periodoDe(l.data) === periodo)
     .slice()
     .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
+}
+
+/**
+ * O mesmo recorte, para os descontos: os de um funcionário dentro do período,
+ * do mais recente pro mais antigo.
+ *
+ * O FILTRO DE PERÍODO VALE IGUAL AOS ADIANTAMENTOS, e isso é o ponto: a data
+ * gravada é a da FALTA, então um desconto de março não abate o salário de
+ * agosto. Sem este filtro, trocar o mês no cabeçalho mudaria os
+ * adiantamentos e deixaria os descontos parados — e o "a pagar" passaria a
+ * ser uma conta que não bate com nenhum período.
+ */
+export function descontosDoFuncionario(
+  descontos: Desconto[],
+  funcionarioId: string,
+  periodo: string = 'all',
+): Desconto[] {
+  return descontos
+    .filter(d => String(d.funcionario_id ?? '') === String(funcionarioId))
+    .filter(d => periodo === 'all' || periodoDe(d.data) === periodo)
+    .slice()
+    .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
+}
+
+/**
+ * Uma linha do histórico expansível do funcionário. União discriminada, e não
+ * um objeto achatado com campos opcionais, porque as duas coisas NÃO são o
+ * mesmo registro: um lançamento tem categoria e descrição e move dinheiro; um
+ * desconto tem motivo e só muda quanto será pago. Achatar os dois num tipo só
+ * (`categoria?: string; motivo?: string`) faria a tela ter de adivinhar qual
+ * dos dois está lendo — e um clique abre modais diferentes.
+ *
+ * `id`, `data` e `valor` ficam no nível de cima porque são o que a lista
+ * ordena e mede, em ambos os casos.
+ */
+export type ItemHistorico =
+  | { tipo: 'lancamento'; id: string; data: string; valor: number; lancamento: LancamentoParaFuncionario }
+  | { tipo: 'desconto'; id: string; data: string; valor: number; desconto: Desconto }
+
+/**
+ * O histórico do funcionário: lançamentos e descontos do período na MESMA
+ * lista, do mais recente pro mais antigo.
+ *
+ * Recebe as duas listas JÁ FILTRADAS (por funcionário e por período) para não
+ * repetir aqui o recorte que `lancamentosDoFuncionario` e
+ * `descontosDoFuncionario` já fazem — e para o saldo e o histórico saírem
+ * comprovadamente do mesmo conjunto de registros. Se um dia divergirem, a
+ * tela mostraria uma lista que não explica o número ao lado dela.
+ *
+ * Empate de data entre um lançamento e um desconto: o lançamento vem primeiro
+ * (`sort` é estável e os lançamentos entram antes). É arbitrário, mas é
+ * determinístico — a lista não muda de ordem sozinha entre renders.
+ */
+export function historicoDoFuncionario(
+  lancamentosDoPeriodo: LancamentoParaFuncionario[],
+  descontosDoPeriodo: Desconto[],
+): ItemHistorico[] {
+  const itens: ItemHistorico[] = [
+    ...lancamentosDoPeriodo.map((l): ItemHistorico => ({
+      tipo: 'lancamento', id: l.id, data: l.data, valor: Number(l.valor) || 0, lancamento: l,
+    })),
+    ...descontosDoPeriodo.map((d): ItemHistorico => ({
+      tipo: 'desconto', id: d.id, data: d.data, valor: Number(d.valor) || 0, desconto: d,
+    })),
+  ]
+  return itens.sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
 }
 
 // REMOVIDA: `periodosComFolha`, que montava as opções do seletor de período
@@ -294,22 +423,31 @@ export interface EstatisticasFuncionarios {
   adiantadoPeriodo: number | null
   /** Salários pagos no período, todos os funcionários. `null` = indisponível. */
   pagoPeriodo: number | null
-  /** `max(0, folha − adiantado − pago)`. `null` = indisponível. */
+  /** Descontado no período, todos os funcionários. `null` = descontos indisponíveis. */
+  descontadoPeriodo: number | null
+  /** `max(0, folha − adiantado − pago − descontado)`. `null` = indisponível. */
   aPagarTotal: number | null
 }
 
 export function estatisticasFuncionarios(
   funcionarios: Funcionario[],
   lancamentos: LancamentoParaFuncionario[] | null,
+  descontos: Desconto[] | null,
   periodo: string = 'all',
 ): EstatisticasFuncionarios {
   const folhaMensal = funcionarios.reduce((soma, f) => soma + (Number(f.salario) || 0), 0)
-  if (lancamentos === null) {
+  // Basta UMA das duas listas faltar para o cartão "A pagar" virar travessão:
+  // com metade da conta em mãos ele mostraria um número maior que o real
+  // (sem os descontos) ou menor (sem os salários pagos), e nos dois casos com
+  // cara de medição. Só `quantidade` e `folhaMensal` sobrevivem — os dois
+  // saem do cadastro, que continua carregado.
+  if (lancamentos === null || descontos === null) {
     return {
       quantidade: funcionarios.length,
       folhaMensal,
       adiantadoPeriodo: null,
       pagoPeriodo: null,
+      descontadoPeriodo: null,
       aPagarTotal: null,
     }
   }
@@ -324,17 +462,29 @@ export function estatisticasFuncionarios(
     if (l.categoria === CATEGORIA_ADIANTAMENTO) adiantadoPeriodo += v
     else if (l.categoria === CATEGORIA_SALARIO) pagoPeriodo += v
   }
+  // Os descontos entram na mesma conta do cartão, com o mesmo recorte de
+  // período — um desconto de março não pode diminuir a folha de agosto. Sem
+  // filtrar por funcionário: aqui é a empresa inteira, e todo desconto tem
+  // funcionário (coluna `not null`), então não existe o caso de "desconto
+  // solto" que o `continue` acima descarta nos lançamentos.
+  let descontadoPeriodo = 0
+  for (const d of descontos) {
+    if (periodo !== 'all' && periodoDe(d.data) !== periodo) continue
+    descontadoPeriodo += Number(d.valor) || 0
+  }
   return {
     quantidade: funcionarios.length,
     folhaMensal,
     adiantadoPeriodo,
     pagoPeriodo,
+    descontadoPeriodo,
     // Piso aplicado uma vez, no agregado — e não à soma dos `aPagar` de cada
     // linha. É o que o protótipo faz (linha 2601) e o que a própria sublinha
-    // do cartão promete ("salários − adiantado − pago"): o cartão é a conta
-    // da folha inteira, não o total das dívidas individuais. Os dois só
-    // divergem quando alguém recebeu adiantado mais que o próprio salário.
-    aPagarTotal: Math.max(0, folhaMensal - adiantadoPeriodo - pagoPeriodo),
+    // do cartão promete ("salários − adiantado − pago − descontado"): o cartão
+    // é a conta da folha inteira, não o total das dívidas individuais. Os dois
+    // só divergem quando alguém recebeu adiantado (ou levou desconto) acima do
+    // próprio salário.
+    aPagarTotal: Math.max(0, folhaMensal - adiantadoPeriodo - pagoPeriodo - descontadoPeriodo),
   }
 }
 
@@ -344,23 +494,31 @@ export interface FuncionarioDerivado extends Funcionario {
   ultimoPago: string | null
   pagamento: PagamentoInfo
   /**
-   * `null` quando os lançamentos não puderam ser carregados — diferente de
-   * um saldo com `adiantado: 0`, que é um zero medido (o funcionário existe,
-   * o período foi olhado, não houve adiantamento). A tela mostra travessão
-   * num caso e R$ 0,00 no outro.
+   * `null` quando os lançamentos ou os descontos não puderam ser carregados —
+   * diferente de um saldo com `adiantado: 0`, que é um zero medido (o
+   * funcionário existe, o período foi olhado, não houve adiantamento). A tela
+   * mostra travessão num caso e R$ 0,00 no outro.
    */
   saldo: SaldoFuncionario | null
-  /** Lançamentos do período, mais recente primeiro. `null` = indisponíveis. */
-  historico: LancamentoParaFuncionario[] | null
+  /** Lançamentos E descontos do período, mais recente primeiro (ver
+   * `historicoDoFuncionario`). `null` = indisponíveis. */
+  historico: ItemHistorico[] | null
 }
 
 /**
  * Combina tudo acima pro conjunto de funcionários da tela.
  *
- * `lancamentos: null` significa "GET /api/lancamentos falhou" — o cadastro
- * (nome, cargo, salário, dia de pagamento) e o próximo pagamento continuam
- * saindo, só o que depende de lançamento vira `null`. `[]` é outra coisa:
- * carregou e não havia nada, então as somas são zero de verdade.
+ * `lancamentos: null` significa "GET /api/lancamentos falhou" e
+ * `descontos: null`, o mesmo para "GET /api/descontos" — o cadastro (nome,
+ * cargo, salário, dia de pagamento) e o próximo pagamento continuam saindo,
+ * só o que depende deles vira `null`. `[]` é outra coisa: carregou e não
+ * havia nada, então as somas são zero de verdade.
+ *
+ * BASTA UMA DAS DUAS FALTAR para o saldo inteiro virar `null`, e não só a
+ * parcela que faltou: sem os descontos, o "a pagar" seria maior que o real —
+ * e o botão "Pagar salário", que pré-preenche esse número, ofereceria o valor
+ * CHEIO de quem faltou. Que é exatamente o erro que o desconto existe para
+ * evitar. Melhor não oferecer a ação do que oferecê-la com o número errado.
  *
  * `ultimoPago` olha TODAS as épocas, não o período filtrado (protótipo,
  * linha 2565: "todas as épocas") — quando o último salário caiu não muda
@@ -369,19 +527,25 @@ export interface FuncionarioDerivado extends Funcionario {
 export function derivarFuncionarios(
   funcionarios: Funcionario[],
   lancamentos: LancamentoParaFuncionario[] | null,
+  descontos: Desconto[] | null,
   hoje: Date = new Date(),
   periodo: string = 'all',
 ): FuncionarioDerivado[] {
+  const folhaDisponivel = lancamentos !== null && descontos !== null
   return funcionarios.map(f => {
     const ultimoPago = lancamentos === null ? null : ultimoSalarioPago(lancamentos, f.id)
     const proximaData = proximoPagamento(f.dia_pag, ultimoPago, hoje)
-    const historico = lancamentos === null ? null : lancamentosDoFuncionario(lancamentos, f.id, periodo)
+    if (!folhaDisponivel) {
+      return { ...f, ultimoPago, pagamento: statusPagamento(proximaData, hoje), saldo: null, historico: null }
+    }
+    const meusLancamentos = lancamentosDoFuncionario(lancamentos!, f.id, periodo)
+    const meusDescontos = descontosDoFuncionario(descontos!, f.id, periodo)
     return {
       ...f,
       ultimoPago,
       pagamento: statusPagamento(proximaData, hoje),
-      saldo: historico === null ? null : saldoFuncionario(f.salario, historico),
-      historico,
+      saldo: saldoFuncionario(f.salario, meusLancamentos, meusDescontos),
+      historico: historicoDoFuncionario(meusLancamentos, meusDescontos),
     }
   })
 }

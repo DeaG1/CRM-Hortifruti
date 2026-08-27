@@ -7,6 +7,7 @@ import { clientes } from './routes/clientes'
 import { produtos } from './routes/produtos'
 import { fornecedores } from './routes/fornecedores'
 import { funcionarios } from './routes/funcionarios'
+import { descontos } from './routes/descontos'
 import { lancamentos } from './routes/lancamentos'
 import { entradas } from './routes/entradas'
 import { saidas } from './routes/saidas'
@@ -141,14 +142,20 @@ app.post('/api/logout', exigirSessao, async (c) => {
 app.get('/api/eu', exigirSessao, (c) =>
   c.json({ usuarioId: c.get('usuarioId'), papel: c.get('papel') }))
 
-// As oito entidades do CRM. Cada router traz sua propria exigencia de
-// permissao: clientes, produtos, fornecedores, funcionarios e lancamentos sao
-// telas de admin no design; entradas, saidas e perdas o colaborador tambem
-// acessa (`ADMIN_ONLY_SCREENS` em web/src/telas.ts).
+// As entidades do CRM. Cada router traz sua propria exigencia de
+// permissao: clientes, produtos, fornecedores, funcionarios, descontos e
+// lancamentos sao telas de admin no design; entradas, saidas e perdas o
+// colaborador tambem acessa (`ADMIN_ONLY_SCREENS` em web/src/telas.ts).
 app.route('/api/clientes', clientes)
 app.route('/api/produtos', produtos)
 app.route('/api/fornecedores', fornecedores)
 app.route('/api/funcionarios', funcionarios)
+// Descontos de salario por falta. NAO e um sub-recurso de /api/funcionarios
+// (a tela lista a equipe inteira e precisaria de uma busca por funcionario) e
+// NAO e uma categoria de /api/lancamentos: desconto nao move dinheiro, so
+// reduz o que sera pago — ver src/routes/descontos.ts e a migration 016.
+// Admin em tudo, como funcionarios e lancamentos.
+app.route('/api/descontos', descontos)
 app.route('/api/lancamentos', lancamentos)
 app.route('/api/entradas', entradas)
 app.route('/api/saidas', saidas)

@@ -7,11 +7,21 @@ import {
   parseDataIso,
   saldoFuncionario,
   lancamentosDoFuncionario,
+  descontosDoFuncionario,
+  historicoDoFuncionario,
+  sujeitoDoExcedente,
   descricaoSalario,
   estatisticasFuncionarios,
   type Funcionario,
   type LancamentoParaFuncionario,
 } from './funcionarios'
+import type { Desconto } from './descontos'
+
+/** Um desconto por falta — o registro que NAO e lancamento (nada se move
+ * quando ele e criado; a empresa e que vai pagar menos depois). */
+const desc = (over: Partial<Desconto> = {}): Desconto => ({
+  id: 'd1', funcionario_id: '1', data: '2026-06-12', motivo: 'faltou sem avisar', valor: 0, ...over,
+})
 
 const lanc = (over: Partial<LancamentoParaFuncionario> = {}): LancamentoParaFuncionario => ({
   id: 'l1', data: '2026-06-15', categoria: 'Salário', descricao: '', valor: 0,
@@ -167,7 +177,7 @@ describe('derivarFuncionarios', () => {
     const hoje = new Date(2026, 5, 10, 9, 0)
     const funcionarios = [funcionario({ id: '1', dia_pag: 5 })]
     const lancamentos = [lanc({ data: '2026-05-30', funcionario_id: '1', categoria: 'Salário' })]
-    const [d] = derivarFuncionarios(funcionarios, lancamentos, hoje)
+    const [d] = derivarFuncionarios(funcionarios, lancamentos, [], hoje)
     expect(d.ultimoPago).toBe('2026-05-30')
     expect(d.pagamento.proximaData).toBe('2026-06-05')
     expect(d.pagamento.status).toBe('atrasado')
@@ -176,27 +186,27 @@ describe('derivarFuncionarios', () => {
   it('funcionario sem nenhum lancamento nao quebra e usa o ramo "nunca pago"', () => {
     const hoje = new Date(2026, 5, 1, 9, 0)
     const funcionarios = [funcionario({ id: '9', dia_pag: 20 })]
-    const [d] = derivarFuncionarios(funcionarios, [], hoje)
+    const [d] = derivarFuncionarios(funcionarios, [], [], hoje)
     expect(d.ultimoPago).toBeNull()
     expect(d.pagamento.proximaData).toBe('2026-06-20')
   })
 
   it('preserva os campos originais do funcionario', () => {
-    const [d] = derivarFuncionarios([funcionario({ nome: 'Maria Souza' })], [])
+    const [d] = derivarFuncionarios([funcionario({ nome: 'Maria Souza' })], [], [])
     expect(d.nome).toBe('Maria Souza')
     expect(d.salario).toBe(2200)
   })
 })
 
-/* ==================== dinheiro: as quatro colunas ==================== */
+/* ==================== dinheiro: as cinco colunas ==================== */
 
-describe('saldoFuncionario — as quatro colunas', () => {
+describe('saldoFuncionario — as cinco colunas', () => {
   it('soma adiantamentos e salários pagos e devolve o que falta pagar', () => {
     const s = saldoFuncionario(2200, [
       lanc({ id: 'a', categoria: 'Adiantamento de salário', valor: 300, data: '2026-06-10' }),
       lanc({ id: 'b', categoria: 'Adiantamento de salário', valor: 200, data: '2026-06-18' }),
       lanc({ id: 'c', categoria: 'Salário', valor: 1000, data: '2026-06-05' }),
-    ])
+    ], [])
     expect(s.salario).toBe(2200)
     expect(s.adiantado).toBe(500)
     expect(s.pagoSalario).toBe(1000)
@@ -207,7 +217,7 @@ describe('saldoFuncionario — as quatro colunas', () => {
   })
 
   it('funcionário sem nenhum lançamento: zeros medidos, a pagar = salário inteiro', () => {
-    const s = saldoFuncionario(2200, [])
+    const s = saldoFuncionario(2200, [], [])
     expect(s.adiantado).toBe(0)
     expect(s.pagoSalario).toBe(0)
     expect(s.aPagar).toBe(2200)
@@ -215,14 +225,14 @@ describe('saldoFuncionario — as quatro colunas', () => {
   })
 
   it('adiantamento sem salário pago: desconta só o adiantado', () => {
-    const s = saldoFuncionario(2200, [lanc({ categoria: 'Adiantamento de salário', valor: 500 })])
+    const s = saldoFuncionario(2200, [lanc({ categoria: 'Adiantamento de salário', valor: 500 })], [])
     expect(s.adiantado).toBe(500)
     expect(s.pagoSalario).toBe(0)
     expect(s.aPagar).toBe(1700)
   })
 
   it('salário pago sem adiantamento: desconta só o pago', () => {
-    const s = saldoFuncionario(2200, [lanc({ categoria: 'Salário', valor: 2200 })])
+    const s = saldoFuncionario(2200, [lanc({ categoria: 'Salário', valor: 2200 })], [])
     expect(s.adiantado).toBe(0)
     expect(s.pagoSalario).toBe(2200)
     expect(s.aPagar).toBe(0)
@@ -231,14 +241,14 @@ describe('saldoFuncionario — as quatro colunas', () => {
   })
 
   it('ignora categorias que não são de folha', () => {
-    const s = saldoFuncionario(2200, [lanc({ categoria: 'Gasolina', valor: 900 })])
+    const s = saldoFuncionario(2200, [lanc({ categoria: 'Gasolina', valor: 900 })], [])
     expect(s.adiantado).toBe(0)
     expect(s.pagoSalario).toBe(0)
     expect(s.aPagar).toBe(2200)
   })
 
   it('adiantou mais que o salário: a pagar fica em zero (não negativo) e o excesso sai em excedente', () => {
-    const s = saldoFuncionario(2000, [lanc({ categoria: 'Adiantamento de salário', valor: 2300 })])
+    const s = saldoFuncionario(2000, [lanc({ categoria: 'Adiantamento de salário', valor: 2300 })], [])
     expect(s.saldoBruto).toBe(-300) // o número cru continua disponível
     expect(s.aPagar).toBe(0) // dívida negativa não existe
     expect(s.excedente).toBe(300)
@@ -281,7 +291,7 @@ describe('descricaoSalario', () => {
   })
 })
 
-describe('estatisticasFuncionarios — os quatro cartões', () => {
+describe('estatisticasFuncionarios — os cartões do topo', () => {
   const funcs = [funcionario({ id: '1', salario: 2200 }), funcionario({ id: '2', salario: 1800 })]
 
   it('conta, soma a folha e agrega adiantado/pago do período', () => {
@@ -289,7 +299,7 @@ describe('estatisticasFuncionarios — os quatro cartões', () => {
       lanc({ id: 'a', funcionario_id: '1', categoria: 'Adiantamento de salário', valor: 300, data: '2026-06-10' }),
       lanc({ id: 'b', funcionario_id: '2', categoria: 'Salário', valor: 1800, data: '2026-06-05' }),
       lanc({ id: 'c', funcionario_id: '1', categoria: 'Salário', valor: 2200, data: '2026-05-05' }),
-    ], '2026-06')
+    ], [], '2026-06')
     expect(st.quantidade).toBe(2)
     expect(st.folhaMensal).toBe(4000)
     expect(st.adiantadoPeriodo).toBe(300)
@@ -298,14 +308,14 @@ describe('estatisticasFuncionarios — os quatro cartões', () => {
   })
 
   it('sem nenhum lançamento no período: zeros medidos, a pagar = folha inteira', () => {
-    const st = estatisticasFuncionarios(funcs, [], '2026-06')
+    const st = estatisticasFuncionarios(funcs, [], [], '2026-06')
     expect(st.adiantadoPeriodo).toBe(0)
     expect(st.pagoPeriodo).toBe(0)
     expect(st.aPagarTotal).toBe(4000)
   })
 
   it('lançamentos indisponíveis (null): os três derivados são null, não zero', () => {
-    const st = estatisticasFuncionarios(funcs, null)
+    const st = estatisticasFuncionarios(funcs, null, null)
     expect(st.quantidade).toBe(2)
     expect(st.folhaMensal).toBe(4000) // sai do cadastro, continua disponível
     expect(st.adiantadoPeriodo).toBeNull()
@@ -316,14 +326,14 @@ describe('estatisticasFuncionarios — os quatro cartões', () => {
   it('ignora lançamento sem funcionário vinculado (custo que não é folha)', () => {
     const st = estatisticasFuncionarios(funcs, [
       lanc({ categoria: 'Salário', valor: 999, funcionario_id: null, data: '2026-06-01' }),
-    ], '2026-06')
+    ], [], '2026-06')
     expect(st.pagoPeriodo).toBe(0)
   })
 
   it('a pagar do cartão nunca fica negativo', () => {
     const st = estatisticasFuncionarios(funcs, [
       lanc({ funcionario_id: '1', categoria: 'Adiantamento de salário', valor: 9000, data: '2026-06-01' }),
-    ], '2026-06')
+    ], [], '2026-06')
     expect(st.aPagarTotal).toBe(0)
   })
 })
@@ -336,7 +346,7 @@ describe('derivarFuncionarios — saldo e histórico', () => {
       lanc({ id: 'b', funcionario_id: '1', categoria: 'Salário', valor: 500, data: '2026-06-20' }),
       lanc({ id: 'c', funcionario_id: '1', categoria: 'Salário', valor: 2200, data: '2026-05-05' }),
     ]
-    const [d] = derivarFuncionarios([funcionario({ id: '1', salario: 2200 })], ls, hoje, '2026-06')
+    const [d] = derivarFuncionarios([funcionario({ id: '1', salario: 2200 })], ls, [], hoje, '2026-06')
     expect(d.saldo?.adiantado).toBe(300)
     expect(d.saldo?.pagoSalario).toBe(500)
     expect(d.saldo?.aPagar).toBe(1400)
@@ -346,14 +356,14 @@ describe('derivarFuncionarios — saldo e histórico', () => {
   it('o último salário pago ignora o filtro de período (olha todas as épocas)', () => {
     const hoje = new Date(2026, 5, 25, 9, 0)
     const ls = [lanc({ id: 'c', funcionario_id: '1', categoria: 'Salário', valor: 2200, data: '2026-05-05' })]
-    const [d] = derivarFuncionarios([funcionario({ id: '1' })], ls, hoje, '2026-06')
+    const [d] = derivarFuncionarios([funcionario({ id: '1' })], ls, [], hoje, '2026-06')
     expect(d.ultimoPago).toBe('2026-05-05') // fora do período filtrado, mas ainda é o último
     expect(d.historico).toEqual([]) // e o histórico do período, esse sim, fica vazio
   })
 
   it('lançamentos indisponíveis (null): saldo e histórico null, cadastro e próximo pagamento intactos', () => {
     const hoje = new Date(2026, 5, 1, 9, 0)
-    const [d] = derivarFuncionarios([funcionario({ id: '1', nome: 'Maria Souza', dia_pag: 20 })], null, hoje)
+    const [d] = derivarFuncionarios([funcionario({ id: '1', nome: 'Maria Souza', dia_pag: 20 })], null, null, hoje)
     expect(d.saldo).toBeNull()
     expect(d.historico).toBeNull()
     expect(d.nome).toBe('Maria Souza')
@@ -362,9 +372,257 @@ describe('derivarFuncionarios — saldo e histórico', () => {
   })
 
   it('lista vazia é diferente de null: zeros medidos', () => {
-    const [d] = derivarFuncionarios([funcionario({ id: '1', salario: 2200 })], [], new Date(2026, 5, 1))
+    const [d] = derivarFuncionarios([funcionario({ id: '1', salario: 2200 })], [], [], new Date(2026, 5, 1))
     expect(d.saldo?.adiantado).toBe(0)
     expect(d.saldo?.aPagar).toBe(2200)
     expect(d.historico).toEqual([])
+  })
+})
+
+/* ==================== desconto de salário por falta ==================== */
+
+describe('saldoFuncionario — o desconto abate o "a pagar"', () => {
+  it('um desconto reduz o que há a pagar, e sai medido na coluna DESCONTADO', () => {
+    const s = saldoFuncionario(2200, [], [desc({ valor: 100 })])
+    expect(s.descontado).toBe(100)
+    expect(s.aPagar).toBe(2100) // 2200 − 100
+    expect(s.saldoBruto).toBe(2100)
+  })
+
+  it('vários descontos somam', () => {
+    const s = saldoFuncionario(2200, [], [
+      desc({ id: 'd1', valor: 100, data: '2026-06-02', motivo: 'faltou segunda' }),
+      desc({ id: 'd2', valor: 80, data: '2026-06-09', motivo: 'faltou terça' }),
+      desc({ id: 'd3', valor: 20.5, data: '2026-06-16', motivo: 'atraso' }),
+    ])
+    expect(s.descontado).toBe(200.5)
+    expect(s.aPagar).toBe(1999.5)
+  })
+
+  it('desconto convive com adiantamento e salário pago — as quatro parcelas na mesma conta', () => {
+    const s = saldoFuncionario(2200, [
+      lanc({ id: 'a', categoria: 'Adiantamento de salário', valor: 300 }),
+      lanc({ id: 'b', categoria: 'Salário', valor: 500 }),
+    ], [desc({ valor: 200 })])
+    expect(s.adiantado).toBe(300)
+    expect(s.pagoSalario).toBe(500)
+    expect(s.descontado).toBe(200)
+    expect(s.aPagar).toBe(1200) // 2200 − 300 − 500 − 200
+  })
+
+  it('sem desconto nenhum: zero MEDIDO, não travessão nem ausência', () => {
+    const s = saldoFuncionario(2200, [lanc({ categoria: 'Salário', valor: 200 })], [])
+    expect(s.descontado).toBe(0)
+    expect(s.aPagar).toBe(2000)
+  })
+
+  it('desconto maior que o salário: a pagar fica em zero (nunca negativo) e o excesso sai em excedente', () => {
+    const s = saldoFuncionario(2000, [], [desc({ valor: 2300 })])
+    expect(s.saldoBruto).toBe(-300)
+    expect(s.aPagar).toBe(0)
+    expect(s.excedente).toBe(300)
+    expect(s.podePagar).toBe(false)
+    expect(s.quitado).toBe(true)
+  })
+
+  it('valor não numérico não contamina a soma (mesma defesa dos lançamentos)', () => {
+    const s = saldoFuncionario(2200, [], [desc({ valor: undefined as unknown as number })])
+    expect(s.descontado).toBe(0)
+    expect(s.aPagar).toBe(2200)
+  })
+})
+
+describe('sujeitoDoExcedente — a frase do excedente tem de dizer a verdade', () => {
+  it('só adiantamento: "Adiantado" (o texto que já existia)', () => {
+    const s = saldoFuncionario(2000, [lanc({ categoria: 'Adiantamento de salário', valor: 2300 })], [])
+    expect(sujeitoDoExcedente(s)).toBe('Adiantado')
+  })
+
+  it('só desconto: "Descontado" — dizer "Adiantado" aqui seria mentira', () => {
+    const s = saldoFuncionario(2000, [], [desc({ valor: 2300 })])
+    expect(sujeitoDoExcedente(s)).toBe('Descontado')
+  })
+
+  it('só salário pago acima do salário do cadastro: "Pago"', () => {
+    const s = saldoFuncionario(2000, [lanc({ categoria: 'Salário', valor: 2300 })], [])
+    expect(sujeitoDoExcedente(s)).toBe('Pago')
+  })
+
+  it('adiantamento e desconto juntos: nomeia os dois', () => {
+    const s = saldoFuncionario(2000, [lanc({ categoria: 'Adiantamento de salário', valor: 1500 })], [desc({ valor: 900 })])
+    expect(s.excedente).toBe(400)
+    expect(sujeitoDoExcedente(s)).toBe('Adiantado e descontado')
+  })
+
+  it('as três parcelas: lista com vírgula e "e" antes da última', () => {
+    const s = saldoFuncionario(2000, [
+      lanc({ id: 'a', categoria: 'Adiantamento de salário', valor: 900 }),
+      lanc({ id: 'b', categoria: 'Salário', valor: 900 }),
+    ], [desc({ valor: 900 })])
+    expect(sujeitoDoExcedente(s)).toBe('Adiantado, pago e descontado')
+  })
+
+  it('sem excedente: null (não há frase a desenhar)', () => {
+    expect(sujeitoDoExcedente(saldoFuncionario(2200, [], [desc({ valor: 100 })]))).toBeNull()
+    expect(sujeitoDoExcedente(saldoFuncionario(2200, [], []))).toBeNull()
+  })
+})
+
+describe('descontosDoFuncionario — o mesmo recorte dos adiantamentos', () => {
+  const todos = [
+    desc({ id: 'a', funcionario_id: '1', data: '2026-06-03', valor: 100 }),
+    desc({ id: 'b', funcionario_id: '1', data: '2026-06-20', valor: 200 }),
+    desc({ id: 'c', funcionario_id: '1', data: '2026-03-10', valor: 300 }),
+    desc({ id: 'd', funcionario_id: '2', data: '2026-06-11', valor: 400 }),
+  ]
+
+  it('só os do funcionário pedido, do mais recente pro mais antigo', () => {
+    expect(descontosDoFuncionario(todos, '1').map(d => d.id)).toEqual(['b', 'a', 'c'])
+  })
+
+  it('desconto de MARÇO não entra no período de agosto (a data é a da falta)', () => {
+    expect(descontosDoFuncionario(todos, '1', '2026-08')).toEqual([])
+    expect(descontosDoFuncionario(todos, '1', '2026-03').map(d => d.id)).toEqual(['c'])
+  })
+
+  it("'all' devolve todas as épocas", () => {
+    expect(descontosDoFuncionario(todos, '1', 'all')).toHaveLength(3)
+  })
+
+  it('funcionário sem desconto devolve lista vazia (não quebra)', () => {
+    expect(descontosDoFuncionario(todos, '99')).toEqual([])
+  })
+})
+
+describe('historicoDoFuncionario — lançamentos e descontos na mesma lista', () => {
+  it('mescla os dois e ordena do mais recente pro mais antigo', () => {
+    const itens = historicoDoFuncionario(
+      [
+        lanc({ id: 'l-antigo', data: '2026-06-01', valor: 100 }),
+        lanc({ id: 'l-novo', data: '2026-06-25', valor: 200 }),
+      ],
+      [desc({ id: 'd-meio', data: '2026-06-12', valor: 80 })],
+    )
+    expect(itens.map(i => i.id)).toEqual(['l-novo', 'd-meio', 'l-antigo'])
+  })
+
+  it('cada item se identifica, e carrega o registro inteiro (o motivo do desconto inclusive)', () => {
+    const [item] = historicoDoFuncionario([], [desc({ id: 'd1', motivo: 'faltou sem avisar', valor: 80 })])
+    expect(item.tipo).toBe('desconto')
+    expect(item.valor).toBe(80)
+    if (item.tipo === 'desconto') expect(item.desconto.motivo).toBe('faltou sem avisar')
+  })
+
+  it('as duas listas vazias dão histórico vazio, não null', () => {
+    expect(historicoDoFuncionario([], [])).toEqual([])
+  })
+
+  it('empate de data: o lançamento vem primeiro (ordem estável, não aleatória)', () => {
+    const itens = historicoDoFuncionario(
+      [lanc({ id: 'l', data: '2026-06-10', valor: 1 })],
+      [desc({ id: 'd', data: '2026-06-10', valor: 1 })],
+    )
+    expect(itens.map(i => i.id)).toEqual(['l', 'd'])
+  })
+})
+
+describe('estatisticasFuncionarios — o cartão do topo acompanha o desconto', () => {
+  const funcs = [funcionario({ id: '1', salario: 2200 }), funcionario({ id: '2', salario: 1800 })]
+
+  it('soma os descontos do período e abate no "a pagar" do cartão', () => {
+    const st = estatisticasFuncionarios(funcs, [
+      lanc({ id: 'a', funcionario_id: '1', categoria: 'Adiantamento de salário', valor: 300, data: '2026-06-10' }),
+    ], [
+      desc({ id: 'd1', funcionario_id: '1', valor: 100, data: '2026-06-12' }),
+      desc({ id: 'd2', funcionario_id: '2', valor: 50, data: '2026-06-13' }),
+    ], '2026-06')
+    expect(st.descontadoPeriodo).toBe(150)
+    expect(st.aPagarTotal).toBe(3550) // 4000 − 300 − 0 − 150
+  })
+
+  it('desconto fora do período não entra na conta do cartão', () => {
+    const st = estatisticasFuncionarios(funcs, [], [
+      desc({ id: 'd1', valor: 100, data: '2026-03-12' }),
+    ], '2026-06')
+    expect(st.descontadoPeriodo).toBe(0)
+    expect(st.aPagarTotal).toBe(4000)
+  })
+
+  it('descontos indisponíveis (null): os derivados são null, não zero — nem os que dependem só de lançamento', () => {
+    // Com metade da conta em mãos, o "a pagar" sairia MAIOR que o real com
+    // cara de número medido. Travessão é a resposta honesta.
+    const st = estatisticasFuncionarios(funcs, [], null)
+    expect(st.quantidade).toBe(2)
+    expect(st.folhaMensal).toBe(4000) // sai do cadastro
+    expect(st.adiantadoPeriodo).toBeNull()
+    expect(st.pagoPeriodo).toBeNull()
+    expect(st.descontadoPeriodo).toBeNull()
+    expect(st.aPagarTotal).toBeNull()
+  })
+
+  it('lista vazia de descontos é diferente de null: zero medido', () => {
+    const st = estatisticasFuncionarios(funcs, [], [], '2026-06')
+    expect(st.descontadoPeriodo).toBe(0)
+    expect(st.aPagarTotal).toBe(4000)
+  })
+
+  it('desconto maior que a folha inteira: o cartão para em zero, nunca negativo', () => {
+    const st = estatisticasFuncionarios(funcs, [], [desc({ valor: 9000, data: '2026-06-01' })], '2026-06')
+    expect(st.aPagarTotal).toBe(0)
+  })
+})
+
+describe('derivarFuncionarios — desconto por funcionário e no histórico', () => {
+  it('anexa o desconto do período ao saldo e o registro ao histórico', () => {
+    const hoje = new Date(2026, 5, 25, 9, 0)
+    const [d] = derivarFuncionarios(
+      [funcionario({ id: '1', salario: 2200 })],
+      [lanc({ id: 'a', funcionario_id: '1', categoria: 'Adiantamento de salário', valor: 300, data: '2026-06-10' })],
+      [desc({ id: 'x', funcionario_id: '1', valor: 100, data: '2026-06-12', motivo: 'faltou' })],
+      hoje, '2026-06',
+    )
+    expect(d.saldo?.descontado).toBe(100)
+    expect(d.saldo?.aPagar).toBe(1800) // 2200 − 300 − 100
+    expect(d.historico?.map(i => i.id)).toEqual(['x', 'a'])
+  })
+
+  it('desconto de outro funcionário não entra no saldo deste', () => {
+    const [d] = derivarFuncionarios(
+      [funcionario({ id: '1', salario: 2200 })],
+      [],
+      [desc({ id: 'x', funcionario_id: '2', valor: 500, data: '2026-06-12' })],
+      new Date(2026, 5, 25), '2026-06',
+    )
+    expect(d.saldo?.descontado).toBe(0)
+    expect(d.saldo?.aPagar).toBe(2200)
+    expect(d.historico).toEqual([])
+  })
+
+  it('desconto fora do período não abate: março não diminui o salário de agosto', () => {
+    const ds = [desc({ id: 'x', funcionario_id: '1', valor: 500, data: '2026-03-12' })]
+    const [emAgosto] = derivarFuncionarios([funcionario({ id: '1', salario: 2200 })], [], ds, new Date(2026, 7, 25), '2026-08')
+    expect(emAgosto.saldo?.descontado).toBe(0)
+    expect(emAgosto.saldo?.aPagar).toBe(2200)
+
+    const [emMarco] = derivarFuncionarios([funcionario({ id: '1', salario: 2200 })], [], ds, new Date(2026, 7, 25), '2026-03')
+    expect(emMarco.saldo?.descontado).toBe(500)
+    expect(emMarco.saldo?.aPagar).toBe(1700)
+  })
+
+  it('descontos indisponíveis (null): saldo e histórico null mesmo com os lançamentos carregados', () => {
+    const [d] = derivarFuncionarios(
+      [funcionario({ id: '1', nome: 'Maria Souza', salario: 2200, dia_pag: 20 })],
+      [lanc({ id: 'a', funcionario_id: '1', categoria: 'Salário', valor: 500, data: '2026-05-30' })],
+      null,
+      new Date(2026, 5, 1, 9, 0),
+    )
+    expect(d.saldo, 'sem descontos, o "a pagar" seria maior que o real').toBeNull()
+    expect(d.historico).toBeNull()
+    // e o cadastro continua inteiro
+    expect(d.nome).toBe('Maria Souza')
+    expect(d.salario).toBe(2200)
+    expect(d.pagamento.proximaData).toBe('2026-06-20')
+    // o último salário pago não depende do desconto e continua saindo
+    expect(d.ultimoPago).toBe('2026-05-30')
   })
 })

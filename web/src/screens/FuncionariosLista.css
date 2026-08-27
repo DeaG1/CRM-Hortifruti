@@ -264,7 +264,7 @@
   white-space: nowrap;
 }
 
-/* ---------- as quatro colunas de dinheiro ---------- */
+/* ---------- as cinco colunas de dinheiro ---------- */
 
 .funcionarios-numeros {
   display: flex;
@@ -294,6 +294,12 @@
 
 .funcionarios-mono--pago {
   color: #5a584a;
+}
+
+/* Vermelho de alerta, como o valor de desconto no historico: e a unica das
+   colunas que representa dinheiro que o funcionario DEIXA de receber. */
+.funcionarios-mono--descontado {
+  color: #9a4a2e;
 }
 
 .funcionarios-numero--apagar {
@@ -356,6 +362,27 @@
 
 .funcionarios-botao-adiantar:hover {
   background: #f6efe4;
+}
+
+/* Mesma forma do botao "Adiantar" (contorno, nao preenchido: sao as acoes
+   secundarias ao lado de "Pagar salario"), com a cor de alerta que o resto da
+   tela ja usa para o que tira dinheiro do funcionario — a mesma de
+   `.funcionarios-lancamento-valor` e do selo de desconto no historico. */
+.funcionarios-botao-descontar {
+  background: #fff;
+  color: #9a4a2e;
+  border: 1px solid #e7cbbf;
+  border-radius: 8px;
+  padding: 8px 13px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+  white-space: nowrap;
+}
+
+.funcionarios-botao-descontar:hover {
+  background: #f6e4dc;
 }
 
 .funcionarios-botao-editar {

@@ -238,6 +238,16 @@ funcionarios.delete('/:id', async (c) => {
   //    alimentava `veiculo_usos` foi removida (7b841b1), linhas esquecidas la
   //    barravam a exclusao para sempre, sem nenhum caminho pelo produto para
   //    limpa-las. Ver 015_veiculo_usos_cascade.sql.
+  //  - DESCONTOS DE SALARIO (faltas): saem junto tambem.
+  //    `descontos_funcionario_fk` e `on delete cascade` (016) — e a coluna e
+  //    `not null`, entao nao havia como fazer `set null`. Um desconto sem
+  //    funcionario nao e registro de coisa nenhuma: nenhum dinheiro se moveu
+  //    por causa dele (por isso nao e um `lancamento`), ele so reduzia o "a
+  //    pagar" de alguem que nao esta mais no cadastro. O salario que chegou a
+  //    ser PAGO, esse sim, continua em `lancamentos`, com o valor liquido que
+  //    saiu de fato. `restrict` aqui repetiria o bloqueio da 015: as unicas
+  //    linhas capazes de barrar a exclusao so sao alcancaveis pela tela do
+  //    proprio funcionario que se quer excluir.
   //
   // O try/catch NAO E SOBRA depois da 015. Ele nao estava aqui, e por isso o
   // bloqueio acima chegava ao dono como 500 "erro interno". Qualquer FK

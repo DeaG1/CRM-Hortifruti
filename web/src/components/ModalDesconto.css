@@ -1,0 +1,275 @@
+/* Molde: ModalLancamento.css — mesmo layout (form curto + exclusao dentro
+   do proprio modal) e mesmas classes genericas `.modal-*`, ja compartilhadas
+   por todos os modais deste projeto. As unicas adicoes sao
+   `.modal-desconto-*`, para o que so este modal tem: o nome do funcionario
+   no cabecalho e a dica em tom de alerta (o texto explica que nada e pago
+   aqui). */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 25, 18, 0.48);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 24px;
+}
+
+.modal-card {
+  background: #fbfaf4;
+  border-radius: 16px;
+  width: 560px;
+  max-width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  margin: 0;
+}
+
+.modal-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid #e6e2d4;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fff;
+}
+
+.modal-header-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #7cb342;
+  flex: 0 0 8px;
+}
+
+.modal-header-titulo {
+  flex: 1;
+  font-family: 'Archivo', sans-serif;
+  font-weight: 700;
+  font-size: 17px;
+  color: #21331f;
+}
+
+.modal-fechar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid #e6e2d4;
+  background: #fff;
+  cursor: pointer;
+  font-size: 16px;
+  color: #8a8775;
+  line-height: 1;
+}
+
+.modal-fechar:hover {
+  background: #f3f0e6;
+}
+
+.modal-corpo {
+  flex: 1;
+  overflow-y: auto;
+  padding: 22px 24px;
+}
+
+.modal-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+}
+
+.modal-campo--full {
+  grid-column: 1 / -1;
+}
+
+.modal-rotulo {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #6a685c;
+  margin-bottom: 5px;
+  display: block;
+}
+
+.modal-input,
+.modal-select {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid #d8d3c2;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: 'Public Sans', sans-serif;
+  color: #2a2a24;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.modal-input--mono {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.modal-input:focus,
+.modal-select:focus {
+  outline: none;
+  border-color: #7cb342;
+  box-shadow: 0 0 0 3px rgba(124, 179, 66, 0.22);
+}
+
+.modal-dica {
+  background: #f6f4ec;
+  border-radius: 9px;
+  padding: 10px 13px;
+  font-size: 12px;
+  color: #6a685c;
+  line-height: 1.5;
+}
+
+.modal-erro {
+  margin: 6px 0 0;
+  background: #f6e4dc;
+  border: 1px solid #e7cbbf;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: #9a4a2e;
+  font-weight: 600;
+}
+
+.modal-erro-geral {
+  margin-top: 16px;
+}
+
+/* ---------- confirmacao de exclusao ---------- */
+
+.modal-confirma {
+  background: #fff;
+}
+
+.modal-confirma-texto {
+  font-size: 13.5px;
+  color: #4a4838;
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+/* ---------- rodape ---------- */
+
+.modal-rodape {
+  padding: 15px 24px;
+  border-top: 1px solid #e6e2d4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+}
+
+.modal-rodape-spacer {
+  flex: 1;
+}
+
+.modal-botao-cancelar {
+  background: #fff;
+  color: #4a4838;
+  border: 1px solid #d8d3c2;
+  border-radius: 9px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.modal-botao-cancelar:hover:not(:disabled) {
+  background: #f3f0e6;
+}
+
+.modal-botao-cancelar:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.modal-botao-salvar {
+  background: #5a7d3a;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 9px 22px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.modal-botao-salvar:hover:not(:disabled) {
+  background: #4a6b2e;
+}
+
+.modal-botao-salvar:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.modal-botao-excluir {
+  background: #fff;
+  color: #c2502f;
+  border: 1px solid #e7cbbf;
+  border-radius: 9px;
+  padding: 9px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.modal-botao-excluir:hover {
+  background: #f6e4dc;
+}
+
+.modal-botao-excluir-confirmar {
+  background: #c2502f;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.modal-botao-excluir-confirmar:hover:not(:disabled) {
+  background: #9a4a2e;
+}
+
+.modal-botao-excluir-confirmar:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* ---------- so deste modal ---------- */
+
+/* O nome do funcionario abaixo do titulo: este modal NAO tem seletor de
+   funcionario (ele sempre abre a partir da linha de alguem), entao o nome
+   precisa aparecer em algum lugar — senao o dono ve um formulario de
+   desconto sem saber de quem. */
+.modal-desconto-nome {
+  font-size: 12px;
+  color: #6a685c;
+  margin-top: 2px;
+}
+
+/* Tom de alerta (o mesmo de ModalPerda.css), e nao o cinza neutro da dica de
+   ModalLancamento: aqui o texto avisa que este registro NAO paga nem lanca
+   nada — so reduz o que sera pago. */
+.modal-desconto-dica {
+  background: #f6efe4;
+  border: 1px solid #ecdcc6;
+  border-radius: 9px;
+  padding: 10px 13px;
+  font-size: 12px;
+  color: #8a5a2a;
+  line-height: 1.5;
+}

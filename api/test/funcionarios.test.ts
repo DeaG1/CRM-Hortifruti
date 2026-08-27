@@ -134,7 +134,28 @@ describe('respostaDeErroPg', () => {
     })
   })
 
+  /**
+   * 23503 (violacao de FK) NAO era mapeado, e a rota DELETE nem try/catch
+   * tinha — as duas coisas juntas sao o defeito que prendeu o dono do negocio.
+   * `veiculo_usos_funcionario_fk` era `on delete restrict` (011) sobre uma
+   * tabela cuja tela foi removida (7b841b1); duas linhas esquecidas la
+   * travaram a exclusao do funcionario e a unica coisa que chegava a tela era
+   * 500 "erro interno" traduzido como "Não foi possível excluir. Tente
+   * novamente."
+   *
+   * A 015 tirou aquele bloqueio especifico (cascade), mas o mapeamento fica —
+   * ele e a rede para a proxima FK. Por isso o teste nao amarra o texto a uma
+   * causa: amarra ao que o dono precisa ler, que e a SAIDA.
+   */
+  it('23503 -> 409 com o caminho (desativar), em vez de deixar virar 500', () => {
+    const mapeado = respostaDeErroPg(erroPg('23503', 'uma_fk_qualquer'))
+    expect(mapeado?.status).toBe(409)
+    expect(mapeado?.corpo.erro).toMatch(/não pode ser excluído/i)
+    expect(mapeado?.corpo.erro).toMatch(/desative-o/i)
+    expect(mapeado?.corpo.erro).not.toMatch(/veiculo_usos/i)
+  })
+
   it('outro codigo -> null (deixa a excecao original subir)', () => {
-    expect(respostaDeErroPg(erroPg('23503'))).toBeNull()
+    expect(respostaDeErroPg(erroPg('42P01'))).toBeNull()
   })
 })

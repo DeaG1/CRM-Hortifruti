@@ -101,6 +101,40 @@ export function respostaDeErroPg(err: unknown): { corpo: { erro: string }; statu
       ?? 'dado invalido para um dos campos'
     return { corpo: { erro: mensagem }, status: 400 }
   }
+  // 23503 = violacao de chave estrangeira. Mesma rede que produtos.ts tem: se
+  // alguma FK barrar a exclusao de um funcionario, o dono precisa LER o motivo
+  // e o caminho, nao levar 500 "erro interno".
+  //
+  // Isto faltava, e custou caro. `veiculo_usos_funcionario_fk` era
+  // `on delete restrict` (011) sobre uma tabela cuja tela foi removida
+  // (7b841b1): duas linhas esquecidas ali travaram a exclusao do funcionario
+  // em producao, permanentemente, e a unica pista que o dono recebia era a
+  // mensagem generica do front. Aquele bloqueio especifico acabou — a 015
+  // passou as duas FKs de `veiculo_usos` para `cascade` — mas o tratamento
+  // fica, e de proposito NAO fala de `veiculo_usos`: ele existe para a
+  // proxima FK, a que ainda nao foi escrita.
+  //
+  // Por isso a mensagem e generica quanto a CAUSA e especifica quanto a
+  // SAIDA. A rota nao tem como traduzir o nome de uma constraint que ainda
+  // nao existe, mas a saida e sempre a mesma e e a que o dono precisa
+  // conhecer: desativar (`ativo = false`) aposenta o funcionario, tira dos
+  // seletores e preserva tudo que ja foi registrado. Excluir e outra coisa.
+  //
+  // O texto vai ACENTUADO, ao contrario do resto das mensagens desta API.
+  // Nao e descuido: esta e exibida VERBATIM na tela (ModalFuncionario.tsx
+  // mostra o corpo do 409 em vez de um texto fixo, justamente para servir a
+  // FKs que o front nao conhece). Mensagem lida pelo usuario se escreve como
+  // se le. As outras sao traduzidas no front por status e podem seguir em
+  // ASCII.
+  if (e.code === '23503') {
+    return {
+      corpo: {
+        erro: 'Este funcionário está vinculado a outros registros e não pode ser excluído. '
+          + 'Desative-o (deixe de marcar "Ativo") para tirá-lo da equipe sem perder o histórico.',
+      },
+      status: 409,
+    }
+  }
   return null
 }
 
@@ -193,11 +227,29 @@ funcionarios.put('/:id', async (c) => {
 funcionarios.delete('/:id', async (c) => {
   const id = c.req.param('id')
   if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
-  // FK de lancamentos.funcionario_id e `on delete set null` (migration
-  // 009): apagar um funcionario com lancamentos historicos nao apaga nem
-  // bloqueia os lancamentos, so desvincula. Nenhum tratamento extra
-  // necessario aqui.
-  const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
-    tx`delete from funcionarios where id = ${id} returning id`)
-  return linhas.length ? c.json({ ok: true }) : c.json({ erro: 'nao encontrado' }, 404)
+  // O QUE ACONTECE COM O QUE APONTA PARA O FUNCIONARIO:
+  //
+  //  - LANCAMENTOS (salario, adiantamento): ficam. `lancamentos_funcionario_fk`
+  //    e `on delete set null (funcionario_id)` (009/010, corrigida em 014) —
+  //    a despesa aconteceu, o dinheiro saiu, o registro financeiro continua
+  //    valido sem saber de quem era. Perde-se a atribuicao; o valor fica.
+  //  - REGISTROS DE USO DE VEICULO: saem junto. `veiculo_usos_funcionario_fk`
+  //    e `on delete cascade` desde a 015. Era `restrict`, e como a tela que
+  //    alimentava `veiculo_usos` foi removida (7b841b1), linhas esquecidas la
+  //    barravam a exclusao para sempre, sem nenhum caminho pelo produto para
+  //    limpa-las. Ver 015_veiculo_usos_cascade.sql.
+  //
+  // O try/catch NAO E SOBRA depois da 015. Ele nao estava aqui, e por isso o
+  // bloqueio acima chegava ao dono como 500 "erro interno". Qualquer FK
+  // futura que barre esta exclusao passa a virar 409 com mensagem legivel em
+  // vez de 500 — ver respostaDeErroPg acima.
+  try {
+    const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
+      tx`delete from funcionarios where id = ${id} returning id`)
+    return linhas.length ? c.json({ ok: true }) : c.json({ erro: 'nao encontrado' }, 404)
+  } catch (err) {
+    const mapeado = respostaDeErroPg(err)
+    if (mapeado) return c.json(mapeado.corpo, mapeado.status)
+    throw err
+  }
 })

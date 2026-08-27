@@ -1,0 +1,118 @@
+-- BLOQUEIO PERMANENTE EM PRODUCAO: o dono nao consegue excluir funcionario
+-- nem veiculo, e nao tem como destravar sozinho.
+--
+-- COMO APARECEU: relato do dono. Excluir um funcionario e excluir um veiculo
+-- da tela dele falhavam sempre, com a mesma mensagem ("Nao foi possivel
+-- excluir. Tente novamente." — que nao diz nada e ainda sugere que insistir
+-- resolve). Consultando as chaves estrangeiras do banco:
+--
+--   lancamentos_funcionario_fk   lancamentos    -> funcionarios   set null
+--   veiculo_usos_funcionario_fk  veiculo_usos   -> funcionarios   RESTRICT
+--   lancamentos_veiculo_fk       lancamentos    -> veiculos       set null
+--   veiculo_usos_veiculo_fk      veiculo_usos   -> veiculos       RESTRICT
+--
+-- As duas de `lancamentos` estao certas e nao barram nada (014). Quem barra
+-- sao as duas de `veiculo_usos` — e ha 2 linhas nessa tabela no tenant do
+-- dono, sobra de teste do tempo em que o controle de "pegar carro" existia,
+-- travando exatamente o funcionario e o veiculo que ele quer excluir.
+--
+-- POR QUE ELE NAO CONSEGUE DESTRAVAR: `veiculo_usos` alimentava o
+-- check-in/check-out de veiculos, REMOVIDO DA INTERFACE no commit 7b841b1.
+-- A tabela ficou (decisao registrada em 013: derrubar tabela e mudanca
+-- destrutiva que merece decisao propria do dono, e ele pediu para manter
+-- caso mude de ideia), mas nenhuma tela le ou escreve nela. Nao existe botao,
+-- lista ou formulario que chegue naquelas 2 linhas. O bloqueio, portanto, nao
+-- e "resolva a pendencia e tente de novo": e definitivo pela via do produto.
+--
+-- O RESTRICT DA 011 NAO ERA ERRADO — DEIXOU DE SER VERDADE.
+--
+-- A 011 escolheu `restrict` com um motivo explicito e bom: "apagar o carro do
+-- cadastro nao deveria apagar o historico de quem o usou (a informacao que
+-- justifica a feature inteira — 'quando chega uma multa' pode ser meses
+-- depois)". Isso valia enquanto a feature existia e alguem lia aquele
+-- historico. Nao vale mais: a feature foi usada, avaliada e recusada pelo
+-- dono, e o que ele quer registrar no carro e o CUSTO dele (013), nao a
+-- posse. Ninguem le `veiculo_usos` — nao ha rota, tela nem relatorio que
+-- toque nela.
+--
+-- Um registro de uso de um veiculo que nao existe mais no cadastro nao e
+-- historico aproveitavel: e uma linha apontando para um carro que ninguem
+-- consegue mais identificar, de uma funcionalidade que ninguem mais abre. Nao
+-- informa nada e barra uma operacao legitima. Isso e lixo que bloqueia, nao
+-- historico.
+--
+-- E QUEM QUISER PRESERVAR HISTORICO NAO DEVE EXCLUIR, DEVE DESATIVAR.
+-- `funcionarios.ativo` e `veiculos.ativo` existem exatamente para isso (009 e
+-- 011): `ativo = false` aposenta o cadastro, tira dos seletores e mantem tudo
+-- que ja foi registrado no lugar. Excluir e a operacao de quem cadastrou
+-- errado e quer o registro fora do banco — e ela precisa funcionar. Sao duas
+-- intencoes diferentes, e o sistema ja tem uma resposta para cada; era o
+-- `restrict` que estava forcando a primeira a fazer o papel da segunda.
+--
+-- CORRECAO: as duas FKs de `veiculo_usos` passam de `restrict` para
+-- `cascade`. Excluir o funcionario ou o veiculo leva junto os registros de
+-- uso dele. Nenhuma outra FK e tocada.
+--
+-- POR QUE `cascade` E NAO `set null`: as duas colunas sao `not null` na 011
+-- ("nao ha 'sem funcionario' para um uso que ja aconteceu"), entao `set null`
+-- nem seria aceito. E a linha orfa tambem nao teria leitura possivel — um uso
+-- sem carro e sem quem pegou nao e registro de coisa nenhuma.
+--
+-- ESTA MIGRATION NAO APAGA AS 2 LINHAS DE PRODUCAO. Com `cascade` elas saem
+-- sozinhas no momento em que o dono excluir o funcionario e o veiculo — que e
+-- exatamente o que ele esta tentando fazer. Apaga-las por fora seria tomar a
+-- decisao no lugar dele, e ele ainda pode desistir de excluir o cadastro (e
+-- ai as linhas continuam onde estao). Nenhum dado e apagado ou reescrito
+-- aqui: so a acao futura do banco muda, de "erro" para "leva o uso junto".
+--
+-- AS CHAVES SAO COMPOSTAS E CONTINUAM COMPOSTAS. `(tenant_id, veiculo_id)
+-- references veiculos(tenant_id, id)` — a forma que a 010 impos a todas as
+-- FKs do projeto porque a verificacao de chave estrangeira do PostgreSQL roda
+-- com os privilegios do dono da tabela referenciada e NAO esta sujeita a RLS:
+-- com uma FK simples, uma linha da empresa B referenciando um registro da
+-- empresa A e aceita em silencio. Recriar estas duas como FK simples
+-- reabriria aquele furo de isolamento. A definicao abaixo e identica a da 011
+-- exceto pela acao de delete.
+--
+-- Nao ha lista de colunas aqui, ao contrario da 014: aquela lista so existe
+-- para `set null`, que escreve nas colunas da chave. `cascade` apaga a linha
+-- inteira, entao a questao do `tenant_id` not-null nem se coloca.
+--
+-- `drop` + `add` porque nao ha `alter constraint` para trocar a acao de
+-- delete — mesmo caminho da 014. As duas rodam na mesma transacao do runner
+-- (db/migrate.mjs), de modo que nenhuma janela sem a constraint fica visivel
+-- para outra sessao.
+
+alter table veiculo_usos drop constraint veiculo_usos_funcionario_fk;
+alter table veiculo_usos add constraint veiculo_usos_funcionario_fk
+  foreign key (tenant_id, funcionario_id) references funcionarios(tenant_id, id)
+  on delete cascade;
+
+alter table veiculo_usos drop constraint veiculo_usos_veiculo_fk;
+alter table veiculo_usos add constraint veiculo_usos_veiculo_fk
+  foreign key (tenant_id, veiculo_id) references veiculos(tenant_id, id)
+  on delete cascade;
+
+-- O QUE CONTINUA `restrict` E POR QUE. As outras tres FKs `restrict` do banco
+-- apontam todas para `produtos` — `entrada_itens_produto_fk`,
+-- `saida_itens_produto_fk` e `perdas_produto_fk` — e nao sao tocadas aqui. La
+-- o bloqueio e legitimo e o raciocinio e o oposto deste: aquelas linhas nao
+-- sao etiqueta, sao o que CONSTROI o numero (saldo de estoque e preco medio
+-- sao somas sobre elas), a funcionalidade que as alimenta esta viva na tela, e
+-- o dono TEM como resolver a pendencia. Para elas a resposta certa continua
+-- sendo 409 com uma mensagem que diz o motivo e o caminho
+-- (respostaDeErroPg em api/src/routes/produtos.ts), nao cascade.
+--
+-- `clientes` e `fornecedores` foram conferidos junto e nao tem o problema:
+-- nenhuma tabela aponta para eles com `restrict`. Cliente recebe so
+-- `saidas_cliente_fk` (set null); fornecedor recebe `entradas_fornecedor_fk`
+-- (set null) e `fornecedor_produtos_fornecedor_fk` (cascade, tabela de
+-- vinculo). Excluir cliente e fornecedor nunca esteve barrado.
+--
+-- PARA REMOVER `veiculo_usos` DE VEZ (decisao do dono, migration propria), o
+-- roteiro do fim de 013 continua valendo — com uma diferenca: o item 3
+-- daquele roteiro (tirar o mapeamento de 23503 de veiculos.ts) NAO deve mais
+-- ser seguido. O tratamento de 23503 deixou de ser sobre esta tabela e passou
+-- a ser a rede geral da rota para qualquer FK que barre uma exclusao, hoje ou
+-- no futuro — ver o comentario de respostaDeErroPg em
+-- api/src/routes/veiculos.ts e o par dele em funcionarios.ts.

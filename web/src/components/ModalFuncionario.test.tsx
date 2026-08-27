@@ -275,6 +275,53 @@ describe('ModalFuncionario — exclusão pede confirmação', () => {
     expect(onExcluido).not.toHaveBeenCalled()
   })
 
+  /**
+   * O BLOQUEIO REAL: excluir funcionario falhava sempre, e a tela dizia so
+   * "Não foi possível excluir. Tente novamente." — que nao da o motivo e ainda
+   * sugere que insistir resolve. Nao resolvia: era uma FK de `veiculo_usos`,
+   * tabela cuja tela foi removida, e o dono nao tinha como limpar aquelas
+   * linhas por lugar nenhum.
+   *
+   * O que se verifica aqui e que a mensagem EXIBIDA e a que a API mandou, nao
+   * um texto fixo — e isso que faz a tela continuar correta para bloqueios que
+   * este arquivo nao conhece.
+   */
+  it('409 exibe a mensagem que a API mandou, verbatim, e nao chama onExcluido', async () => {
+    const daApi = 'Este funcionário está vinculado a outros registros e não pode ser excluído. '
+      + 'Desative-o (deixe de marcar "Ativo") para tirá-lo da equipe sem perder o histórico.'
+    mockDel.mockRejectedValue(new ErroApi(409, { erro: daApi }))
+    const onExcluido = vi.fn()
+    render(
+      <ModalFuncionario funcionario={funcionarioExistente} onSalvo={() => {}} onExcluido={onExcluido} onFechar={() => {}} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
+    expect(await screen.findByText(daApi)).toBeInTheDocument()
+    expect(screen.queryByText('Não foi possível excluir. Tente novamente.')).not.toBeInTheDocument()
+    expect(onExcluido).not.toHaveBeenCalled()
+  })
+
+  /** A FK de amanha, que este arquivo nao tem como conhecer, chega igual. */
+  it('409 com uma causa que o front nao conhece tambem chega a tela', async () => {
+    mockDel.mockRejectedValue(new ErroApi(409, { erro: 'Motivo que o front nunca viu antes.' }))
+    render(
+      <ModalFuncionario funcionario={funcionarioExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
+    expect(await screen.findByText('Motivo que o front nunca viu antes.')).toBeInTheDocument()
+  })
+
+  it('409 sem corpo utilizavel cai no texto generico, nunca num alerta em branco', async () => {
+    mockDel.mockRejectedValue(new ErroApi(409, null))
+    render(
+      <ModalFuncionario funcionario={funcionarioExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
+    expect(await screen.findByText('Não foi possível excluir. Tente novamente.')).toBeInTheDocument()
+  })
+
   it('401 na exclusao chama onSessaoExpirada', async () => {
     mockDel.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()

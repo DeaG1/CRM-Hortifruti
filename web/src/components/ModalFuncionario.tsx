@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react'
-import { api, ErroApi } from '../api/client'
+import { api, ErroApi, mensagemDeBloqueio } from '../api/client'
 import { FUNCIONARIO_NOVO, type Funcionario } from '../derive/funcionarios'
 import './ModalFuncionario.css'
 
@@ -111,7 +111,15 @@ export function ModalFuncionario({ funcionario, onSalvo, onExcluido, onFechar, o
         onSessaoExpirada?.()
         return
       }
-      setErroExclusao('Não foi possível excluir. Tente novamente.')
+      // 409 = a API recusou por uma REGRA e mandou junto o motivo e o caminho
+      // (respostaDeErroPg em api/src/routes/funcionarios.ts). Exibe o texto
+      // dela; um fixo aqui so poderia falar de bloqueios que este arquivo ja
+      // conhece, e o que prendeu o dono foi justamente um que ele nao
+      // conhecia — uma FK de `veiculo_usos`, tabela cuja tela foi removida.
+      // Ele lia so "Tente novamente." e tentar de novo dava o mesmo erro,
+      // sempre. Ver mensagemDeBloqueio em api/client.ts.
+      const mensagemDaApi = mensagemDeBloqueio(err)
+      setErroExclusao(mensagemDaApi ?? 'Não foi possível excluir. Tente novamente.')
     } finally {
       setExcluindo(false)
     }

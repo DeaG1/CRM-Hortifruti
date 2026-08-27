@@ -96,22 +96,43 @@ function placaEmBranco(placa: unknown): boolean {
  * que este arquivo tratava era `veiculo_usos_volta_apos_saida`, de uma
  * tabela que este arquivo nao escreve mais.
  *
- * 23503 tem tambem uma origem so, e ela e o residuo visivel da tabela orfa:
- * `veiculo_usos_veiculo_fk` e `on delete restrict` (011), entao um carro que
- * tenha linha de uso do tempo do check-in/check-out continua barrado na
- * exclusao. Nao e um bloqueio que a feature atual queira — a despesa por
- * veiculo usa `on delete set null` justamente para nao barrar nada (013) —
- * mas e o que o banco faz enquanto a tabela existir, e uma mensagem que
- * mente ("veiculo nao encontrado", que era o texto anterior, herdado do
- * check-in) e pior que o bloqueio. `ativo = false` segue sendo o caminho
- * para aposentar o carro sem excluir.
+ * 23503 NAO TEM MAIS ORIGEM CONHECIDA, e o tratamento fica assim mesmo.
+ *
+ * Ele nasceu apontando para uma so: `veiculo_usos_veiculo_fk` era
+ * `on delete restrict` (011), entao um carro com linha de uso do tempo do
+ * check-in/check-out ficava barrado na exclusao. So que a tela que alimentava
+ * `veiculo_usos` foi removida (7b841b1) e o dono nao tinha como limpar
+ * aquelas linhas por lugar nenhum — o bloqueio virou permanente na pratica. A
+ * 015 passou as duas FKs de `veiculo_usos` para `cascade`: os registros de uso
+ * saem junto com o veiculo, e hoje NENHUMA FK barra a exclusao de um veiculo
+ * (`lancamentos_veiculo_fk` e `set null` desde a 013, de proposito).
+ *
+ * O mapeamento continua porque ele nao e sobre `veiculo_usos` — e a rede da
+ * rota para a proxima FK, a que ainda nao foi escrita. Sem ele, o dia em que
+ * alguem adicionar uma tabela apontando para `veiculos` com `restrict`, a
+ * exclusao volta a estourar 500 "erro interno" e o dono volta a nao saber o
+ * que houve. Foi exatamente esse buraco que deixou funcionarios quebrado
+ * (nem try/catch a rota de la tinha).
+ *
+ * Por isso a mensagem e generica quanto a CAUSA e especifica quanto a SAIDA:
+ * a rota nao pode traduzir o nome de uma constraint que ainda nao existe, mas
+ * a saida e sempre a mesma — `ativo = false` aposenta o carro, tira dos
+ * seletores e preserva o que ja foi registrado.
+ *
+ * O texto vai ACENTUADO, ao contrario do resto das mensagens desta API. Nao e
+ * descuido: esta e exibida VERBATIM na tela (ModalVeiculo.tsx mostra o corpo
+ * do 409 em vez de um texto fixo, justamente para servir a FKs que o front
+ * nao conhece). Mensagem lida pelo usuario se escreve como se le.
  */
 export function respostaDeErroPg(err: unknown): { corpo: { erro: string }; status: 409 | 400 } | null {
   const e = err as { code?: string; constraint_name?: string }
   if (e.code === '23505') return { corpo: { erro: 'ja existe um veiculo com essa placa' }, status: 409 }
   if (e.code === '23503') {
     return {
-      corpo: { erro: 'este veiculo tem historico de uso registrado e nao pode ser excluido' },
+      corpo: {
+        erro: 'Este veículo está vinculado a outros registros e não pode ser excluído. '
+          + 'Desative-o (deixe de marcar "Ativo") para tirá-lo da frota sem perder o histórico.',
+      },
       status: 409,
     }
   }
@@ -216,16 +237,20 @@ veiculos.put('/:id', async (c) => {
 veiculos.delete('/:id', async (c) => {
   const id = c.req.param('id')
   if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
-  // Excluir um veiculo com LANCAMENTOS e permitido: `lancamentos_veiculo_fk`
-  // e `on delete set null` (013) — a despesa aconteceu, o dinheiro saiu, e o
-  // registro financeiro continua valido sem saber de qual carro foi. O total
-  // de custos do periodo nao pode mudar porque alguem arrumou o cadastro da
-  // frota.
+  // O QUE ACONTECE COM O QUE APONTA PARA O VEICULO:
   //
-  // Ja um veiculo com HISTORICO DE USO antigo continua barrado pelo banco
-  // (`veiculo_usos_veiculo_fk`, `on delete restrict`, migration 011) e vira
-  // 409 com mensagem propria — ver respostaDeErroPg acima e o comentario
-  // final de 013_lancamentos_veiculo.sql.
+  //  - LANCAMENTOS (gasolina, multa, manutencao): ficam. `lancamentos_veiculo_fk`
+  //    e `on delete set null (veiculo_id)` (013) — a despesa aconteceu, o
+  //    dinheiro saiu, e o registro financeiro continua valido sem saber de qual
+  //    carro foi. O total de custos do periodo nao pode mudar porque alguem
+  //    arrumou o cadastro da frota.
+  //  - REGISTROS DE USO legados: saem junto. `veiculo_usos_veiculo_fk` e
+  //    `on delete cascade` desde a 015. Era `restrict`, e como a tela que
+  //    alimentava `veiculo_usos` foi removida (7b841b1), linhas esquecidas la
+  //    barravam a exclusao para sempre. Ver 015_veiculo_usos_cascade.sql.
+  //
+  // O try/catch fica: com a 015 nenhuma FK barra mais esta exclusao, mas ele e
+  // a rede para a proxima — ver respostaDeErroPg acima.
   try {
     const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
       tx`delete from veiculos where id = ${id} returning id`)

@@ -249,16 +249,73 @@ describe('ModalVeiculo — exclusão pede confirmação', () => {
     await waitFor(() => expect(onExcluido).toHaveBeenCalledWith(veiculoExistente.id))
   })
 
-  it('400 (uso registrado, FK restrict) mostra mensagem especifica e nao chama onExcluido', async () => {
-    mockDel.mockRejectedValue(new ErroApi(400, { erro: 'veiculo nao encontrado' }))
+  /**
+   * O TESTE ANTERIOR AQUI PROVAVA O DEFEITO, NAO A CORRECAO.
+   *
+   * Ele mockava `new ErroApi(400, ...)` e conferia que o texto especifico
+   * aparecia. So que a rota devolve 409 e sempre devolveu (respostaDeErroPg em
+   * api/src/routes/veiculos.ts) — o `status === 400` do componente nunca era
+   * alcancado por um erro de verdade. O teste passava contra um mock que ele
+   * mesmo fabricava com o status errado, enquanto na producao o usuario caia
+   * no texto generico. Cobertura que confirma o bug e pior que nenhuma.
+   *
+   * Agora o mock usa o status que a API usa de fato, e o que se verifica e que
+   * a mensagem EXIBIDA e a que veio no corpo — nao um texto fixo do front. E
+   * isso que faz a tela continuar correta para bloqueios que este arquivo nao
+   * conhece.
+   */
+  it('409 exibe a mensagem que a API mandou, verbatim, e nao chama onExcluido', async () => {
+    const daApi = 'Este veículo está vinculado a outros registros e não pode ser excluído. '
+      + 'Desative-o (deixe de marcar "Ativo") para tirá-lo da frota sem perder o histórico.'
+    mockDel.mockRejectedValue(new ErroApi(409, { erro: daApi }))
     const onExcluido = vi.fn()
     render(
       <ModalVeiculo veiculo={veiculoExistente} onSalvo={() => {}} onExcluido={onExcluido} onFechar={() => {}} />,
     )
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
-    expect(await screen.findByText(/desative-o em vez de excluir/i)).toBeInTheDocument()
+    expect(await screen.findByText(daApi)).toBeInTheDocument()
+    expect(screen.queryByText('Não foi possível excluir. Tente novamente.')).not.toBeInTheDocument()
     expect(onExcluido).not.toHaveBeenCalled()
+  })
+
+  /**
+   * A prova de que nao ha texto fixo escondido: uma mensagem que este arquivo
+   * nunca viu — a FK de amanha — chega a tela do mesmo jeito. Se alguem
+   * substituir o corpo da API por uma constante aqui, este teste cai.
+   */
+  it('409 com uma causa que o front nao conhece tambem chega a tela', async () => {
+    mockDel.mockRejectedValue(new ErroApi(409, { erro: 'Motivo que o front nunca viu antes.' }))
+    render(
+      <ModalVeiculo veiculo={veiculoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
+    expect(await screen.findByText('Motivo que o front nunca viu antes.')).toBeInTheDocument()
+  })
+
+  it('409 sem corpo utilizavel cai no texto generico, nunca num alerta em branco', async () => {
+    mockDel.mockRejectedValue(new ErroApi(409, null))
+    render(
+      <ModalVeiculo veiculo={veiculoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
+    expect(await screen.findByText('Não foi possível excluir. Tente novamente.')).toBeInTheDocument()
+  })
+
+  /**
+   * O aviso de confirmacao dizia "Só é possível excluir um veículo sem nenhum
+   * uso registrado" — a regra do `restrict` da 011, morta desde a 015. Aviso
+   * que descreve regra morta manda desativar quem so queria excluir.
+   */
+  it('a confirmacao nao repete a regra morta do uso registrado; diz o que acontece com as despesas', async () => {
+    render(
+      <ModalVeiculo veiculo={veiculoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
+    expect(screen.queryByText(/uso registrado/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/continuam no histórico/i)).toBeInTheDocument()
   })
 
   it('401 na exclusao chama onSessaoExpirada', async () => {

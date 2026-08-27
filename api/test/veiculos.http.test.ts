@@ -325,18 +325,22 @@ describe('codigos de status dos handlers', () => {
 })
 
 /**
- * OS DOIS DESTINOS DE UM DELETE, e a diferenca entre eles e a decisao
- * documentada em 013_lancamentos_veiculo.sql:
+ * OS DESTINOS DE UM DELETE, e a diferenca entre eles esta nas decisoes
+ * documentadas em 013_lancamentos_veiculo.sql e 015_veiculo_usos_cascade.sql:
  *
- *  - com LANCAMENTO: passa. `lancamentos_veiculo_fk` e `on delete set null`
- *    — a despesa aconteceu e continua valendo; o que se perde e a etiqueta
- *    "de qual carro". O valor do lancamento nao pode mudar porque alguem
- *    arrumou o cadastro da frota.
- *  - com HISTORICO DE USO legado: barra. `veiculo_usos_veiculo_fk` e
- *    `on delete restrict` (011) e a tabela nao foi removida. E o residuo
- *    visivel da tabela orfa, e a mensagem tem que dizer isso.
+ *  - com LANCAMENTO: passa e o lancamento fica. `lancamentos_veiculo_fk` e
+ *    `on delete set null` — a despesa aconteceu e continua valendo; o que se
+ *    perde e a etiqueta "de qual carro". O valor do lancamento nao pode mudar
+ *    porque alguem arrumou o cadastro da frota.
+ *  - com REGISTRO DE USO legado: passa e o uso sai junto.
+ *    `veiculo_usos_veiculo_fk` era `on delete restrict` (011) e virou
+ *    `cascade` na 015. Enquanto foi restrict, uma linha na tabela orfa —
+ *    intocavel pelo produto desde que a tela saiu (7b841b1) — barrava a
+ *    exclusao para sempre.
+ *  - barrado por QUALQUER OUTRA FK: 409 com mensagem legivel, nunca 500. Hoje
+ *    nao existe nenhuma; o teste cria uma so para provar o caminho.
  */
-describe('DELETE — lancamento nao barra (set null), historico de uso legado barra (restrict)', () => {
+describe('DELETE — nem lancamento nem registro de uso barram; outra FK vira 409, nao 500', () => {
   it('excluir veiculo COM lancamento devolve 200 e zera veiculo_id, preservando o valor', async () => {
     const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'LAN-0001' })))).json()
     const [lanc] = await admin`
@@ -353,22 +357,73 @@ describe('DELETE — lancamento nao barra (set null), historico de uso legado ba
     expect(Number(depois.valor)).toBe(250)
   })
 
-  it('excluir veiculo COM historico de uso legado -> 409 com mensagem que diz o motivo', async () => {
+  it('excluir veiculo COM registro de uso legado -> 200 e o uso sai junto', async () => {
     const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'USO-0001' })))).json()
     // Inserido direto: nao ha mais rota que escreva em veiculo_usos. E
-    // exatamente o cenario de dado legado que a tabela orfa deixa para tras.
-    await admin`
+    // exatamente o cenario de dado legado que a tabela orfa deixa para tras —
+    // e era ele que travava a exclusao em producao ate a 015.
+    const [uso] = await admin`
       insert into veiculo_usos (tenant_id, veiculo_id, funcionario_id, volta_em)
-      values (${tenantId}, ${criado.id}, ${funcionarioId}, now())`
+      values (${tenantId}, ${criado.id}, ${funcionarioId}, now()) returning id`
 
     const res = await pedir(`/api/veiculos/${criado.id}`, comoAdmin({ method: 'DELETE' }))
-    expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({
-      erro: 'este veiculo tem historico de uso registrado e nao pode ser excluido',
-    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
 
     const [ainda] = await admin`select id from veiculos where id = ${criado.id}`
-    expect(ainda).toBeDefined()
+    expect(ainda).toBeUndefined()
+    const [usoDepois] = await admin`select id from veiculo_usos where id = ${uso.id}`
+    expect(usoDepois, 'o registro de uso deveria ter saido junto').toBeUndefined()
+  })
+
+  /**
+   * A REDE, e o motivo de ela existir depois da 015.
+   *
+   * Com o cascade, nenhuma FK barra mais a exclusao de um veiculo — entao nao
+   * ha como exercitar o 23503 desta rota com o esquema como ele esta. O teste
+   * CRIA uma FK `restrict` temporaria, faz o DELETE por HTTP e derruba a FK no
+   * `finally`. O que ele prova nao e um bloqueio especifico (nenhum existe):
+   * e que a rota traduz um 23503 que ela NAO CONHECE em 409 com texto
+   * legivel, em vez de deixar a excecao subir e virar 500 "erro interno".
+   *
+   * Sem esta prova, o try/catch da rota ficaria sem cobertura no dia em que a
+   * 015 removeu a unica causa conhecida — e a regressao seria invisivel ate
+   * alguem adicionar a proxima tabela e o dono levar 500 de novo. Foi
+   * exatamente esse buraco que existia em funcionarios.ts, que nem try/catch
+   * tinha.
+   *
+   * A tabela auxiliar e criada e derrubada aqui e nao interfere em outros
+   * arquivos de teste rodando em paralelo: nenhum deles insere nela, e uma FK
+   * `restrict` so barra quando existe linha referenciando a que sai.
+   */
+  it('barrado por outra FK (restrict criada aqui) -> 409 com mensagem legivel, nunca 500', async () => {
+    const criado = await (await pedir('/api/veiculos', comoAdmin(post({ placa: 'FKX-0001' })))).json()
+    await admin.unsafe(`
+      create table teste_bloqueio_veiculo (
+        id         uuid primary key default gen_random_uuid(),
+        tenant_id  uuid not null,
+        veiculo_id uuid not null,
+        constraint teste_bloqueio_veiculo_fk
+          foreign key (tenant_id, veiculo_id) references veiculos(tenant_id, id) on delete restrict
+      )`)
+    try {
+      await admin`
+        insert into teste_bloqueio_veiculo (tenant_id, veiculo_id)
+        values (${tenantId}, ${criado.id})`
+
+      const res = await pedir(`/api/veiculos/${criado.id}`, comoAdmin({ method: 'DELETE' }))
+      expect(res.status, 'FK desconhecida nao pode virar 500').toBe(409)
+      expect(res.headers.get('content-type')).toMatch(/application\/json/)
+      const corpo = await res.json()
+      // A mensagem tem que dizer o CAMINHO (desativar), nao so que falhou.
+      expect(corpo.erro).toMatch(/não pode ser excluído/i)
+      expect(corpo.erro).toMatch(/desative-o/i)
+
+      const [ainda] = await admin`select id from veiculos where id = ${criado.id}`
+      expect(ainda, 'o bloqueio e real: o veiculo continua no cadastro').toBeDefined()
+    } finally {
+      await admin.unsafe('drop table if exists teste_bloqueio_veiculo')
+    }
   })
 
   it('excluir veiculo sem nada -> 200', async () => {

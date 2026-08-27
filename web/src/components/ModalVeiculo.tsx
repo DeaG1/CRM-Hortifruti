@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react'
-import { api, ErroApi } from '../api/client'
+import { api, ErroApi, mensagemDeBloqueio } from '../api/client'
 import { VEICULO_NOVO, type Veiculo } from '../derive/veiculos'
 import './ModalVeiculo.css'
 
@@ -102,14 +102,27 @@ export function ModalVeiculo({ veiculo, onSalvo, onExcluido, onFechar, onSessaoE
         onSessaoExpirada?.()
         return
       }
-      if (err instanceof ErroApi && err.status === 400) {
-        // veiculo_usos_veiculo_fk e ON DELETE RESTRICT (migration 011): um
-        // veiculo com historico de uso nao pode ser apagado — o caminho e
-        // desativar (ativo=false), nao apagar o cadastro.
-        setErroExclusao('Este veículo tem uso registrado e não pode ser excluído. Desative-o em vez de excluir.')
-        return
-      }
-      setErroExclusao('Não foi possível excluir. Tente novamente.')
+      // 409 = a API recusou por uma REGRA, e mandou junto o motivo e o
+      // caminho. Mostra o texto dela, nao um fixo daqui.
+      //
+      // Este branch ja existiu errado de duas maneiras ao mesmo tempo, e as
+      // duas escondiam o defeito real:
+      //
+      //  1. testava `status === 400`. A rota devolve 409 (respostaDeErroPg em
+      //     api/src/routes/veiculos.ts) e sempre devolveu — entao o ramo
+      //     nunca era alcancado por um erro de verdade e o usuario caia no
+      //     texto generico abaixo. O teste que o "cobria" mockava um 400 na
+      //     mao, provando so que o branch existia.
+      //  2. o texto era fixo e nomeava a causa ("uso registrado"). A causa
+      //     mudou — `veiculo_usos` deixou de barrar na migration 015 — e um
+      //     texto fixo aqui teria continuado mentindo, agora sobre qualquer
+      //     FK futura que barrasse a exclusao.
+      //
+      // Quem sabe o que barrou e o banco, e quem traduz isso e a API. O front
+      // so precisa exibir. Assim a mensagem continua correta para bloqueios
+      // que este arquivo nao conhece e que ainda nem existem.
+      const mensagemDaApi = mensagemDeBloqueio(err)
+      setErroExclusao(mensagemDaApi ?? 'Não foi possível excluir. Tente novamente.')
     } finally {
       setExcluindo(false)
     }
@@ -138,9 +151,16 @@ export function ModalVeiculo({ veiculo, onSalvo, onExcluido, onFechar, onSessaoE
           {confirmandoExclusao ? (
             <div className="modal-confirma">
               <p className="modal-confirma-texto" role="alert">
+                {/* O texto anterior avisava "só é possível excluir um veículo sem nenhum uso
+                    registrado" — a regra do `on delete restrict` de veiculo_usos (011). Ela
+                    deixou de existir na migration 015 (cascade), e um aviso que descreve uma
+                    regra morta é pior que nenhum: manda desativar quem só quer excluir, e o
+                    faz por um motivo que não vale mais. No lugar, o mesmo que ModalFuncionario
+                    diz — o que acontece com o que já foi lançado, que é o que a pessoa
+                    realmente precisa saber antes de confirmar. */}
                 Excluir <strong>{rascunho.placa}</strong>? O cadastro será apagado definitivamente — não é
-                possível desfazer. Só é possível excluir um veículo sem nenhum uso registrado; se ele já foi
-                usado alguma vez, desative-o em vez de excluir.
+                possível desfazer. Despesas já lançadas para este veículo continuam no histórico, só
+                deixam de estar vinculadas a ele.
               </p>
               {erroExclusao && <p className="modal-erro" role="alert">{erroExclusao}</p>}
             </div>

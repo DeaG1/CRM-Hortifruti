@@ -105,11 +105,17 @@ describe('respostaDeErroPg', () => {
     })
   })
 
-  it('23503 -> 409, dizendo que e o historico de uso que barra', () => {
-    expect(respostaDeErroPg(erroPg('23503', 'veiculo_usos_veiculo_fk'))).toEqual({
-      corpo: { erro: 'este veiculo tem historico de uso registrado e nao pode ser excluido' },
-      status: 409,
-    })
+  // A mensagem NAO nomeia mais a causa. Ela nomeava `veiculo_usos`, que era a
+  // unica FK capaz de barrar — ate a 015 passar aquelas FKs para cascade. Um
+  // texto que nomeia uma causa morta mente; o que a rota tem como saber, e o
+  // que o dono precisa, e a SAIDA: desativar em vez de excluir. Ver
+  // respostaDeErroPg em src/routes/veiculos.ts.
+  it('23503 -> 409, com o caminho (desativar) e sem nomear uma causa que a rota nao conhece', () => {
+    const mapeado = respostaDeErroPg(erroPg('23503', 'uma_fk_qualquer'))
+    expect(mapeado?.status).toBe(409)
+    expect(mapeado?.corpo.erro).toMatch(/não pode ser excluído/i)
+    expect(mapeado?.corpo.erro).toMatch(/desative-o/i)
+    expect(mapeado?.corpo.erro).not.toMatch(/veiculo_usos|uso registrado/i)
   })
 
   it('23514 (CHECK) nao e mais mapeado: `veiculos` nao tem nenhuma CHECK propria', () => {

@@ -49,6 +49,14 @@ beforeAll(async () => {
   tenantId = t.id
   outroTenantId = t2.id
 
+  // veiculo_usos/veiculos/lancamentos entraram nesta limpeza junto com os
+  // testes de DELETE no fim do arquivo: uma linha sobrando de uma execucao
+  // anterior colidiria com `veiculos_placa_unica` na criacao seguinte, e um
+  // uso orfao mascararia o cenario que aqueles testes montam. A ordem segue as
+  // dependencias — o uso antes do veiculo e do funcionario que ele referencia.
+  await admin`delete from veiculo_usos where tenant_id in (${tenantId}, ${outroTenantId})`
+  await admin`delete from lancamentos where tenant_id in (${tenantId}, ${outroTenantId})`
+  await admin`delete from veiculos where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from funcionarios where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from usuarios where tenant_id in (${tenantId}, ${outroTenantId})`
 
@@ -360,6 +368,108 @@ describe('codigos de status dos handlers', () => {
       expect(res.status, `${metodo} com id malformado`).toBe(400)
       expect(res.headers.get('content-type')).toMatch(/application\/json/)
       expect(await res.json()).toEqual({ erro: 'id invalido' })
+    }
+  })
+})
+
+/**
+ * O DEFEITO QUE PRENDEU O DONO DO NEGOCIO, pela HTTP.
+ *
+ * DELETE /api/funcionarios/:id nao tinha try/catch nenhum. Qualquer erro do
+ * banco na exclusao subia cru e virava 500 "erro interno" — que o front
+ * traduzia como "Não foi possível excluir. Tente novamente.". E o erro
+ * acontecia sempre: `veiculo_usos_funcionario_fk` era `on delete restrict`
+ * (011) e a tela que alimentava `veiculo_usos` foi removida (7b841b1), entao
+ * as linhas esquecidas la eram intocaveis pelo produto. Tentar de novo dava o
+ * mesmo 500, para sempre.
+ *
+ * Sao duas correcoes distintas e os testes abaixo separam as duas:
+ *  - a 015 tirou o bloqueio (cascade), e o uso sai junto com o funcionario;
+ *  - a rota ganhou try/catch + 23503 -> 409, que e a rede para a proxima FK.
+ */
+describe('DELETE — registro de uso nao barra mais; outra FK vira 409, nao 500', () => {
+  it('excluir funcionario COM registro de uso -> 200 e o uso sai junto', async () => {
+    const criado = await (await pedir('/api/funcionarios', comoAdmin(json({ nome: 'Motorista Travado' })))).json()
+    const [v] = await admin`
+      insert into veiculos (tenant_id, placa) values (${tenantId}, 'FHT-0001') returning id`
+    // Direto no banco: nao existe mais rota que escreva em veiculo_usos — e e
+    // justamente por isso que a linha era intocavel e o bloqueio, permanente.
+    const [uso] = await admin`
+      insert into veiculo_usos (tenant_id, veiculo_id, funcionario_id, volta_em)
+      values (${tenantId}, ${v.id}, ${criado.id}, now()) returning id`
+
+    const res = await pedir(`/api/funcionarios/${criado.id}`, comoAdmin({ method: 'DELETE' }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+
+    const [usoDepois] = await admin`select id from veiculo_usos where id = ${uso.id}`
+    expect(usoDepois, 'o registro de uso deveria ter saido junto').toBeUndefined()
+    await admin`delete from veiculos where id = ${v.id}`
+  })
+
+  it('excluir funcionario COM lancamento -> 200, e o lancamento fica (sem vinculo)', async () => {
+    // Nao-regressao da 014 pela HTTP: a mesma exclusao que agora leva o uso
+    // junto nao pode levar o dinheiro junto. O valor tem que sobreviver
+    // intacto — o total do periodo nao muda porque alguem arrumou o cadastro.
+    const criado = await (await pedir('/api/funcionarios', comoAdmin(json({ nome: 'Motorista Com Salario' })))).json()
+    const [lanc] = await admin`
+      insert into lancamentos (tenant_id, data, categoria, valor, funcionario_id)
+      values (${tenantId}, current_date, 'Salário', 1900.00, ${criado.id}) returning id`
+
+    const res = await pedir(`/api/funcionarios/${criado.id}`, comoAdmin({ method: 'DELETE' }))
+    expect(res.status).toBe(200)
+
+    const [depois] = await admin`select funcionario_id, tenant_id, valor from lancamentos where id = ${lanc.id}`
+    expect(depois, 'o lancamento nao pode ter sido apagado').toBeDefined()
+    expect(depois.funcionario_id).toBeNull()
+    expect(depois.tenant_id).toBe(tenantId)
+    expect(Number(depois.valor)).toBe(1900)
+    await admin`delete from lancamentos where id = ${lanc.id}`
+  })
+
+  /**
+   * A REDE. Com a 015 nenhuma FK barra mais a exclusao de um funcionario,
+   * entao nao ha como exercitar o 23503 desta rota com o esquema como ele
+   * esta. O teste cria uma FK `restrict` temporaria e a derruba no `finally`.
+   *
+   * O que ele prova nao e um bloqueio especifico (nenhum existe): e que a rota
+   * traduz um 23503 que NAO CONHECE em 409 legivel em vez de deixar a excecao
+   * subir. Era exatamente isto que faltava — o try/catch nao existia — e sem
+   * este teste a ausencia continuaria invisivel, porque depois da 015 nenhum
+   * cenario natural chega ao catch.
+   *
+   * A tabela auxiliar nao interfere em outros arquivos rodando em paralelo:
+   * ninguem mais insere nela, e uma FK `restrict` so barra quando ha linha
+   * referenciando a que sai.
+   */
+  it('barrado por outra FK (restrict criada aqui) -> 409 com mensagem legivel, nunca 500', async () => {
+    const criado = await (await pedir('/api/funcionarios', comoAdmin(json({ nome: 'Barrado Por FK' })))).json()
+    await admin.unsafe(`
+      create table teste_bloqueio_funcionario (
+        id             uuid primary key default gen_random_uuid(),
+        tenant_id      uuid not null,
+        funcionario_id uuid not null,
+        constraint teste_bloqueio_funcionario_fk
+          foreign key (tenant_id, funcionario_id) references funcionarios(tenant_id, id) on delete restrict
+      )`)
+    try {
+      await admin`
+        insert into teste_bloqueio_funcionario (tenant_id, funcionario_id)
+        values (${tenantId}, ${criado.id})`
+
+      const res = await pedir(`/api/funcionarios/${criado.id}`, comoAdmin({ method: 'DELETE' }))
+      expect(res.status, 'FK desconhecida nao pode virar 500').toBe(409)
+      expect(res.headers.get('content-type')).toMatch(/application\/json/)
+      const corpo = await res.json()
+      // A mensagem tem que dizer o CAMINHO (desativar), nao so que falhou.
+      expect(corpo.erro).toMatch(/não pode ser excluído/i)
+      expect(corpo.erro).toMatch(/desative-o/i)
+      expect(corpo.erro).not.toMatch(/tente novamente/i)
+
+      const [ainda] = await admin`select id from funcionarios where id = ${criado.id}`
+      expect(ainda, 'o bloqueio e real: o funcionario continua no cadastro').toBeDefined()
+    } finally {
+      await admin.unsafe('drop table if exists teste_bloqueio_funcionario')
     }
   })
 })

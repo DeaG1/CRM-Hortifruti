@@ -403,7 +403,7 @@ describe('codigos de status dos handlers', () => {
   })
 })
 
-describe('regra de negocio: funcionario_id so em Salario/Adiantamento', () => {
+describe('regra de negocio: funcionario_id so em Salario/Adiantamento/Multa', () => {
   it('POST categoria Salário com funcionario_id do proprio tenant -> grava o vinculo', async () => {
     const res = await pedir('/api/lancamentos', comoAdmin(json({
       data: '2024-05-10', categoria: 'Salário', valor: 1500, funcionario_id: funcionarioId,
@@ -420,7 +420,7 @@ describe('regra de negocio: funcionario_id so em Salario/Adiantamento', () => {
     expect((await res.json()).funcionario_id).toBe(funcionarioId)
   })
 
-  it('POST categoria fora de Salario/Adiantamento com funcionario_id -> ignora (nao rejeita), grava nulo', async () => {
+  it('POST categoria fora de CATEGORIAS_COM_FUNCIONARIO com funcionario_id -> ignora (nao rejeita), grava nulo', async () => {
     const res = await pedir('/api/lancamentos', comoAdmin(json({
       ...LANCAMENTO_BASE, categoria: 'Frete', funcionario_id: funcionarioId,
     })))
@@ -669,5 +669,171 @@ describe('GET /categorias — a lista e fonte unica, e Multa entrou nela', () =>
     })))
     expect(res.status).toBe(201)
     expect((await res.json()).categoria).toBe('Multa')
+  })
+})
+
+/**
+ * MULTA E A UNICA CATEGORIA NAS DUAS LISTAS (CATEGORIAS_COM_FUNCIONARIO e
+ * CATEGORIAS_COM_VEICULO), e este describe existe para provar que as duas
+ * colunas nao se atrapalham.
+ *
+ * POR QUE MULTA VINCULA FUNCIONARIO SEM VIRAR DESCONTO DE SALARIO (016): numa
+ * falta nenhum dinheiro saiu — a empresa so vai PAGAR MENOS, e por isso o
+ * desconto nao e lancamento. Numa multa o dinheiro SAIU DE VERDADE, pago ao
+ * orgao de transito: e custo real, fica no Financeiro e no gasto do carro, e o
+ * funcionario REEMBOLSA pela folha. Mesma forma de um adiantamento.
+ */
+describe('Multa: veiculo E funcionario ao mesmo tempo', () => {
+  it('POST com os dois -> grava os dois (nenhum saneamento zera o outro)', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-10', categoria: 'Multa', valor: 293.47,
+      veiculo_id: veiculoId, funcionario_id: funcionarioId,
+    })))
+    expect(res.status).toBe(201)
+    const corpo = await res.json()
+    expect(corpo.categoria).toBe('Multa')
+    expect(corpo.veiculo_id).toBe(veiculoId)
+    expect(corpo.funcionario_id).toBe(funcionarioId)
+
+    // E o que ficou GRAVADO tem os dois — nao so o que a resposta devolveu.
+    const [linha] = await admin`select veiculo_id, funcionario_id from lancamentos where id = ${corpo.id}`
+    expect(linha.veiculo_id).toBe(veiculoId)
+    expect(linha.funcionario_id).toBe(funcionarioId)
+  })
+
+  it('POST de multa SEM funcionario continua valido — nem toda infracao tem culpado', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-11', categoria: 'Multa', valor: 130.16, veiculo_id: veiculoId,
+    })))
+    expect(res.status).toBe(201)
+    const corpo = await res.json()
+    expect(corpo.veiculo_id).toBe(veiculoId)
+    expect(corpo.funcionario_id).toBeNull()
+  })
+
+  it('POST de multa SEM veiculo tambem e valido (os dois vinculos sao opcionais)', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-12', categoria: 'Multa', valor: 88, funcionario_id: funcionarioId,
+    })))
+    expect(res.status).toBe(201)
+    const corpo = await res.json()
+    expect(corpo.funcionario_id).toBe(funcionarioId)
+    expect(corpo.veiculo_id).toBeNull()
+  })
+
+  it('PUT trocando a categoria PARA Multa mantem os dois vinculos enviados juntos', async () => {
+    const criado = await (await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-13', categoria: 'Gasolina', valor: 200, veiculo_id: veiculoId,
+    })))).json()
+    expect(criado.funcionario_id).toBeNull()
+
+    const resPut = await pedir(`/api/lancamentos/${criado.id}`, comoAdmin(jsonPut({
+      categoria: 'Multa', funcionario_id: funcionarioId, veiculo_id: veiculoId,
+    })))
+    expect(resPut.status).toBe(200)
+    const depois = await resPut.json()
+    expect(depois.veiculo_id).toBe(veiculoId)
+    expect(depois.funcionario_id).toBe(funcionarioId)
+  })
+
+  it('PUT que so envia o funcionario numa Multa nao derruba o veiculo ja gravado', async () => {
+    // Ramo `else if` do PUT (categoria ausente no corpo): so o campo enviado e
+    // reavaliado. Zerar o outro apagaria um vinculo que ninguem pediu para
+    // apagar — e aqui os dois sao legitimos ao mesmo tempo.
+    const criado = await (await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-14', categoria: 'Multa', valor: 195, veiculo_id: veiculoId,
+    })))).json()
+    expect(criado.veiculo_id).toBe(veiculoId)
+
+    const resPut = await pedir(`/api/lancamentos/${criado.id}`,
+      comoAdmin(jsonPut({ funcionario_id: funcionarioId })))
+    expect(resPut.status).toBe(200)
+    const depois = await resPut.json()
+    expect(depois.funcionario_id).toBe(funcionarioId)
+    expect(depois.veiculo_id).toBe(veiculoId)
+  })
+
+  it('PUT que so envia o veiculo numa Multa nao derruba o funcionario ja gravado', async () => {
+    const criado = await (await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-15', categoria: 'Multa', valor: 195, funcionario_id: funcionarioId,
+    })))).json()
+    expect(criado.funcionario_id).toBe(funcionarioId)
+
+    const resPut = await pedir(`/api/lancamentos/${criado.id}`,
+      comoAdmin(jsonPut({ veiculo_id: veiculoId })))
+    expect(resPut.status).toBe(200)
+    const depois = await resPut.json()
+    expect(depois.veiculo_id).toBe(veiculoId)
+    expect(depois.funcionario_id).toBe(funcionarioId)
+  })
+
+  it('PUT trocando Multa para Frete zera OS DOIS vinculos', async () => {
+    const criado = await (await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-16', categoria: 'Multa', valor: 400,
+      veiculo_id: veiculoId, funcionario_id: funcionarioId,
+    })))).json()
+    expect(criado.veiculo_id).toBe(veiculoId)
+    expect(criado.funcionario_id).toBe(funcionarioId)
+
+    const resPut = await pedir(`/api/lancamentos/${criado.id}`, comoAdmin(jsonPut({ categoria: 'Frete' })))
+    expect(resPut.status).toBe(200)
+    const depois = await resPut.json()
+    expect(depois.veiculo_id).toBeNull()
+    expect(depois.funcionario_id).toBeNull()
+  })
+
+  it('multa com funcionario de OUTRO TENANT -> 400, e nada e gravado', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-17', categoria: 'Multa', valor: 250,
+      veiculo_id: veiculoId, funcionario_id: funcionarioOutroTenantId,
+    })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'funcionario invalido' })
+    const [linha] = await admin`select id from lancamentos where funcionario_id = ${funcionarioOutroTenantId}`
+    expect(linha, 'nem com o veiculo certo o vinculo cross-tenant pode passar').toBeUndefined()
+  })
+
+  it('multa com veiculo de OUTRO TENANT -> 400, mesmo com funcionario proprio valido', async () => {
+    const res = await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-17', categoria: 'Multa', valor: 250,
+      veiculo_id: veiculoOutroTenantId, funcionario_id: funcionarioId,
+    })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'veiculo invalido' })
+    const [linha] = await admin`select id from lancamentos where veiculo_id = ${veiculoOutroTenantId}`
+    expect(linha).toBeUndefined()
+  })
+
+  it('a multa de um tenant nao aparece no GET do outro (isolamento com dois tenants de verdade)', async () => {
+    const criada = await (await pedir('/api/lancamentos', comoAdmin(json({
+      data: '2024-05-18', categoria: 'Multa', valor: 777.77,
+      veiculo_id: veiculoId, funcionario_id: funcionarioId,
+    })))).json()
+
+    // Uma sessao de admin do OUTRO tenant, criada aqui: nao basta um token
+    // diferente, tem de ser um usuario de outra empresa para o RLS ser
+    // exercitado de verdade.
+    const hash2 = await hashSenha('segredo123')
+    const [uOutro] = await admin`
+      insert into usuarios (tenant_id, email, senha_hash, nome, papel)
+      values (${outroTenantId}, 'admin@lanc-http-2.com', ${hash2}, 'Admin 2', 'admin')
+      on conflict (tenant_id, email) do update set nome = excluded.nome returning id`
+    const tokenOutro = await criarSessao(sql, uOutro.id, outroTenantId)
+    const comoOutro = (init: RequestInit = {}): RequestInit => ({
+      ...init,
+      headers: { ...init.headers, cookie: `${COOKIE_SESSAO}=${tokenOutro}` },
+    })
+
+    const lista = await (await pedir('/api/lancamentos', comoOutro())).json()
+    expect(lista.some((l: { id: string }) => l.id === criada.id)).toBe(false)
+
+    // E nem pelo id direto: 404, nao 200 com o dado da outra empresa.
+    const resDireto = await pedir(`/api/lancamentos/${criada.id}`, comoOutro())
+    expect(resDireto.status).toBe(404)
+
+    // O dono continua enxergando a propria multa, com os dois vinculos.
+    const meu = await (await pedir(`/api/lancamentos/${criada.id}`, comoAdmin())).json()
+    expect(meu.veiculo_id).toBe(veiculoId)
+    expect(meu.funcionario_id).toBe(funcionarioId)
   })
 })

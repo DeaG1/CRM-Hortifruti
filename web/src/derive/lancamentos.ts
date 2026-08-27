@@ -12,23 +12,44 @@ export interface Lancamento {
 }
 
 /**
+ * Os nomes das categorias que alguma conta do front precisa DISTINGUIR uma da
+ * outra — quem soma dinheiro por funcionário (derive/funcionarios.ts) ou por
+ * veículo (derive/veiculos.ts) não se contenta com "aceita funcionário", tem
+ * de saber qual é qual. Os dois `Set` abaixo são montados a partir destas
+ * constantes, então não há como uma divergir da outra.
+ *
+ * A LISTA FECHADA de categorias em si continua nunca sendo hardcoded no front
+ * — sempre vem de `GET /api/lancamentos/categorias`. O que mora aqui são
+ * regras de UI (qual campo exibir) e de derivação (o que somar onde).
+ */
+export const CATEGORIA_SALARIO = 'Salário'
+export const CATEGORIA_ADIANTAMENTO = 'Adiantamento de salário'
+export const CATEGORIA_GASOLINA = 'Gasolina'
+export const CATEGORIA_MANUTENCAO = 'Manutenção dos Carros'
+export const CATEGORIA_MULTA = 'Multa'
+
+/**
  * Categorias que aceitam vincular um funcionário — mesma regra de
  * `CATEGORIAS_COM_FUNCIONARIO` em api/src/routes/lancamentos.ts (nas demais
  * categorias o servidor ignora o valor enviado, não vale a pena mostrar o
  * campo). Duplicada aqui de propósito: é uma regra de UI (que campo exibir),
- * diferente da lista fechada de categorias em si, que nunca é hardcoded no
- * front — sempre vem de `GET /api/lancamentos/categorias`.
+ * diferente da lista fechada de categorias em si, que vem do servidor.
  *
- * As duas categorias também são exportadas nomeadamente
- * (CATEGORIA_SALARIO / CATEGORIA_ADIANTAMENTO) porque quem conta dinheiro
- * por funcionário (derive/funcionarios.ts) precisa distinguir uma da outra
- * — o Set diz "aceita funcionário", não diz qual é qual. É a mesma fonte: o
- * Set é montado a partir delas, então não há como uma divergir da outra.
+ * 'MULTA' ESTÁ AQUI **E** EM CATEGORIAS_COM_VEICULO, e é a única nas duas.
+ * Multa não é desconto de salário: o dinheiro SAIU DE VERDADE (foi paga ao
+ * órgão de trânsito), então ela continua sendo um lançamento — custo no
+ * Financeiro e gasto do carro na tela de Veículos — e o funcionário
+ * REEMBOLSA pela folha. É a mesma forma de um adiantamento (custo que existe
+ * + recuperação no salário), e por isso ela abate o "a pagar" em vez de
+ * virar um `Desconto` (derive/descontos.ts), que apagaria o custo.
+ *
+ * O vínculo com o funcionário é OPCIONAL: nem toda infração é atribuível a
+ * alguém, e multa sem funcionário é só custo do veículo. O raciocínio inteiro
+ * está no comentário da API, que é onde a regra é aplicada de verdade.
  */
-export const CATEGORIA_SALARIO = 'Salário'
-export const CATEGORIA_ADIANTAMENTO = 'Adiantamento de salário'
-
-export const CATEGORIAS_COM_FUNCIONARIO = new Set([CATEGORIA_SALARIO, CATEGORIA_ADIANTAMENTO])
+export const CATEGORIAS_COM_FUNCIONARIO = new Set([
+  CATEGORIA_SALARIO, CATEGORIA_ADIANTAMENTO, CATEGORIA_MULTA,
+])
 
 /**
  * As categorias que aceitam vincular um VEÍCULO — mesma regra de
@@ -50,11 +71,12 @@ export const CATEGORIAS_COM_FUNCIONARIO = new Set([CATEGORIA_SALARIO, CATEGORIA_
  * quando o frete é feito com carro próprio, o custo já aparece como a
  * gasolina e a manutenção daquele carro. Ver o comentário completo na API,
  * que é onde a regra é aplicada de verdade.
+ *
+ * As duas listas NÃO são disjuntas desde que 'Multa' passou a aceitar
+ * funcionário: uma multa tem carro (de qual veículo foi a infração) e pode ter
+ * funcionário (quem a cometeu) ao mesmo tempo, e as duas colunas são
+ * independentes no banco e no saneamento do servidor.
  */
-export const CATEGORIA_GASOLINA = 'Gasolina'
-export const CATEGORIA_MANUTENCAO = 'Manutenção dos Carros'
-export const CATEGORIA_MULTA = 'Multa'
-
 export const CATEGORIAS_COM_VEICULO_ORDEM: readonly string[] = [
   CATEGORIA_GASOLINA, CATEGORIA_MANUTENCAO, CATEGORIA_MULTA,
 ]

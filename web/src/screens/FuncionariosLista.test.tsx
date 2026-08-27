@@ -4,6 +4,7 @@ import { FuncionariosLista } from './FuncionariosLista'
 import { api, ErroApi } from '../api/client'
 import type { Funcionario } from '../derive/funcionarios'
 import type { Lancamento } from '../derive/lancamentos'
+import type { Veiculo } from '../derive/veiculos'
 import type { Desconto } from '../derive/descontos'
 
 // Mock so de `api.get/post/put/del` — mantem a classe ErroApi real (o
@@ -22,7 +23,7 @@ const mockPost = api.post as unknown as ReturnType<typeof vi.fn>
 const mockPut = api.put as unknown as ReturnType<typeof vi.fn>
 const mockDel = api.del as unknown as ReturnType<typeof vi.fn>
 
-const CATEGORIAS = ['Frete', 'Gasolina', 'Salário', 'Adiantamento de salário']
+const CATEGORIAS = ['Frete', 'Gasolina', 'Multa', 'Salário', 'Adiantamento de salário']
 
 const funcionario = (over: Partial<Funcionario> = {}): Funcionario => ({
   id: '1', nome: 'João Pereira', cargo: 'Motorista', tel: '(41) 99900-1122',
@@ -39,10 +40,64 @@ const desc = (over: Partial<Desconto> = {}): Desconto => ({
   funcionario_id: '1', ...over,
 })
 
-/** Resolve as quatro rotas que a tela busca (/api/funcionarios sozinha, e
+const veic = (over: Partial<Veiculo> = {}): Veiculo => ({
+  id: 'v-1', placa: 'ABC-1234', modelo: 'Fiorino', marca: 'Fiat', ano: 2020,
+  ativo: true, obs: '', ...over,
+})
+
+/** Uma multa vinculada ao funcionario '1' e ao carro 'v-1'. Ela e lancamento
+ * (o dinheiro saiu de verdade, foi paga ao orgao de transito) e ao mesmo
+ * tempo abate o "a pagar" de quem cometeu a infracao — como um adiantamento. */
+const multa = (over: Partial<Lancamento> = {}): Lancamento =>
+  lanc({ id: 'm1', categoria: 'Multa', data: '2026-06-12', veiculo_id: 'v-1', ...over })
+
+/** Resolve as cinco rotas que a tela busca (/api/funcionarios sozinha,
  * /api/lancamentos + /categorias + /api/descontos no Promise.all que falha
- * isolado). */
+ * isolado, e /api/veiculos sozinha — ela so etiqueta a placa da multa no
+ * historico, nao entra em conta nenhuma). */
 function mockCarga(
+  funcionarios: Funcionario[],
+  lancamentos: Lancamento[] = [],
+  descontos: Desconto[] = [],
+  veiculos: Veiculo[] = [veic()],
+) {
+  mockGet.mockImplementation((rota: string) => {
+    if (rota === '/api/funcionarios') return Promise.resolve(funcionarios)
+    if (rota === '/api/lancamentos') return Promise.resolve(lancamentos)
+    if (rota === '/api/lancamentos/categorias') return Promise.resolve(CATEGORIAS)
+    if (rota === '/api/descontos') return Promise.resolve(descontos)
+    if (rota === '/api/veiculos') return Promise.resolve(veiculos)
+    return Promise.reject(new Error('rota inesperada: ' + rota))
+  })
+}
+
+/** Mesma carga, mas com /api/lancamentos fora do ar (o cadastro continua).
+ * /api/veiculos continua respondendo de proposito: assim o unico role=status
+ * da tela e o da folha, e o teste mede a falha que ele quer medir. */
+function mockCargaSemLancamentos(funcionarios: Funcionario[]) {
+  mockGet.mockImplementation((rota: string) => {
+    if (rota === '/api/funcionarios') return Promise.resolve(funcionarios)
+    if (rota === '/api/veiculos') return Promise.resolve([veic()])
+    return Promise.reject(new Error('502'))
+  })
+}
+
+/** So /api/descontos fora do ar. As outras quatro respondem — e mesmo assim as
+ * colunas de dinheiro tem de ir para travessao: com metade da conta, o "a
+ * pagar" sairia maior que o real com cara de numero medido. */
+function mockCargaSemDescontos(funcionarios: Funcionario[], lancamentos: Lancamento[] = []) {
+  mockGet.mockImplementation((rota: string) => {
+    if (rota === '/api/funcionarios') return Promise.resolve(funcionarios)
+    if (rota === '/api/lancamentos') return Promise.resolve(lancamentos)
+    if (rota === '/api/lancamentos/categorias') return Promise.resolve(CATEGORIAS)
+    if (rota === '/api/veiculos') return Promise.resolve([veic()])
+    return Promise.reject(new Error('502'))
+  })
+}
+
+/** Tudo de pe, menos /api/veiculos. A folha inteira continua funcionando: o
+ * que se perde e so a placa ao lado da multa no historico. */
+function mockCargaSemVeiculos(
   funcionarios: Funcionario[],
   lancamentos: Lancamento[] = [],
   descontos: Desconto[] = [],
@@ -52,26 +107,6 @@ function mockCarga(
     if (rota === '/api/lancamentos') return Promise.resolve(lancamentos)
     if (rota === '/api/lancamentos/categorias') return Promise.resolve(CATEGORIAS)
     if (rota === '/api/descontos') return Promise.resolve(descontos)
-    return Promise.reject(new Error('rota inesperada: ' + rota))
-  })
-}
-
-/** Mesma carga, mas com /api/lancamentos fora do ar (o cadastro continua). */
-function mockCargaSemLancamentos(funcionarios: Funcionario[]) {
-  mockGet.mockImplementation((rota: string) => {
-    if (rota === '/api/funcionarios') return Promise.resolve(funcionarios)
-    return Promise.reject(new Error('502'))
-  })
-}
-
-/** So /api/descontos fora do ar. As outras tres respondem — e mesmo assim as
- * colunas de dinheiro tem de ir para travessao: com metade da conta, o "a
- * pagar" sairia maior que o real com cara de numero medido. */
-function mockCargaSemDescontos(funcionarios: Funcionario[], lancamentos: Lancamento[] = []) {
-  mockGet.mockImplementation((rota: string) => {
-    if (rota === '/api/funcionarios') return Promise.resolve(funcionarios)
-    if (rota === '/api/lancamentos') return Promise.resolve(lancamentos)
-    if (rota === '/api/lancamentos/categorias') return Promise.resolve(CATEGORIAS)
     return Promise.reject(new Error('502'))
   })
 }
@@ -174,7 +209,7 @@ describe('FuncionariosLista — dados exibidos', () => {
     render(<FuncionariosLista />)
     await screen.findByText('João Pereira')
     expect(
-      screen.getByText(/= salário − adiantamentos − salários pagos − descontos, no período/i),
+      screen.getByText(/= salário − adiantamentos − salários pagos − descontos − multas, no período/i),
     ).toBeInTheDocument()
   })
 })
@@ -362,7 +397,7 @@ describe('FuncionariosLista — linha expansivel', () => {
     render(<FuncionariosLista />)
     await screen.findByText('João Pereira')
     fireEvent.click(linhaDe('João Pereira'))
-    expect(screen.getByText(/Nenhum adiantamento, salário ou desconto neste período/i)).toBeInTheDocument()
+    expect(screen.getByText(/Nenhum adiantamento, salário, multa ou desconto neste período/i)).toBeInTheDocument()
     expect(screen.getByText('nunca')).toBeInTheDocument()
   })
 
@@ -418,7 +453,7 @@ describe('FuncionariosLista — Adiantar e Pagar salario', () => {
 
     await waitFor(() => expect(valorDaColuna('ADIANTADO')).toBe('R$ 400,00'))
     expect(valorDaColuna('A PAGAR')).toBe('R$ 1.800,00')
-    expect(mockGet).toHaveBeenCalledTimes(4) // so a carga inicial, nenhum refetch
+    expect(mockGet).toHaveBeenCalledTimes(5) // so a carga inicial, nenhum refetch
   })
 })
 
@@ -484,7 +519,7 @@ describe('FuncionariosLista — criar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     await waitFor(() => expect(screen.getByText('Recém-contratado')).toBeInTheDocument())
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(mockGet).toHaveBeenCalledTimes(4) // so a carga inicial, nenhum refetch
+    expect(mockGet).toHaveBeenCalledTimes(5) // so a carga inicial, nenhum refetch
   })
 })
 
@@ -727,7 +762,7 @@ describe('FuncionariosLista — o botão Descontar', () => {
     expect(valorDaColuna('A PAGAR')).toBe('R$ 2.050,00')
     expect(cartao('A pagar')).toHaveTextContent('R$ 2.050,00')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(mockGet).toHaveBeenCalledTimes(4) // so a carga inicial, nenhum refetch
+    expect(mockGet).toHaveBeenCalledTimes(5) // so a carga inicial, nenhum refetch
   })
 
   it('excluir o desconto devolve o valor ao "a pagar"', async () => {
@@ -798,7 +833,7 @@ describe('FuncionariosLista — o desconto no histórico expansível', () => {
     await screen.findByText('João Pereira')
     fireEvent.click(linhaDe('João Pereira'))
     expect(screen.queryByText('falta de março')).not.toBeInTheDocument()
-    expect(screen.getByText(/Nenhum adiantamento, salário ou desconto neste período/i)).toBeInTheDocument()
+    expect(screen.getByText(/Nenhum adiantamento, salário, multa ou desconto neste período/i)).toBeInTheDocument()
   })
 
   it('excedente vindo de DESCONTO não é anunciado como adiantamento', async () => {
@@ -887,5 +922,232 @@ describe('FuncionariosLista — /api/descontos fora do ar (falha isolada)', () =
     fireEvent.click(linhaDe('João Pereira'))
     expect(screen.getByText(/HISTÓRICO/)).toHaveTextContent('indisponível')
     expect(screen.getByText(/lançamentos não puderam ser carregados/i)).toBeInTheDocument()
+  })
+})
+
+/**
+ * A MULTA ENTRA COMO ADIANTAMENTO, NÃO COMO DESCONTO. O dinheiro já saiu (foi
+ * paga ao órgão de trânsito), então ela continua sendo lançamento — custo no
+ * Financeiro e gasto do carro em Veículos — e o funcionário reembolsa pela
+ * folha. Aqui se prova o lado da folha.
+ */
+describe('FuncionariosLista — a coluna MULTAS', () => {
+  it('a multa vinculada sai medida na coluna e abate o "a pagar"', async () => {
+    mockCarga([funcionario({ id: '1', salario: 2200 })], [multa({ valor: 350 })])
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+
+    await waitFor(() => expect(valorDaColuna('MULTAS')).toBe('R$ 350,00'))
+    expect(valorDaColuna('A PAGAR')).toBe('R$ 1.850,00') // 2200 − 350
+  })
+
+  it('a multa NÃO é somada em ADIANTADO — o rótulo diz dinheiro entregue', async () => {
+    mockCarga([funcionario({ id: '1', salario: 2200 })], [
+      lanc({ id: 'a', categoria: 'Adiantamento de salário', valor: 200, data: '2026-06-01' }),
+      multa({ valor: 350 }),
+    ])
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+
+    await waitFor(() => expect(valorDaColuna('MULTAS')).toBe('R$ 350,00'))
+    expect(valorDaColuna('ADIANTADO')).toBe('R$ 200,00')
+    expect(valorDaColuna('A PAGAR')).toBe('R$ 1.650,00') // 2200 − 200 − 350
+  })
+
+  it('sem multa nenhuma a coluna mostra R$ 0,00 — zero MEDIDO, não travessão', async () => {
+    mockCarga([funcionario({ id: '1', salario: 2200 })], [])
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+    await waitFor(() => expect(valorDaColuna('MULTAS')).toBe('R$ 0,00'))
+  })
+
+  it('sem os lançamentos, a coluna vira travessão junto com as outras', async () => {
+    mockCargaSemLancamentos([funcionario({ id: '1', salario: 2200 })])
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+    await waitFor(() => expect(valorDaColuna('MULTAS')).toBe('—'))
+  })
+
+  it('multa SEM funcionário não abate ninguém — é custo do carro, dívida de ninguém', async () => {
+    mockCarga(
+      [funcionario({ id: '1', salario: 2200 }), funcionario({ id: '2', nome: 'Maria Souza', salario: 1800 })],
+      [multa({ valor: 350, funcionario_id: null })],
+    )
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+
+    await waitFor(() => expect(screen.getAllByText('MULTAS')[0].nextElementSibling?.textContent).toBe('R$ 0,00'))
+    const multasDasLinhas = screen.getAllByText('MULTAS').map(l => l.nextElementSibling?.textContent)
+    expect(multasDasLinhas).toEqual(['R$ 0,00', 'R$ 0,00'])
+    const aPagarDasLinhas = screen.getAllByText('A PAGAR').map(l => l.nextElementSibling?.textContent)
+    expect(aPagarDasLinhas).toEqual(['R$ 2.200,00', 'R$ 1.800,00'])
+    // O cartão do topo também: a folha inteira continua devendo os R$ 4.000.
+    expect(cartao('A pagar')).toHaveTextContent('R$ 4.000,00')
+  })
+
+  it('a multa de um funcionário não abate a do outro', async () => {
+    mockCarga(
+      [funcionario({ id: '1', salario: 2200 }), funcionario({ id: '2', nome: 'Maria Souza', salario: 1800 })],
+      [multa({ valor: 350, funcionario_id: '2' })],
+    )
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('Maria Souza')
+
+    await waitFor(() => {
+      expect(screen.getAllByText('MULTAS').map(l => l.nextElementSibling?.textContent))
+        .toEqual(['R$ 0,00', 'R$ 350,00'])
+    })
+    expect(screen.getAllByText('A PAGAR').map(l => l.nextElementSibling?.textContent))
+      .toEqual(['R$ 2.200,00', 'R$ 1.450,00'])
+  })
+
+  it('multa fora do período não abate — o recorte vale igual ao dos adiantamentos', async () => {
+    mockCarga([funcionario({ id: '1', salario: 2200 })], [multa({ valor: 350, data: '2026-03-12' })])
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+
+    await waitFor(() => expect(valorDaColuna('MULTAS')).toBe('R$ 0,00'))
+    expect(valorDaColuna('A PAGAR')).toBe('R$ 2.200,00')
+    expect(cartao('A pagar')).toHaveTextContent('R$ 2.200,00')
+  })
+
+  it('o cartão "A pagar" do topo acompanha, e a sublinha descreve a conta que ele faz', async () => {
+    mockCarga([funcionario({ id: '1', salario: 2200 })], [multa({ valor: 350 })])
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+
+    await waitFor(() => expect(cartao('A pagar')).toHaveTextContent('R$ 1.850,00'))
+    expect(cartao('A pagar')).toHaveTextContent('salários − adiantado − pago − descontado − multas')
+    // E o cartão "Adiantado no período" não engoliu a multa.
+    expect(cartao('Adiantado no período')).toHaveTextContent('R$ 0,00')
+  })
+
+  it('a nota de rodapé descreve a fórmula com a multa', async () => {
+    mockCarga([funcionario()])
+    render(<FuncionariosLista />)
+    await screen.findByText('João Pereira')
+    expect(
+      screen.getByText(/= salário − adiantamentos − salários pagos − descontos − multas, no período/i),
+    ).toBeInTheDocument()
+  })
+})
+
+describe('FuncionariosLista — "Pagar salário" pré-preenche o líquido com a multa descontada', () => {
+  it('o valor sugerido já vem sem a multa', async () => {
+    mockCarga([funcionario({ id: '1', salario: 2200 })], [multa({ valor: 350 })])
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+    await waitFor(() => expect(valorDaColuna('MULTAS')).toBe('R$ 350,00'))
+
+    fireEvent.click(screen.getByRole('button', { name: /pagar salário — joão pereira/i }))
+    // 1850, não 2200: oferecer o bruto faria o dono pagar a multa duas vezes —
+    // uma ao órgão de trânsito e outra ao funcionário.
+    expect(screen.getByLabelText(/valor/i)).toHaveValue(1850)
+  })
+
+  it('com adiantamento, desconto e multa juntos o líquido é o que sobra dos quatro', async () => {
+    mockCarga(
+      [funcionario({ id: '1', salario: 2200 })],
+      [
+        lanc({ id: 'a', categoria: 'Adiantamento de salário', valor: 300, data: '2026-06-01' }),
+        lanc({ id: 'b', categoria: 'Salário', valor: 200, data: '2026-06-02' }),
+        multa({ valor: 100 }),
+      ],
+      [desc({ valor: 200, data: '2026-06-03' })],
+    )
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+    await waitFor(() => expect(valorDaColuna('A PAGAR')).toBe('R$ 1.400,00'))
+
+    fireEvent.click(screen.getByRole('button', { name: /pagar salário — joão pereira/i }))
+    expect(screen.getByLabelText(/valor/i)).toHaveValue(1400) // 2200 − 300 − 200 − 200 − 100
+  })
+
+  it('multa que estoura o salário: nada a pagar, e a frase do excedente diz que foi multa', async () => {
+    mockCarga([funcionario({ id: '1', salario: 2000 })], [multa({ valor: 2300 })])
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+
+    await waitFor(() => expect(valorDaColuna('A PAGAR')).toBe('R$ 0,00'))
+    expect(screen.queryByRole('button', { name: /pagar salário/i })).not.toBeInTheDocument()
+    fireEvent.click(linhaDe('João Pereira'))
+    const frase = screen.getByText(/além do salário do período/i)
+    expect(frase).toHaveTextContent('R$ 300,00')
+    expect(frase).toHaveTextContent(/^Multado/)
+    expect(frase).not.toHaveTextContent(/^Adiantado/)
+  })
+})
+
+describe('FuncionariosLista — a multa no histórico expansível', () => {
+  it('aparece rotulada como multa, com a placa do veículo e a descrição', async () => {
+    mockCarga(
+      [funcionario({ id: '1', salario: 2200 })],
+      [multa({ valor: 350, descricao: 'Radar da Marginal' })],
+      [],
+      [veic({ id: 'v-1', placa: 'ABC-1234' })],
+    )
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+    await waitFor(() => expect(valorDaColuna('MULTAS')).toBe('R$ 350,00'))
+    fireEvent.click(linhaDe('João Pereira'))
+
+    // O selo diz MULTA — "Adiantamento R$ 350" esconderia do dono o que ele
+    // quer justamente saber.
+    expect(screen.getByText('Multa')).toBeInTheDocument()
+    expect(screen.getByText('ABC-1234')).toBeInTheDocument()
+    expect(screen.getByText('Radar da Marginal')).toBeInTheDocument()
+    expect(screen.getByText('12/06')).toBeInTheDocument()
+  })
+
+  it('multa sem veículo não inventa placa nenhuma', async () => {
+    mockCarga([funcionario({ id: '1' })], [multa({ valor: 350, veiculo_id: null })])
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+    await waitFor(() => expect(valorDaColuna('MULTAS')).toBe('R$ 350,00'))
+    fireEvent.click(linhaDe('João Pereira'))
+
+    expect(screen.getByText('Multa')).toBeInTheDocument()
+    expect(screen.queryByText('ABC-1234')).not.toBeInTheDocument()
+  })
+
+  it('clicar na multa abre o modal de lançamento com os dois vínculos preenchidos', async () => {
+    mockCarga([funcionario({ id: '1' })], [multa({ valor: 350, descricao: 'Radar da Marginal' })])
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+    await waitFor(() => expect(valorDaColuna('MULTAS')).toBe('R$ 350,00'))
+    fireEvent.click(linhaDe('João Pereira'))
+    fireEvent.click(screen.getByText('Radar da Marginal').closest('button') as HTMLElement)
+
+    await screen.findByRole('dialog')
+    expect(screen.getByLabelText(/^categoria$/i)).toHaveValue('Multa')
+    // O `<select>` de veiculo tem a opcao de verdade: a tela buscou
+    // /api/veiculos. Sem ela o vinculo abriria como "lista indisponivel".
+    expect(screen.getByLabelText(/^veículo$/i)).toHaveValue('v-1')
+    expect(screen.getByLabelText(/^funcionário$/i)).toHaveValue('1')
+  })
+})
+
+describe('FuncionariosLista — /api/veiculos fora do ar (falha isolada)', () => {
+  it('a folha inteira continua funcionando; só a placa some, e a tela avisa', async () => {
+    mockCargaSemVeiculos([funcionario({ id: '1', salario: 2200 })], [multa({ valor: 350 })])
+    render(<FuncionariosLista periodo="2026-06" />)
+    await screen.findByText('João Pereira')
+
+    // As contas não dependem dos veículos: elas saem dos lançamentos.
+    await waitFor(() => expect(valorDaColuna('MULTAS')).toBe('R$ 350,00'))
+    expect(valorDaColuna('A PAGAR')).toBe('R$ 1.850,00')
+    expect(cartao('A pagar')).toHaveTextContent('R$ 1.850,00')
+
+    // E as ações da folha continuam oferecidas.
+    expect(screen.getByRole('button', { name: /adiantar — joão pereira/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /pagar salário — joão pereira/i })).toBeInTheDocument()
+
+    const aviso = screen.getByRole('status')
+    expect(aviso).toHaveTextContent('Não foi possível carregar os veículos')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    fireEvent.click(linhaDe('João Pereira'))
+    expect(screen.getByText('Multa')).toBeInTheDocument()
+    expect(screen.queryByText('ABC-1234')).not.toBeInTheDocument()
   })
 })

@@ -49,6 +49,33 @@ export function nomeVeiculo(v: Pick<Veiculo, 'placa' | 'marca' | 'modelo'>): str
 }
 
 /**
+ * A placa de um veículo pelo id, ou `null`. Existe para o histórico do
+ * funcionário poder dizer DE QUAL CARRO foi a multa que abateu o salário
+ * dele: "Multa R$ 350" sem a placa esconde do dono metade do registro.
+ *
+ * Os três caminhos que devolvem `null` são coisas diferentes e todos
+ * legítimos, e por isso nenhum deles é erro:
+ *
+ *   - `veiculoId` nulo/vazio: o lançamento não tem carro (a maioria deles, e
+ *     também a multa de um carro já excluído do cadastro —
+ *     `lancamentos_veiculo_fk` é `on delete set null`);
+ *   - `veiculos === null`: a lista não pôde ser carregada. A conta do "a
+ *     pagar" não depende dela, então a tela continua de pé sem a placa;
+ *   - id que não está na lista: mesma resposta honesta — não se sabe a placa.
+ *
+ * Nunca inventa texto ("veículo desconhecido"): quem exibe decide o que pôr
+ * no lugar, do mesmo jeito que decide entre R$ 0,00 e travessão.
+ */
+export function placaDeVeiculo(
+  veiculos: Pick<Veiculo, 'id' | 'placa'>[] | null,
+  veiculoId: string | null | undefined,
+): string | null {
+  if (!veiculoId || veiculos === null) return null
+  const achado = veiculos.find(v => String(v.id) === String(veiculoId))
+  return achado ? achado.placa : null
+}
+
+/**
  * Lançamentos de um veículo dentro do período, do mais recente pro mais
  * antigo — a mesma lista que alimenta o gasto e o histórico da linha
  * expandida. Espelha `lancamentosDoFuncionario` (derive/funcionarios.ts),

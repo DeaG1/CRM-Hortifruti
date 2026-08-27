@@ -1,5 +1,5 @@
 import { periodoDe } from './periodo'
-import { CATEGORIA_ADIANTAMENTO, CATEGORIA_SALARIO, type Lancamento } from './lancamentos'
+import { CATEGORIA_ADIANTAMENTO, CATEGORIA_MULTA, CATEGORIA_SALARIO, type Lancamento } from './lancamentos'
 import type { Desconto } from './descontos'
 
 /** Funcionario como a API devolve (api/src/routes/funcionarios.ts). */
@@ -168,15 +168,34 @@ export function ultimoSalarioPago(lancamentos: LancamentoParaFuncionario[], func
 /**
  * As somas do período e o que sobra delas, pra UM funcionário. Porta a conta
  * do protótipo (design/CRM Hortifruti.dc.html:2554-2557 e a nota de rodapé da
- * linha 779), com uma parcela a mais que o protótipo não tinha:
- * `a pagar = salário − adiantamentos − salários pagos − descontos, no
- * período`.
+ * linha 779), com duas parcelas a mais que o protótipo não tinha:
+ * `a pagar = salário − adiantamentos − salários pagos − descontos − multas,
+ * no período`.
  *
  * O DESCONTO ENTRA AQUI E NÃO NO FINANCEIRO. Ele não é um lançamento — nada
  * se move quando a falta é registrada, a empresa é que vai pagar menos
  * depois. Somá-lo como custo (que é o que o Financeiro faz com todo
  * lançamento) inverteria o sinal: o desconto AUMENTARIA o custo da folha em
  * vez de reduzi-lo. Ver derive/descontos.ts e a migration 016.
+ *
+ * A MULTA ENTRA NOS DOIS LUGARES, e é o oposto do desconto — não uma variação
+ * dele. O dinheiro saiu de verdade (foi paga ao órgão de trânsito), então ela
+ * É lançamento: conta como custo no Financeiro e como gasto daquele carro na
+ * tela de Veículos, integralmente, independentemente de quem reembolsa. O que
+ * o vínculo com o funcionário acrescenta é a RECUPERAÇÃO — a mesma forma de um
+ * adiantamento: custo que existe + abatimento na folha.
+ *
+ * POR QUE `multa` É UM CAMPO PRÓPRIO, e não mais uma coisa somada em
+ * `adiantado` (que é mecanicamente idêntico e pouparia uma coluna na tela):
+ *
+ *  - "adiantado" descreve dinheiro ENTREGUE ao funcionário, e multa não é
+ *    isso. Quem lê "Adiantado R$ 350" entende que a pessoa recebeu R$ 350;
+ *  - o cartão do topo se chama "Adiantado no período". Ou ele passaria a
+ *    incluir multas (e o rótulo mentiria) ou não incluiria (e discordaria da
+ *    coluna da linha, que incluiria) — os dois defeitos são piores que uma
+ *    sexta coluna;
+ *  - o dono pediu para saber DE QUEM foi a infração; separar o número é o que
+ *    responde "quanto do abatimento veio de multa" sem abrir o histórico.
  */
 export interface SaldoFuncionario {
   /** Salário do cadastro — a base da conta, não vem de lançamento. */
@@ -187,8 +206,12 @@ export interface SaldoFuncionario {
   pagoSalario: number
   /** Soma dos descontos por falta do período (tabela própria, não lançamento). */
   descontado: number
+  /** Soma dos lançamentos de 'Multa' VINCULADOS a este funcionário no período.
+   * Multa sem funcionário não entra aqui (nem em ninguém): continua sendo só
+   * custo do veículo. */
+  multa: number
   /**
-   * `salário − adiantado − pago − descontado` SEM piso: fica negativo quando
+   * `salário − adiantado − pago − descontado − multa` SEM piso: fica negativo quando
    * as parcelas somam mais que o salário do período. É o número cru, exposto
    * pra quem precisar dele (o excedente abaixo sai daqui) — não é o que a
    * coluna A PAGAR mostra.
@@ -203,8 +226,8 @@ export interface SaldoFuncionario {
    */
   aPagar: number
   /** Quanto passou do salário (`-saldoBruto` quando negativo, senão 0). Pode
-   * vir de adiantamento, de salário já pago, de desconto ou de qualquer
-   * combinação deles — `sujeitoDoExcedente` diz qual. */
+   * vir de adiantamento, de salário já pago, de desconto, de multa ou de
+   * qualquer combinação deles — `sujeitoDoExcedente` diz qual. */
   excedente: number
   /** Protótipo: `podePagar: aPagar>0` — só oferece "Pagar salário" se há o que pagar. */
   podePagar: boolean
@@ -215,10 +238,13 @@ export interface SaldoFuncionario {
 /**
  * Soma os lançamentos e os descontos JÁ FILTRADOS de um funcionário (ver
  * `lancamentosDoFuncionario` e `descontosDoFuncionario`) e devolve o saldo.
- * Categorias fora das duas de folha são ignoradas: a API já zera
- * `funcionario_id` fora delas (api/src/routes/lancamentos.ts), mas somar por
- * categoria — e não por "tem funcionário" — mantém a conta certa mesmo se um
- * dia outra categoria passar a aceitar vínculo.
+ * Categorias fora das três que abatem folha são ignoradas: a API já zera
+ * `funcionario_id` fora de CATEGORIAS_COM_FUNCIONARIO
+ * (api/src/routes/lancamentos.ts), mas somar por CATEGORIA — e não por "tem
+ * funcionário" — mantém a conta certa mesmo se um dia outra categoria passar
+ * a aceitar vínculo. Foi exatamente esse cuidado que fez a multa entrar aqui
+ * como uma parcela pensada, e não escorregar para dentro de `adiantado` só
+ * porque passou a chegar com funcionário preenchido.
  *
  * Os descontos entram como uma lista SEPARADA, e não misturados aos
  * lançamentos, porque são coisas diferentes no banco e no significado: os
@@ -234,22 +260,25 @@ export function saldoFuncionario(
 ): SaldoFuncionario {
   let adiantado = 0
   let pagoSalario = 0
+  let multa = 0
   for (const l of lancamentosDoPeriodo) {
     const v = Number(l.valor) || 0
     if (l.categoria === CATEGORIA_ADIANTAMENTO) adiantado += v
     else if (l.categoria === CATEGORIA_SALARIO) pagoSalario += v
+    else if (l.categoria === CATEGORIA_MULTA) multa += v
   }
   let descontado = 0
   for (const d of descontosDoPeriodo) descontado += Number(d.valor) || 0
 
   const base = Number(salario) || 0
-  const saldoBruto = base - adiantado - pagoSalario - descontado
+  const saldoBruto = base - adiantado - pagoSalario - descontado - multa
   const aPagar = Math.max(0, saldoBruto)
   return {
     salario: base,
     adiantado,
     pagoSalario,
     descontado,
+    multa,
     saldoBruto,
     aPagar,
     excedente: Math.max(0, -saldoBruto),
@@ -270,8 +299,8 @@ export function saldoFuncionario(
  *
  * Devolve o SUJEITO da frase — 'Adiantado', 'Descontado', 'Adiantado e
  * descontado'… — e não a frase inteira, porque a formatação do dinheiro é da
- * tela (`money`), não daqui. A ordem é fixa (adiantado, pago, descontado)
- * para o texto não dançar entre renders.
+ * tela (`money`), não daqui. A ordem é fixa (adiantado, pago, descontado,
+ * multado) para o texto não dançar entre renders.
  *
  * `null` quando não há excedente — e também no caso impossível de haver
  * excedente sem nenhuma parcela positiva (só aconteceria com salário
@@ -284,6 +313,10 @@ export function sujeitoDoExcedente(saldo: SaldoFuncionario): string | null {
   if (saldo.adiantado > 0) partes.push('adiantado')
   if (saldo.pagoSalario > 0) partes.push('pago')
   if (saldo.descontado > 0) partes.push('descontado')
+  // 'multado' pela mesma razão de 'descontado': um funcionário com R$ 2.300 de
+  // multa sobre um salário de R$ 2.000 tem excedente sem ter recebido um
+  // centavo adiantado, e a frase precisa dizer de onde o excedente veio.
+  if (saldo.multa > 0) partes.push('multado')
   if (partes.length === 0) return null
   // 'adiantado' / 'adiantado e pago' / 'adiantado, pago e descontado'
   const frase = partes.length === 1
@@ -411,8 +444,12 @@ export function descricaoSalario(hoje: Date = new Date()): string {
 
 /**
  * Os números dos quatro cartões do topo (protótipo: `funcStats`, linha
- * 2596). `null` em vez de 0 nos três que dependem de lançamento quando a
- * lista não pôde ser carregada — zero ali seria um dado inventado.
+ * 2596). `null` em vez de 0 nos que dependem de lançamento ou de desconto
+ * quando a lista não pôde ser carregada — zero ali seria um dado inventado.
+ *
+ * Nem todo campo daqui vira cartão: `pagoPeriodo`, `descontadoPeriodo` e
+ * `multaPeriodo` são as parcelas de `aPagarTotal`, expostas para a conta poder
+ * ser conferida (e testada) sem refazê-la fora.
  */
 export interface EstatisticasFuncionarios {
   /** Quantos funcionários cadastrados. */
@@ -425,7 +462,12 @@ export interface EstatisticasFuncionarios {
   pagoPeriodo: number | null
   /** Descontado no período, todos os funcionários. `null` = descontos indisponíveis. */
   descontadoPeriodo: number | null
-  /** `max(0, folha − adiantado − pago − descontado)`. `null` = indisponível. */
+  /** Multas VINCULADAS a algum funcionário no período. `null` = indisponível.
+   * Multa sem funcionário fica de fora, igual ao adiantado e ao pago: ela é
+   * custo do veículo e continua contando no Financeiro e na tela de Veículos,
+   * mas não abate a folha de ninguém. */
+  multaPeriodo: number | null
+  /** `max(0, folha − adiantado − pago − descontado − multa)`. `null` = indisponível. */
   aPagarTotal: number | null
 }
 
@@ -448,19 +490,25 @@ export function estatisticasFuncionarios(
       adiantadoPeriodo: null,
       pagoPeriodo: null,
       descontadoPeriodo: null,
+      multaPeriodo: null,
       aPagarTotal: null,
     }
   }
   let adiantadoPeriodo = 0
   let pagoPeriodo = 0
+  let multaPeriodo = 0
   for (const l of lancamentos) {
     // Só lançamento vinculado a funcionário entra — igual ao protótipo, que
-    // soma `adiantByFunc`/`salByFunc`, ambos indexados por funcionarioId.
+    // soma `adiantByFunc`/`salByFunc`, ambos indexados por funcionarioId. É
+    // este `continue` que mantém a multa SEM funcionário fora do "a pagar": ela
+    // continua sendo custo (Financeiro, e o gasto do carro na tela de
+    // Veículos), só não é dívida de ninguém.
     if (!String(l.funcionario_id ?? '')) continue
     if (periodo !== 'all' && periodoDe(l.data) !== periodo) continue
     const v = Number(l.valor) || 0
     if (l.categoria === CATEGORIA_ADIANTAMENTO) adiantadoPeriodo += v
     else if (l.categoria === CATEGORIA_SALARIO) pagoPeriodo += v
+    else if (l.categoria === CATEGORIA_MULTA) multaPeriodo += v
   }
   // Os descontos entram na mesma conta do cartão, com o mesmo recorte de
   // período — um desconto de março não pode diminuir a folha de agosto. Sem
@@ -478,13 +526,16 @@ export function estatisticasFuncionarios(
     adiantadoPeriodo,
     pagoPeriodo,
     descontadoPeriodo,
+    multaPeriodo,
     // Piso aplicado uma vez, no agregado — e não à soma dos `aPagar` de cada
     // linha. É o que o protótipo faz (linha 2601) e o que a própria sublinha
-    // do cartão promete ("salários − adiantado − pago − descontado"): o cartão
-    // é a conta da folha inteira, não o total das dívidas individuais. Os dois
-    // só divergem quando alguém recebeu adiantado (ou levou desconto) acima do
-    // próprio salário.
-    aPagarTotal: Math.max(0, folhaMensal - adiantadoPeriodo - pagoPeriodo - descontadoPeriodo),
+    // do cartão promete ("salários − adiantado − pago − descontado − multas"):
+    // o cartão é a conta da folha inteira, não o total das dívidas
+    // individuais. Os dois só divergem quando alguém recebeu adiantado (ou
+    // levou desconto ou multa) acima do próprio salário.
+    aPagarTotal: Math.max(
+      0, folhaMensal - adiantadoPeriodo - pagoPeriodo - descontadoPeriodo - multaPeriodo,
+    ),
   }
 }
 

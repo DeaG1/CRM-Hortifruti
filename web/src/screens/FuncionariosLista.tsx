@@ -9,7 +9,11 @@ import {
   type FuncionarioDerivado,
 } from '../derive/funcionarios'
 import { rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
-import { CATEGORIA_ADIANTAMENTO, CATEGORIA_SALARIO, type Lancamento } from '../derive/lancamentos'
+import {
+  CATEGORIA_ADIANTAMENTO, CATEGORIA_MULTA, CATEGORIA_SALARIO, type Lancamento,
+} from '../derive/lancamentos'
+import { placaDeVeiculo, type Veiculo } from '../derive/veiculos'
+import { dataBrCurta } from '../derive/pagamento'
 import type { Desconto } from '../derive/descontos'
 import { ModalFuncionario } from '../components/ModalFuncionario'
 import { ModalLancamento } from '../components/ModalLancamento'
@@ -37,27 +41,32 @@ const money = (n: number) => 'R$ ' + n.toLocaleString('pt-BR', { minimumFraction
  * R$ 0,00 normalmente. */
 const moneyOuTraco = (n: number | null) => (n === null ? '—' : money(n))
 
+/** 'AAAA-MM-DD' -> 'DD/MM', via `dataBrCurta` (derive/pagamento.ts) — o mesmo
+ * formatador curto que estoque e memória de preço usam. A string crua volta
+ * quando a data não bate o formato: aqui ela vem sempre da API, e um segundo
+ * formatador só para o caso impossível seria a duplicação que este reuso
+ * desfaz. */
 function formatarDataBr(iso: string): string {
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return m ? `${m[3]}/${m[2]}` : iso
+  return dataBrCurta(iso) ?? iso
 }
 
 /**
- * Lista de veículos VAZIA para o ModalLancamento, e é uma decisão, não um
- * esquecimento (a prop é obrigatória justamente para forçar a decisão).
+ * Lista vazia de veículos para o ModalLancamento quando /api/veiculos não
+ * pôde ser carregado. Constante de módulo (não `[]` inline) para não criar um
+ * array novo a cada render e remontar o `<select>` à toa.
  *
- * Esta tela só abre o modal a partir de Adiantar, Pagar salário ou de uma
- * linha do histórico do funcionário — sempre em categoria de folha, onde o
- * campo de veículo nem é exibido. Não há vínculo de veículo a perder aqui.
+ * ESTA TELA PASSOU A BUSCAR OS VEÍCULOS, e a decisão anterior (nunca buscar,
+ * passar sempre `[]`) caiu porque o problema mudou, não porque estava errada.
+ * Ela valia enquanto o histórico do funcionário só podia conter salário e
+ * adiantamento — categorias sem carro nenhum. Com 'Multa' aceitando os dois
+ * vínculos, o histórico passou a conter lançamentos DE VEÍCULO, e o dono quer
+ * ver de qual carro foi a infração que abateu o salário.
  *
- * Buscar /api/veiculos só pelo caso de alguém trocar a categoria para
- * Gasolina dentro do modal acoplaria a folha à frota: uma queda de
- * /api/veiculos derrubaria os botões Adiantar e Pagar salário, que não têm
- * nada a ver com carro. Quem quer lançar gasolina tem a tela de Veículos e a
- * de Lançamentos, as duas com a lista completa.
- *
- * Constante de módulo (não `[]` inline) para não criar um array novo a cada
- * render e remontar o `<select>` à toa.
+ * O que se preservou da decisão antiga é o motivo dela: a folha não pode
+ * depender da frota. Por isso a busca é um `useEffect` PRÓPRIO, que falha
+ * sozinho — /api/veiculos fora do ar tira a placa do histórico e nada mais.
+ * Adiantar, Pagar salário, Descontar e o "a pagar" (que sai dos lançamentos,
+ * não dos veículos) continuam de pé.
  */
 const VEICULOS_NENHUM: never[] = []
 
@@ -72,10 +81,14 @@ function corAPagar(saldo: FuncionarioDerivado['saldo']): string {
   return saldo.aPagar > 0 ? AMBER : GREEN
 }
 
-/** Cores do selo de categoria no historico (protótipo: `corCat`/`bgCat`). */
+/** Cores do selo de categoria no historico (protótipo: `corCat`/`bgCat`).
+ * 'Multa' entra com a cor de alerta (a mesma familia do desconto e de
+ * "atrasado"): das tres, e a unica que nao e folha — e a que o dono quer
+ * distinguir de relance de um adiantamento comum. */
 const COR_CATEGORIA: Record<string, { cor: string; bg: string }> = {
   [CATEGORIA_ADIANTAMENTO]: { cor: '#8a5a2a', bg: '#f6efe4' },
   [CATEGORIA_SALARIO]: { cor: '#2f5d3f', bg: '#e7f1e8' },
+  [CATEGORIA_MULTA]: { cor: '#9a4a2e', bg: '#f6e4dc' },
 }
 const COR_CATEGORIA_PADRAO = { cor: '#4a4838', bg: '#f3f0e6' }
 /** O selo do desconto no historico. Vermelho — a mesma cor de "atrasado" e de
@@ -113,10 +126,17 @@ export function FuncionariosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
   // nenhum. Desconto NAO e lancamento — nada se move quando a falta e
   // registrada — entao vem de rota propria (ver derive/descontos.ts).
   const [descontos, setDescontos] = useState<Desconto[] | null>(null)
+  // Mesma convencao: `null` = indisponivel (carregando, ou GET /api/veiculos
+  // falhou), `[]` = carregou e nao ha nenhum. Os veiculos NAO entram em
+  // nenhuma conta desta tela — servem para dizer de qual carro foi a multa no
+  // historico e para o `<select>` do ModalLancamento quando uma multa e aberta
+  // dali (ver VEICULOS_NENHUM).
+  const [veiculos, setVeiculos] = useState<Veiculo[] | null>(null)
   const [categorias, setCategorias] = useState<string[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
   const [erroLancamentos, setErroLancamentos] = useState('')
+  const [erroVeiculos, setErroVeiculos] = useState('')
   const [expandido, setExpandido] = useState<string | null>(null)
   // undefined = modal fechado; null = criando; Funcionario = editando (prefill)
   const [modal, setModal] = useState<Partial<Funcionario> | null | undefined>(undefined)
@@ -183,7 +203,28 @@ export function FuncionariosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
           onSessaoExpirada?.()
           return
         }
-        setErroLancamentos('Não foi possível carregar os lançamentos da folha — adiantado, pago, descontado e a pagar ficam indisponíveis.')
+        setErroLancamentos('Não foi possível carregar os lançamentos da folha — adiantado, pago, descontado, multas e a pagar ficam indisponíveis.')
+      })
+    return () => { cancelado = true }
+  }, [onSessaoExpirada])
+
+  // TERCEIRA busca, separada das outras duas de proposito: os veiculos so
+  // ETIQUETAM (a placa da multa no historico e o `<select>` do modal quando
+  // uma multa e aberta dali), nao entram em conta nenhuma. Junto no
+  // Promise.all acima, /api/veiculos fora do ar apagaria o "a pagar" e
+  // esconderia Adiantar / Pagar salario / Descontar — acoplando a folha a
+  // frota por causa de um rotulo. Sozinha, ela cai sozinha.
+  useEffect(() => {
+    let cancelado = false
+    api.get<Veiculo[]>('/api/veiculos')
+      .then(vs => { if (!cancelado) setVeiculos(vs) })
+      .catch((err: unknown) => {
+        if (cancelado) return
+        if (err instanceof ErroApi && err.status === 401) {
+          onSessaoExpirada?.()
+          return
+        }
+        setErroVeiculos('Não foi possível carregar os veículos — a placa não aparece nas multas do histórico. O valor abatido não muda.')
       })
     return () => { cancelado = true }
   }, [onSessaoExpirada])
@@ -253,7 +294,11 @@ export function FuncionariosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
     { chave: 'quantidade', label: 'Funcionários', valor: String(stats.quantidade), sub: 'cadastrados' },
     { chave: 'folha', label: 'Folha mensal', valor: money(stats.folhaMensal), sub: 'soma dos salários' },
     { chave: 'adiantado', label: 'Adiantado no período', valor: moneyOuTraco(stats.adiantadoPeriodo), sub: rotuloPeriodo(periodo) },
-    { chave: 'apagar', label: 'A pagar', valor: moneyOuTraco(stats.aPagarTotal), sub: 'salários − adiantado − pago − descontado' },
+    // A SUBLINHA DESCREVE A CONTA QUE O CARTAO FAZ DE FATO. Com a multa
+    // entrando em `aPagarTotal`, "salários − adiantado − pago − descontado"
+    // passaria a explicar uma conta diferente da exibida — e um rodape que
+    // mente e pior que rodape nenhum. Mesma razao da nota no fim da tela.
+    { chave: 'apagar', label: 'A pagar', valor: moneyOuTraco(stats.aPagarTotal), sub: 'salários − adiantado − pago − descontado − multas' },
   ]
 
   function abrirAdiantamento(f: FuncionarioDerivado) {
@@ -290,10 +335,18 @@ export function FuncionariosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
         <p className="funcionarios-aviso-folha" role="status">{erroLancamentos}</p>
       )}
 
+      {/* Aviso PROPRIO, e nao junto do de cima: os dois descrevem perdas de
+          tamanhos muito diferentes (uma apaga as contas, a outra apaga uma
+          etiqueta) e somar as duas frases numa so faria a menor parecer
+          grave. */}
+      {erroVeiculos && (
+        <p className="funcionarios-aviso-folha" role="status">{erroVeiculos}</p>
+      )}
+
       <div className="funcionarios-topo">
         <div className="funcionarios-dica">
-          Clique num funcionário para ver adiantamentos e descontos · adiantamentos e salários vão
-          para o Financeiro, descontos não ·{' '}
+          Clique num funcionário para ver adiantamentos, multas e descontos · adiantamentos,
+          salários e multas vão para o Financeiro, descontos não ·{' '}
           folha de <strong>{rotuloPeriodo(periodo)}</strong> (o cadastro aparece inteiro)
         </div>
         <button type="button" className="funcionarios-botao-novo" onClick={() => setModal(null)}>
@@ -382,6 +435,19 @@ export function FuncionariosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
                             ser carregada. */}
                         <div className="funcionarios-mono funcionarios-mono--descontado">
                           {moneyOuTraco(saldo ? saldo.descontado : null)}
+                        </div>
+                      </div>
+                      {/* COLUNA PROPRIA, e nao somada em ADIANTADO. As duas
+                          abatem a folha da mesma forma, mas "adiantado" quer
+                          dizer dinheiro ENTREGUE ao funcionario, e multa nao e
+                          isso — alem de o cartao do topo se chamar "Adiantado
+                          no periodo" e passar a mentir ou a discordar da linha.
+                          O raciocinio completo esta em `SaldoFuncionario`
+                          (derive/funcionarios.ts). */}
+                      <div className="funcionarios-numero">
+                        <div className="funcionarios-rotulo">MULTAS</div>
+                        <div className="funcionarios-mono funcionarios-mono--multa">
+                          {moneyOuTraco(saldo ? saldo.multa : null)}
                         </div>
                       </div>
                       <div className="funcionarios-numero funcionarios-numero--apagar">
@@ -506,7 +572,7 @@ export function FuncionariosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
                       </div>
                     ) : f.historico.length === 0 ? (
                       <div className="funcionarios-historico-vazio">
-                        Nenhum adiantamento, salário ou desconto neste período.
+                        Nenhum adiantamento, salário, multa ou desconto neste período.
                         {podeLancar && <> Use <strong>Adiantar</strong> para registrar.</>}
                       </div>
                     ) : (
@@ -546,6 +612,14 @@ export function FuncionariosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
                         }
                         const l = item.lancamento
                         const cores = COR_CATEGORIA[l.categoria] ?? COR_CATEGORIA_PADRAO
+                        // A PLACA, quando o lancamento tem carro — e so a
+                        // multa tem, aqui. "Multa R$ 350" sem dizer de qual
+                        // carro esconde do dono metade do registro; e um
+                        // adiantamento continua sem placa nenhuma, porque nao
+                        // tem. `null` (sem veiculo, veiculo excluido do
+                        // cadastro, ou lista indisponivel) simplesmente nao
+                        // desenha o chip — nunca um texto inventado.
+                        const placa = placaDeVeiculo(veiculos, l.veiculo_id)
                         return (
                           <button
                             key={l.id}
@@ -554,13 +628,16 @@ export function FuncionariosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
                             onClick={() => setModalLancamento(l)}
                           >
                             <span className="funcionarios-mono">{formatarDataBr(l.data)}</span>
-                            <span>
+                            <span className="funcionarios-lancamento-selo">
                               <span
                                 className="funcionarios-categoria-badge"
                                 style={{ color: cores.cor, background: cores.bg }}
                               >
                                 {l.categoria}
                               </span>
+                              {placa && (
+                                <span className="funcionarios-lancamento-placa">{placa}</span>
+                              )}
                             </span>
                             <span className="funcionarios-lancamento-descricao">{l.descricao || '—'}</span>
                             <span className="funcionarios-mono funcionarios-lancamento-valor">{money(l.valor)}</span>
@@ -577,14 +654,18 @@ export function FuncionariosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
       )}
 
       {/* A NOTA DESCREVE A FORMULA QUE A TELA USA DE FATO. Ela dizia
-          "salário − adiantamentos − salários pagos"; com o desconto entrando
-          na conta, deixaria de ser verdade — e uma nota de rodapé que explica
-          uma conta diferente da exibida é pior que nenhuma. */}
+          "salário − adiantamentos − salários pagos"; com o desconto e depois a
+          multa entrando na conta, deixaria de ser verdade — e uma nota de
+          rodapé que explica uma conta diferente da exibida é pior que nenhuma.
+          A última frase existe porque desconto e multa se parecem na tela e são
+          opostos na contabilidade: num nenhum dinheiro saiu, no outro saiu. */}
       <div className="funcionarios-nota">
-        <strong>A pagar</strong> = salário − adiantamentos − salários pagos − descontos, no período. O{' '}
-        <strong>próximo pagamento</strong> é o dia escolhido no cadastro, contado a partir do último
-        salário pago. <strong>Descontar</strong> registra uma falta (dia, motivo e valor): não move
-        dinheiro nenhum, só abate o que há a pagar.
+        <strong>A pagar</strong> = salário − adiantamentos − salários pagos − descontos − multas, no
+        período. O <strong>próximo pagamento</strong> é o dia escolhido no cadastro, contado a partir
+        do último salário pago. <strong>Descontar</strong> registra uma falta (dia, motivo e valor):
+        não move dinheiro nenhum, só abate o que há a pagar. Uma <strong>multa</strong> é o
+        contrário: ela já foi paga, continua contando como custo do carro no Financeiro e em
+        Veículos, e o valor entra aqui como adiantamento — o funcionário reembolsa pela folha.
       </div>
 
       {modal !== undefined && (
@@ -613,7 +694,7 @@ export function FuncionariosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
           lancamento={modalLancamento}
           categorias={categorias}
           funcionarios={funcionarios}
-          veiculos={VEICULOS_NENHUM}
+          veiculos={veiculos ?? VEICULOS_NENHUM}
           onSalvo={aoSalvarLancamento}
           onExcluido={aoExcluirLancamento}
           onFechar={() => setModalLancamento(undefined)}

@@ -33,7 +33,9 @@ interface ModalLancamentoProps {
   lancamento: Partial<Lancamento> | null // null = criando
   /** Lista fechada de categorias — vem de GET /api/lancamentos/categorias, buscada por quem abre este modal (LancamentosLista). */
   categorias: string[]
-  /** Funcionários pra popular o vínculo — só aparece nas categorias de CATEGORIAS_COM_FUNCIONARIO. */
+  /** Funcionários pra popular o vínculo — só aparece nas categorias de
+   * CATEGORIAS_COM_FUNCIONARIO (salário, adiantamento e multa). Mesma
+   * obrigatoriedade e mesmo motivo da prop `veiculos` abaixo. */
   funcionarios: FuncionarioOpcao[]
   /**
    * Veículos pra popular o vínculo — só aparece nas categorias de
@@ -41,10 +43,15 @@ interface ModalLancamentoProps {
    *
    * Obrigatória, e não opcional com `[]` de default, de propósito: quem abre
    * este modal numa tela que edita lançamento de despesa de carro PRECISA
-   * passar a lista. Um `<select>` sem a opção correspondente ao
-   * `veiculo_id` gravado cai para '' sozinho, e o submit gravaria `null` —
-   * perda silenciosa do vínculo. Exigir a prop força cada chamador a decidir
-   * (ver o comentário em FuncionariosLista.tsx, o único que passa `[]`).
+   * passar a lista, senão o `<select>` abre sem a opção do carro já gravado e
+   * o usuário não tem como escolher nenhum. Exigir a prop força cada chamador
+   * a decidir em vez de esquecer.
+   *
+   * Uma lista vazia (ou incompleta) NÃO apaga o vínculo gravado: ele vira uma
+   * opção própria no `<select>` (ver `veiculoForaDaLista` abaixo) e continua
+   * sendo enviado no submit. As duas defesas existem para coisas diferentes —
+   * a prop obrigatória contra o esquecimento de quem escreve a tela, a opção
+   * extra contra a queda de uma rota em produção.
    */
   veiculos: VeiculoOpcao[]
   onSalvo: (l: Lancamento) => void
@@ -82,10 +89,33 @@ export function ModalLancamento({
   // efeito confunde quem usa. Esconder aqui é só UX; a limpeza de fato
   // acontece no submit (`funcionarioIdEfetivo` abaixo).
   const mostraFuncionario = CATEGORIAS_COM_FUNCIONARIO.has(rascunho.categoria)
+  // O funcionário gravado que não está na lista recebida — mesma defesa (e
+  // mesmo motivo) de `veiculoForaDaLista` logo abaixo, com o outro sujeito.
+  const funcionarioForaDaLista = mostraFuncionario && rascunho.funcionario_id
+    && !funcionarios.some(f => f.id === rascunho.funcionario_id)
+    ? rascunho.funcionario_id
+    : null
   // Idem para o veículo (CATEGORIAS_COM_VEICULO em derive/lancamentos.ts):
   // gasolina, manutenção e multa. 'Frete' não entra — é serviço comprado de
   // terceiro, não custo do carro próprio.
+  //
+  // OS DOIS CAMPOS PODEM APARECER JUNTOS, e só em 'Multa': ela está nas duas
+  // listas. O carro diz de qual veículo foi a infração (e o gasto dele conta a
+  // multa inteira), o funcionário diz quem a cometeu — e é esse vínculo que
+  // faz o valor abater o "a pagar" dele, como um adiantamento. Os dois campos
+  // continuam opcionais: nem toda infração é atribuível a alguém.
   const mostraVeiculo = CATEGORIAS_COM_VEICULO.has(rascunho.categoria)
+  // O veículo gravado que NÃO está na lista recebida. Acontece quando quem
+  // abriu o modal não pôde carregar /api/veiculos (FuncionariosLista, cuja
+  // busca de veículos falha sozinha de propósito). Sem esta opção o `<select>`
+  // abre em branco e o primeiro toque nele troca um vínculo real por outro
+  // valor sem que ninguém tenha decidido isso — a opção mantém o vínculo
+  // visível e selecionável de volta. `null` no caso normal, em que o id está
+  // na lista (ou não há id nenhum).
+  const veiculoForaDaLista = mostraVeiculo && rascunho.veiculo_id
+    && !veiculos.some(v => v.id === rascunho.veiculo_id)
+    ? rascunho.veiculo_id
+    : null
 
   function campo<K extends keyof Rascunho>(chave: K) {
     return {
@@ -230,6 +260,9 @@ export function ModalLancamento({
                     <label className="modal-rotulo" htmlFor="lancamento-funcionario_id">Funcionário</label>
                     <select className="modal-select" {...campo('funcionario_id')}>
                       <option value="">—</option>
+                      {funcionarioForaDaLista && (
+                        <option value={funcionarioForaDaLista}>funcionário vinculado (lista indisponível)</option>
+                      )}
                       {funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
                     </select>
                   </div>
@@ -240,6 +273,9 @@ export function ModalLancamento({
                     <label className="modal-rotulo" htmlFor="lancamento-veiculo_id">Veículo</label>
                     <select className="modal-select" {...campo('veiculo_id')}>
                       <option value="">—</option>
+                      {veiculoForaDaLista && (
+                        <option value={veiculoForaDaLista}>veículo vinculado (lista indisponível)</option>
+                      )}
                       {veiculos.map(v => (
                         <option key={v.id} value={v.id}>{nomeVeiculo(v)} · {v.placa}</option>
                       ))}
@@ -250,7 +286,10 @@ export function ModalLancamento({
                 <div className="modal-campo modal-campo--full modal-dica">
                   O lançamento entra no <strong>total de custos</strong> do período e — quando vinculado a
                   um funcionário — desconta do <strong>a pagar</strong> dele. Vinculado a um{' '}
-                  <strong>veículo</strong>, entra no gasto daquele carro na tela de Veículos.
+                  <strong>veículo</strong>, entra no gasto daquele carro na tela de Veículos.{' '}
+                  Uma <strong>multa</strong> pode ter os dois: o custo continua inteiro no carro e o
+                  valor entra como adiantamento de quem cometeu a infração. Deixe o funcionário em{' '}
+                  <strong>—</strong> quando não houver a quem atribuir.
                 </div>
               </div>
 

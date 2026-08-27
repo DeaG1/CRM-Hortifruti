@@ -200,7 +200,7 @@ describe('derivarFuncionarios', () => {
 
 /* ==================== dinheiro: as cinco colunas ==================== */
 
-describe('saldoFuncionario — as cinco colunas', () => {
+describe('saldoFuncionario — as colunas de dinheiro da linha', () => {
   it('soma adiantamentos e salários pagos e devolve o que falta pagar', () => {
     const s = saldoFuncionario(2200, [
       lanc({ id: 'a', categoria: 'Adiantamento de salário', valor: 300, data: '2026-06-10' }),
@@ -624,5 +624,229 @@ describe('derivarFuncionarios — desconto por funcionário e no histórico', ()
     expect(d.pagamento.proximaData).toBe('2026-06-20')
     // o último salário pago não depende do desconto e continua saindo
     expect(d.ultimoPago).toBe('2026-05-30')
+  })
+})
+
+/**
+ * MULTA ABATE O SALÁRIO COMO UM ADIANTAMENTO, E NÃO COMO UM DESCONTO — a
+ * distinção é contábil e não cosmética: numa falta nenhum dinheiro saiu (por
+ * isso desconto não é lançamento), enquanto a multa JÁ FOI PAGA ao órgão de
+ * trânsito. Ela continua sendo custo (Financeiro, e gasto do carro em
+ * Veículos) e o funcionário reembolsa pela folha.
+ *
+ * Por isso ela entra aqui como uma PARCELA PRÓPRIA (`multa`), não somada em
+ * `adiantado`: "adiantado" quer dizer dinheiro entregue ao funcionário, e
+ * multa não é isso.
+ */
+describe('saldoFuncionario — a multa vinculada abate o "a pagar"', () => {
+  const multa = (over: Partial<LancamentoParaFuncionario> = {}) =>
+    lanc({ id: 'm1', categoria: 'Multa', valor: 0, data: '2026-06-12', veiculo_id: 'v-1', ...over })
+
+  it('uma multa vinculada reduz o que há a pagar e sai medida na coluna MULTAS', () => {
+    const s = saldoFuncionario(2200, [multa({ valor: 350 })], [])
+    expect(s.multa).toBe(350)
+    expect(s.aPagar).toBe(1850) // 2200 − 350
+    expect(s.saldoBruto).toBe(1850)
+  })
+
+  it('a multa NÃO entra em `adiantado` — quem lê "adiantado" entende dinheiro entregue', () => {
+    const s = saldoFuncionario(2200, [multa({ valor: 350 })], [])
+    expect(s.adiantado).toBe(0)
+    expect(s.pagoSalario).toBe(0)
+    expect(s.descontado).toBe(0)
+  })
+
+  it('várias multas somam', () => {
+    const s = saldoFuncionario(2200, [
+      multa({ id: 'm1', valor: 130.16 }),
+      multa({ id: 'm2', valor: 293.47 }),
+    ], [])
+    expect(s.multa).toBe(423.63)
+    expect(s.aPagar).toBeCloseTo(1776.37, 2)
+  })
+
+  it('as cinco parcelas na mesma conta: salário − adiantado − pago − descontado − multa', () => {
+    const s = saldoFuncionario(2200, [
+      lanc({ id: 'a', categoria: 'Adiantamento de salário', valor: 300 }),
+      lanc({ id: 'b', categoria: 'Salário', valor: 500 }),
+      multa({ id: 'm', valor: 100 }),
+    ], [desc({ valor: 200 })])
+    expect(s.adiantado).toBe(300)
+    expect(s.pagoSalario).toBe(500)
+    expect(s.descontado).toBe(200)
+    expect(s.multa).toBe(100)
+    expect(s.aPagar).toBe(1100) // 2200 − 300 − 500 − 200 − 100
+  })
+
+  it('sem multa nenhuma: zero MEDIDO, não travessão nem ausência', () => {
+    const s = saldoFuncionario(2200, [lanc({ categoria: 'Salário', valor: 200 })], [])
+    expect(s.multa).toBe(0)
+    expect(s.aPagar).toBe(2000)
+  })
+
+  it('multa maior que o salário: a pagar em zero (nunca negativo) e o excesso em excedente', () => {
+    const s = saldoFuncionario(2000, [multa({ valor: 2300 })], [])
+    expect(s.saldoBruto).toBe(-300)
+    expect(s.aPagar).toBe(0)
+    expect(s.excedente).toBe(300)
+    expect(s.podePagar).toBe(false)
+    expect(s.quitado).toBe(true)
+  })
+
+  it('valor não numérico não contamina a soma (mesma defesa das outras parcelas)', () => {
+    const s = saldoFuncionario(2200, [multa({ valor: undefined as unknown as number })], [])
+    expect(s.multa).toBe(0)
+    expect(s.aPagar).toBe(2200)
+  })
+
+  it('a multa continua sendo lançamento: um carro no `veiculo_id` não a tira da conta', () => {
+    // O vínculo com o veículo é o que faz a multa contar no gasto daquele
+    // carro; ele não tem nada a ver com o abatimento na folha.
+    const comCarro = saldoFuncionario(2200, [multa({ valor: 350, veiculo_id: 'v-1' })], [])
+    const semCarro = saldoFuncionario(2200, [multa({ valor: 350, veiculo_id: null })], [])
+    expect(comCarro.multa).toBe(350)
+    expect(semCarro.multa).toBe(350)
+  })
+
+  it('sujeitoDoExcedente diz "Multado" quando o excedente veio só de multa', () => {
+    const s = saldoFuncionario(2000, [multa({ valor: 2300 })], [])
+    expect(sujeitoDoExcedente(s)).toBe('Multado')
+  })
+
+  it('sujeitoDoExcedente junta as quatro causas na ordem fixa', () => {
+    const s = saldoFuncionario(1000, [
+      lanc({ id: 'a', categoria: 'Adiantamento de salário', valor: 400 }),
+      lanc({ id: 'b', categoria: 'Salário', valor: 400 }),
+      multa({ id: 'm', valor: 400 }),
+    ], [desc({ valor: 400 })])
+    expect(s.excedente).toBe(600)
+    expect(sujeitoDoExcedente(s)).toBe('Adiantado, pago, descontado e multado')
+  })
+})
+
+/**
+ * MULTA SEM FUNCIONÁRIO NÃO ABATE NINGUÉM. Nem toda infração é atribuível
+ * (radar sem condutor identificado), e forçar a escolha faria o usuário
+ * inventar um culpado. Ela continua sendo custo do veículo e do Financeiro.
+ */
+describe('multa sem funcionário — custo do carro, dívida de ninguém', () => {
+  it('lancamentosDoFuncionario não recolhe multa de funcionario_id nulo', () => {
+    const solta = lanc({ id: 'm1', categoria: 'Multa', valor: 350, funcionario_id: null, veiculo_id: 'v-1' })
+    expect(lancamentosDoFuncionario([solta], '1', 'all')).toEqual([])
+  })
+
+  it('o "a pagar" de todo mundo fica intacto', () => {
+    const solta = lanc({ id: 'm1', categoria: 'Multa', valor: 350, funcionario_id: null, veiculo_id: 'v-1' })
+    const [d] = derivarFuncionarios([funcionario({ id: '1', salario: 2200 })], [solta], [], new Date('2026-06-20T10:00:00'), '2026-06')
+    expect(d.saldo?.multa).toBe(0)
+    expect(d.saldo?.aPagar).toBe(2200)
+    expect(d.historico).toEqual([])
+  })
+
+  it('e o cartão do topo também: multa solta não reduz a folha a pagar', () => {
+    const solta = lanc({ id: 'm1', categoria: 'Multa', valor: 350, funcionario_id: null, veiculo_id: 'v-1' })
+    const stats = estatisticasFuncionarios([funcionario({ id: '1', salario: 2200 })], [solta], [], '2026-06')
+    expect(stats.multaPeriodo).toBe(0)
+    expect(stats.aPagarTotal).toBe(2200)
+  })
+})
+
+describe('multa e o recorte de período — a de outro mês não abate', () => {
+  it('multa de março não diminui o salário de junho', () => {
+    const marco = lanc({ id: 'm1', categoria: 'Multa', valor: 350, data: '2026-03-12', veiculo_id: 'v-1' })
+    const junho = lanc({ id: 'm2', categoria: 'Multa', valor: 100, data: '2026-06-12', veiculo_id: 'v-1' })
+    const doPeriodo = lancamentosDoFuncionario([marco, junho], '1', '2026-06')
+    expect(doPeriodo.map(l => l.id)).toEqual(['m2'])
+    expect(saldoFuncionario(2200, doPeriodo, []).multa).toBe(100)
+    expect(saldoFuncionario(2200, doPeriodo, []).aPagar).toBe(2100)
+  })
+
+  it('em "all" as duas contam', () => {
+    const marco = lanc({ id: 'm1', categoria: 'Multa', valor: 350, data: '2026-03-12', veiculo_id: 'v-1' })
+    const junho = lanc({ id: 'm2', categoria: 'Multa', valor: 100, data: '2026-06-12', veiculo_id: 'v-1' })
+    const todos = lancamentosDoFuncionario([marco, junho], '1', 'all')
+    expect(saldoFuncionario(2200, todos, []).multa).toBe(450)
+  })
+
+  it('o cartão do topo respeita o mesmo recorte', () => {
+    const marco = lanc({ id: 'm1', categoria: 'Multa', valor: 350, data: '2026-03-12', veiculo_id: 'v-1' })
+    const stats = estatisticasFuncionarios([funcionario({ id: '1', salario: 2200 })], [marco], [], '2026-06')
+    expect(stats.multaPeriodo).toBe(0)
+    expect(stats.aPagarTotal).toBe(2200)
+  })
+})
+
+describe('estatisticasFuncionarios — o cartão "A pagar" acompanha a multa', () => {
+  it('a multa vinculada reduz o total a pagar da folha', () => {
+    const stats = estatisticasFuncionarios(
+      [funcionario({ id: '1', salario: 2200 }), funcionario({ id: '2', salario: 1800 })],
+      [lanc({ id: 'm1', categoria: 'Multa', valor: 350, data: '2026-06-12', funcionario_id: '2', veiculo_id: 'v-1' })],
+      [],
+      '2026-06',
+    )
+    expect(stats.folhaMensal).toBe(4000)
+    expect(stats.multaPeriodo).toBe(350)
+    expect(stats.aPagarTotal).toBe(3650)
+  })
+
+  it('a multa NÃO entra no cartão "Adiantado no período" — o rótulo diz adiantado', () => {
+    const stats = estatisticasFuncionarios(
+      [funcionario({ id: '1', salario: 2200 })],
+      [
+        lanc({ id: 'a', categoria: 'Adiantamento de salário', valor: 200, data: '2026-06-01' }),
+        lanc({ id: 'm1', categoria: 'Multa', valor: 350, data: '2026-06-12', veiculo_id: 'v-1' }),
+      ],
+      [],
+      '2026-06',
+    )
+    expect(stats.adiantadoPeriodo).toBe(200)
+    expect(stats.multaPeriodo).toBe(350)
+    expect(stats.aPagarTotal).toBe(1650) // 2200 − 200 − 350
+  })
+
+  it('lançamentos ou descontos indisponíveis: multaPeriodo é null, nunca zero', () => {
+    const semLanc = estatisticasFuncionarios([funcionario()], null, [], '2026-06')
+    const semDesc = estatisticasFuncionarios([funcionario()], [], null, '2026-06')
+    expect(semLanc.multaPeriodo).toBeNull()
+    expect(semDesc.multaPeriodo).toBeNull()
+  })
+})
+
+describe('derivarFuncionarios — a multa no saldo e no histórico', () => {
+  it('a multa aparece no histórico do funcionário como lançamento, com o veículo junto', () => {
+    const multa = lanc({
+      id: 'm1', categoria: 'Multa', valor: 350, data: '2026-06-12',
+      funcionario_id: '1', veiculo_id: 'v-1', descricao: 'Radar da Marginal',
+    })
+    const [d] = derivarFuncionarios(
+      [funcionario({ id: '1', salario: 2200 })], [multa], [],
+      new Date('2026-06-20T10:00:00'), '2026-06',
+    )
+    expect(d.saldo?.multa).toBe(350)
+    expect(d.saldo?.aPagar).toBe(1850)
+    expect(d.historico).toHaveLength(1)
+    const item = d.historico![0]
+    expect(item.tipo).toBe('lancamento')
+    if (item.tipo === 'lancamento') {
+      // O item carrega o lançamento inteiro — é dele que a tela tira a
+      // categoria (o rótulo "Multa") e o `veiculo_id` (a placa).
+      expect(item.lancamento.categoria).toBe('Multa')
+      expect(item.lancamento.veiculo_id).toBe('v-1')
+    }
+  })
+
+  it('a multa de um funcionário não abate a de outro', () => {
+    const multa = lanc({
+      id: 'm1', categoria: 'Multa', valor: 350, data: '2026-06-12',
+      funcionario_id: '2', veiculo_id: 'v-1',
+    })
+    const derivados = derivarFuncionarios(
+      [funcionario({ id: '1', salario: 2200 }), funcionario({ id: '2', nome: 'Maria', salario: 1800 })],
+      [multa], [], new Date('2026-06-20T10:00:00'), '2026-06',
+    )
+    expect(derivados[0].saldo?.multa).toBe(0)
+    expect(derivados[0].saldo?.aPagar).toBe(2200)
+    expect(derivados[1].saldo?.multa).toBe(350)
+    expect(derivados[1].saldo?.aPagar).toBe(1450)
   })
 })

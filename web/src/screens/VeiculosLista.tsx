@@ -9,6 +9,8 @@ import {
   CATEGORIA_GASOLINA, CATEGORIA_MANUTENCAO, CATEGORIA_MULTA,
   CATEGORIAS_COM_VEICULO_ORDEM, type Lancamento,
 } from '../derive/lancamentos'
+import type { Funcionario } from '../derive/funcionarios'
+import { dataBrCurta } from '../derive/pagamento'
 import { ModalVeiculo } from '../components/ModalVeiculo'
 import { ModalLancamento } from '../components/ModalLancamento'
 import './VeiculosLista.css'
@@ -45,9 +47,10 @@ const money = (n: number) => 'R$ ' + n.toLocaleString('pt-BR', { minimumFraction
  * como R$ 0,00 normalmente. Mesma regra de FuncionariosLista.tsx. */
 const moneyOuTraco = (n: number | null) => (n === null ? '—' : money(n))
 
+/** 'AAAA-MM-DD' -> 'DD/MM', via `dataBrCurta` (derive/pagamento.ts) — o mesmo
+ * formatador curto de FuncionariosLista.tsx e de estoque. */
 function formatarDataBr(iso: string): string {
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return m ? `${m[3]}/${m[2]}` : iso
+  return dataBrCurta(iso) ?? iso
 }
 
 /** Cores do selo de categoria no histórico — mesma mecânica de
@@ -86,9 +89,15 @@ export function VeiculosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Vei
   // derivação trata as duas de forma diferente — ver derivarVeiculos.
   const [lancamentos, setLancamentos] = useState<Lancamento[] | null>(null)
   const [categorias, setCategorias] = useState<string[]>([])
+  // Só para o `<select>` de funcionário do ModalLancamento em MULTA (ver o
+  // terceiro useEffect). `[]` enquanto não carregou ou se a busca falhou: um
+  // vínculo já gravado não se perde por isso, ele vira uma opção própria
+  // dentro do modal (ver `funcionarioForaDaLista` em ModalLancamento.tsx).
+  const [funcionarios, setFuncionarios] = useState<Funcionario[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
   const [erroLancamentos, setErroLancamentos] = useState('')
+  const [erroFuncionarios, setErroFuncionarios] = useState('')
   const [expandido, setExpandido] = useState<string | null>(null)
   // undefined = modal de cadastro fechado; null = criando; Veiculo = editando
   const [modal, setModal] = useState<Partial<Veiculo> | null | undefined>(undefined)
@@ -139,6 +148,30 @@ export function VeiculosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Vei
           return
         }
         setErroLancamentos('Não foi possível carregar os lançamentos — o gasto de cada veículo fica indisponível.')
+      })
+    return () => { cancelado = true }
+  }, [onSessaoExpirada])
+
+  // TERCEIRA busca, separada e que falha sozinha: os funcionários existem só
+  // para o `<select>` do ModalLancamento na categoria MULTA, que passou a
+  // aceitar carro e funcionário ao mesmo tempo — "Lançar multa" abre daqui, e
+  // sem esta lista o dono veria o campo de quem cometeu a infração vazio,
+  // exatamente na tela onde ele registra a multa.
+  //
+  // Sozinha porque não entra em conta nenhuma: /api/funcionarios fora do ar
+  // não muda um centavo do gasto de nenhum carro. Junto no Promise.all acima,
+  // derrubaria o gasto do período inteiro por causa de um `<select>`.
+  useEffect(() => {
+    let cancelado = false
+    api.get<Funcionario[]>('/api/funcionarios')
+      .then(fs => { if (!cancelado) setFuncionarios(fs) })
+      .catch((err: unknown) => {
+        if (cancelado) return
+        if (err instanceof ErroApi && err.status === 401) {
+          onSessaoExpirada?.()
+          return
+        }
+        setErroFuncionarios('Não foi possível carregar os funcionários — não dá para dizer quem cometeu a infração numa multa. O gasto do veículo não muda.')
       })
     return () => { cancelado = true }
   }, [onSessaoExpirada])
@@ -218,10 +251,11 @@ export function VeiculosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Vei
     <ModalLancamento
       lancamento={modalLancamento}
       categorias={categorias}
-      // Só a folha vincula funcionário, e nenhum caminho desta tela abre o
-      // modal numa categoria de folha — mesma decisão (e mesmo racional
-      // espelhado) de VEICULOS_NENHUM em FuncionariosLista.tsx.
-      funcionarios={FUNCIONARIOS_NENHUM}
+      // ESTA TELA PASSOU A PASSAR A LISTA DE VERDADE. Ela mandava
+      // `FUNCIONARIOS_NENHUM` porque nenhum caminho daqui abria o modal numa
+      // categoria que aceitasse funcionário. 'Multa' passou a aceitar, e é
+      // justamente uma das três que esta tela lança.
+      funcionarios={funcionarios}
       veiculos={veiculos}
       onSalvo={aoSalvarLancamento}
       onExcluido={aoExcluirLancamento}
@@ -257,6 +291,13 @@ export function VeiculosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Vei
     <div className="veiculos-lista">
       {erroLancamentos && (
         <p className="veiculos-aviso-gasto" role="status">{erroLancamentos}</p>
+      )}
+
+      {/* Aviso próprio: as duas perdas têm tamanhos muito diferentes (uma
+          apaga o gasto de toda a frota, a outra só o campo de quem cometeu a
+          infração) e uma frase só faria a menor parecer grave. */}
+      {erroFuncionarios && (
+        <p className="veiculos-aviso-gasto" role="status">{erroFuncionarios}</p>
       )}
 
       <div className="veiculos-topo">
@@ -427,6 +468,9 @@ export function VeiculosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Vei
   )
 }
 
-/** Ver o comentário em `modalDeLancamento`. Constante de módulo (não `[]`
- * inline) para não criar um array novo a cada render. */
-const FUNCIONARIOS_NENHUM: never[] = []
+// REMOVIDA: `FUNCIONARIOS_NENHUM`, a lista vazia que esta tela passava ao
+// ModalLancamento. Ela existia porque nenhuma categoria lançada daqui aceitava
+// funcionário; 'Multa' passou a aceitar (ver CATEGORIAS_COM_FUNCIONARIO em
+// derive/lancamentos.ts) e a tela busca a lista de verdade. Não fica aqui "por
+// precaução": uma constante com um comentário que descreve uma regra que já
+// mudou é o que engana quem lê depois.

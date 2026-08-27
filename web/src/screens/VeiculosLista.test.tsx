@@ -32,16 +32,25 @@ const lanc = (over: Partial<Lancamento> = {}): Lancamento => ({
   funcionario_id: null, veiculo_id: 'v-1', ...over,
 })
 
+const FUNCIONARIOS = [
+  { id: 'f-1', nome: 'João Pereira', cargo: 'Motorista', tel: '', salario: 2200, dia_pag: 5, ativo: true },
+]
+
 /**
- * Resolve as tres rotas que a tela busca: /api/veiculos sozinha (cadastro), e
- * /api/lancamentos + /categorias no Promise.all que falha ISOLADO.
+ * Resolve as quatro rotas que a tela busca: /api/veiculos sozinha (cadastro),
+ * /api/lancamentos + /categorias no Promise.all que falha ISOLADO, e
+ * /api/funcionarios sozinha (só popula o `<select>` de quem cometeu a
+ * infração, na categoria Multa — não entra em conta nenhuma, por isso cai
+ * sozinha).
  * `lancamentos: null` faz a segunda busca rejeitar — e como se simula a falha
- * que deixa o cadastro de pe e o gasto em travessao.
+ * que deixa o cadastro de pe e o gasto em travessao. `funcionarios: null` faz
+ * o mesmo com a quarta.
  */
 function mockCarga(
   veiculos: Veiculo[],
   lancamentos: Lancamento[] | null = [],
   categorias: string[] = CATEGORIAS,
+  funcionarios: typeof FUNCIONARIOS | null = FUNCIONARIOS,
 ) {
   mockGet.mockImplementation((rota: string) => {
     if (rota === '/api/veiculos') return Promise.resolve(veiculos)
@@ -51,6 +60,11 @@ function mockCarga(
         : Promise.resolve(lancamentos)
     }
     if (rota === '/api/lancamentos/categorias') return Promise.resolve(categorias)
+    if (rota === '/api/funcionarios') {
+      return funcionarios === null
+        ? Promise.reject(new Error('falha de rede'))
+        : Promise.resolve(funcionarios)
+    }
     return Promise.reject(new Error('rota inesperada: ' + rota))
   })
 }
@@ -379,5 +393,61 @@ describe('VeiculosLista — o check-in/check-out saiu da tela', () => {
     await screen.findByText('Fiat Fiorino')
     const rotas = mockGet.mock.calls.map(c => c[0])
     expect(rotas).not.toContain('/api/funcionarios/opcoes')
+  })
+})
+
+/**
+ * O GASTO DO CARRO NÃO SABE DE FUNCIONÁRIO. A multa foi paga ao órgão de
+ * trânsito: é custo daquele veículo, inteiro, independentemente de quem
+ * reembolsa pela folha. O abatimento acontece do outro lado, em Funcionários.
+ */
+describe('VeiculosLista — a multa com funcionário vinculado', () => {
+  const multaComCulpado = lanc({
+    id: 'm1', categoria: 'Multa', valor: 293.47, data: '2026-06-12',
+    veiculo_id: 'v-1', funcionario_id: 'f-1', descricao: 'Radar da Marginal',
+  })
+
+  it('o gasto do veículo conta a multa inteira, com funcionário vinculado', async () => {
+    mockCarga([veiculo({ id: 'v-1' })], [multaComCulpado])
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+    await waitFor(() => expect(gastoNaLinha('Fiat Fiorino')).toBe('R$ 293,47'))
+  })
+
+  it('e é exatamente o mesmo gasto de uma multa sem funcionário', async () => {
+    mockCarga([veiculo({ id: 'v-1' })], [{ ...multaComCulpado, funcionario_id: null }])
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+    await waitFor(() => expect(gastoNaLinha('Fiat Fiorino')).toBe('R$ 293,47'))
+  })
+
+  it('"Lançar multa" abre o modal com o carro preenchido e a lista de funcionários', async () => {
+    mockCarga([veiculo({ id: 'v-1' })], [])
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/api/funcionarios'))
+
+    fireEvent.click(screen.getByRole('button', { name: /lançar multa — fiat fiorino/i }))
+    await screen.findByRole('dialog')
+    expect(screen.getByLabelText(/^categoria$/i)).toHaveValue('Multa')
+    expect(screen.getByLabelText(/^veículo$/i)).toHaveValue('v-1')
+    // O campo de quem cometeu a infração existe E tem gente dentro: sem a
+    // busca de /api/funcionarios ele abriria só com o travessão.
+    const select = screen.getByLabelText(/^funcionário$/i) as HTMLSelectElement
+    expect(Array.from(select.options).map(o => o.textContent)).toEqual(['—', 'João Pereira'])
+    expect(select).toHaveValue('')
+  })
+
+  it('/api/funcionarios fora do ar: o gasto continua, e a tela avisa em role=status', async () => {
+    mockCarga([veiculo({ id: 'v-1' })], [multaComCulpado], CATEGORIAS, null)
+    render(<VeiculosLista periodo="2026-06" />)
+    await screen.findByText('Fiat Fiorino')
+
+    // Uma queda em /api/funcionarios não muda um centavo do gasto de nenhum
+    // carro — é por isso que ela é uma busca separada.
+    await waitFor(() => expect(gastoNaLinha('Fiat Fiorino')).toBe('R$ 293,47'))
+    const aviso = await screen.findByRole('status')
+    expect(aviso).toHaveTextContent('Não foi possível carregar os funcionários')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

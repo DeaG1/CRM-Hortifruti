@@ -178,7 +178,7 @@ describe('ModalLancamento — campo veículo só nas categorias de despesa de ca
     }
   })
 
-  it('nunca mostra os dois campos ao mesmo tempo (as duas listas sao disjuntas)', () => {
+  it('fora de Multa, so um dos dois campos aparece de cada vez', () => {
     renderModal({ categorias: ['Gasolina', 'Salário'] })
     expect(screen.getByLabelText(/^veículo$/i)).toBeInTheDocument()
     expect(screen.queryByLabelText(/^funcionário$/i)).not.toBeInTheDocument()
@@ -414,5 +414,137 @@ describe('ModalLancamento — fechar', () => {
     renderModal({ onFechar })
     fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
     expect(onFechar).toHaveBeenCalledOnce()
+  })
+})
+
+/**
+ * MULTA É A ÚNICA CATEGORIA COM OS DOIS CAMPOS. O carro diz de qual veículo
+ * foi a infração (o gasto dele conta a multa inteira); o funcionário diz quem
+ * a cometeu, e é esse vínculo que faz o valor abater o "a pagar" dele — como
+ * um adiantamento, porque o dinheiro já saiu de verdade. Os dois são
+ * opcionais: nem toda infração é atribuível a alguém.
+ */
+describe('ModalLancamento — Multa aceita veículo e funcionário ao mesmo tempo', () => {
+  it('a categoria Multa mostra OS DOIS campos', () => {
+    renderModal({ categorias: ['Frete', 'Multa'] })
+    fireEvent.change(screen.getByLabelText(/^categoria$/i), { target: { value: 'Multa' } })
+    expect(screen.getByLabelText(/^veículo$/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^funcionário$/i)).toBeInTheDocument()
+  })
+
+  it('envia os dois vínculos no mesmo POST', async () => {
+    mockPost.mockResolvedValue({ ...lancamentoExistente, id: 'novo' })
+    renderModal({ categorias: ['Multa'] })
+    fireEvent.change(screen.getByLabelText(/^veículo$/i), { target: { value: 'v-1' } })
+    fireEvent.change(screen.getByLabelText(/^funcionário$/i), { target: { value: 'f-2' } })
+    fireEvent.change(screen.getByLabelText(/valor/i), { target: { value: '293.47' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    const corpo = mockPost.mock.calls[0][1] as Record<string, unknown>
+    expect(corpo.categoria).toBe('Multa')
+    expect(corpo.veiculo_id).toBe('v-1')
+    expect(corpo.funcionario_id).toBe('f-2')
+    expect(corpo.valor).toBe(293.47)
+  })
+
+  it('multa SEM funcionário é salva do mesmo jeito — vincular é opcional', async () => {
+    mockPost.mockResolvedValue({ ...lancamentoExistente, id: 'novo' })
+    renderModal({ categorias: ['Multa'] })
+    fireEvent.change(screen.getByLabelText(/^veículo$/i), { target: { value: 'v-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    const corpo = mockPost.mock.calls[0][1] as Record<string, unknown>
+    expect(corpo.veiculo_id).toBe('v-1')
+    expect(corpo.funcionario_id).toBeNull()
+  })
+
+  it('editar uma multa abre com os dois selecionados e mantem os dois ao salvar', async () => {
+    mockPut.mockResolvedValue({ ...lancamentoExistente, categoria: 'Multa' })
+    renderModal({
+      lancamento: { ...lancamentoExistente, categoria: 'Multa', veiculo_id: 'v-2', funcionario_id: 'f-1' },
+    })
+    expect(screen.getByLabelText(/^veículo$/i)).toHaveValue('v-2')
+    expect(screen.getByLabelText(/^funcionário$/i)).toHaveValue('f-1')
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPut).toHaveBeenCalled())
+    const corpo = mockPut.mock.calls[0][1] as Record<string, unknown>
+    expect(corpo.veiculo_id).toBe('v-2')
+    expect(corpo.funcionario_id).toBe('f-1')
+  })
+
+  it('trocar Multa para Frete zera OS DOIS vinculos no envio', async () => {
+    mockPost.mockResolvedValue({ ...lancamentoExistente, id: 'novo' })
+    renderModal({ categorias: ['Multa', 'Frete'] })
+    fireEvent.change(screen.getByLabelText(/^veículo$/i), { target: { value: 'v-1' } })
+    fireEvent.change(screen.getByLabelText(/^funcionário$/i), { target: { value: 'f-1' } })
+    fireEvent.change(screen.getByLabelText(/^categoria$/i), { target: { value: 'Frete' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    const corpo = mockPost.mock.calls[0][1] as Record<string, unknown>
+    expect(corpo.veiculo_id).toBeNull()
+    expect(corpo.funcionario_id).toBeNull()
+  })
+
+  it('a dica explica que a multa fica inteira no carro e vira adiantamento de quem a cometeu', () => {
+    renderModal({ categorias: ['Multa'] })
+    const dica = document.querySelector('.modal-dica') as HTMLElement
+    expect(dica.textContent).toMatch(/multa/i)
+    expect(dica.textContent).toMatch(/adiantamento/i)
+  })
+})
+
+/**
+ * A LISTA VAZIA NÃO PODE APAGAR UM VÍNCULO GRAVADO. As duas telas que abrem
+ * este modal buscam veículos e funcionários em requisições que falham
+ * sozinhas de propósito (para uma queda de /api/veiculos não derrubar a
+ * folha); quando uma delas cai, o `<select>` fica sem a opção do vínculo já
+ * gravado, e um toque nele trocaria o vínculo sem ninguém ter decidido isso.
+ */
+describe('ModalLancamento — vínculo gravado que não está na lista recebida', () => {
+  it('o veiculo gravado vira uma opcao propria e continua sendo enviado', async () => {
+    mockPut.mockResolvedValue({ ...lancamentoExistente })
+    renderModal({
+      veiculos: [],
+      lancamento: { ...lancamentoExistente, categoria: 'Multa', veiculo_id: 'v-2' },
+    })
+    const select = screen.getByLabelText(/^veículo$/i) as HTMLSelectElement
+    expect(select).toHaveValue('v-2')
+    expect(Array.from(select.options).map(o => o.textContent))
+      .toEqual(['—', 'veículo vinculado (lista indisponível)'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPut).toHaveBeenCalled())
+    expect((mockPut.mock.calls[0][1] as Record<string, unknown>).veiculo_id).toBe('v-2')
+  })
+
+  it('o funcionario gravado tambem, e pela mesma razao', async () => {
+    mockPut.mockResolvedValue({ ...lancamentoExistente })
+    renderModal({
+      funcionarios: [],
+      lancamento: { ...lancamentoExistente, categoria: 'Multa', funcionario_id: 'f-9' },
+    })
+    const select = screen.getByLabelText(/^funcionário$/i) as HTMLSelectElement
+    expect(select).toHaveValue('f-9')
+    expect(Array.from(select.options).map(o => o.textContent))
+      .toEqual(['—', 'funcionário vinculado (lista indisponível)'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPut).toHaveBeenCalled())
+    expect((mockPut.mock.calls[0][1] as Record<string, unknown>).funcionario_id).toBe('f-9')
+  })
+
+  it('com a lista completa NAO aparece opcao extra nenhuma', () => {
+    renderModal({ lancamento: { ...lancamentoExistente, categoria: 'Multa', veiculo_id: 'v-2', funcionario_id: 'f-1' } })
+    const veic = screen.getByLabelText(/^veículo$/i) as HTMLSelectElement
+    const func = screen.getByLabelText(/^funcionário$/i) as HTMLSelectElement
+    expect(Array.from(veic.options).map(o => o.textContent))
+      .toEqual(['—', 'Fiat Fiorino · ABC-1234', 'Volkswagen Kombi · XYZ-9876'])
+    expect(Array.from(func.options).map(o => o.textContent)).toEqual(['—', 'João Pereira', 'Maria Souza'])
+  })
+
+  it('lancamento novo, sem vinculo nenhum, tambem nao ganha opcao extra', () => {
+    renderModal({ categorias: ['Multa'], veiculos: [], funcionarios: [] })
+    expect(Array.from((screen.getByLabelText(/^veículo$/i) as HTMLSelectElement).options)).toHaveLength(1)
+    expect(Array.from((screen.getByLabelText(/^funcionário$/i) as HTMLSelectElement).options)).toHaveLength(1)
   })
 })

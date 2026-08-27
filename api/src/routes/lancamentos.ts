@@ -31,11 +31,37 @@ export const CATEGORIAS = [
 type Categoria = (typeof CATEGORIAS)[number]
 
 /**
- * `funcionario_id` so faz sentido em Salario e Adiantamento de salario —
- * e o que desconta do "a pagar" daquele funcionario (comentario da
- * migration 009). Nas demais categorias o campo tem que ficar nulo.
+ * `funcionario_id` e o que desconta do "a pagar" daquele funcionario
+ * (comentario da migration 009). Nas demais categorias o campo tem que ficar
+ * nulo.
+ *
+ * 'MULTA' ENTROU AQUI, e a distincao contabil e o motivo de ela ser um
+ * ADIANTAMENTO e nao um desconto de salario (016):
+ *
+ *  - Falta: nenhum dinheiro saiu. A empresa so vai PAGAR MENOS. Por isso o
+ *    desconto NAO e lancamento — se fosse, o Financeiro (que soma
+ *    `lancamentos.valor` como custo) contaria a falta como custo, ao mesmo
+ *    tempo em que ela abateria o "a pagar": erro nas duas pontas, com sinais
+ *    opostos.
+ *  - Multa: o dinheiro SAIU DE VERDADE, pago ao orgao de transito. E custo
+ *    real que aconteceu, e o funcionario REEMBOLSA pela folha. Mesma forma de
+ *    um adiantamento — custo que existe + recuperacao no salario — e por isso
+ *    ela continua sendo `lancamento` (custo no Financeiro, gasto do veiculo na
+ *    tela de Veiculos) e passa a tambem abater o "a pagar" de quem cometeu a
+ *    infracao. Transforma-la em desconto apagaria o custo da contabilidade.
+ *
+ * MULTA E A UNICA CATEGORIA NAS DUAS LISTAS (esta e CATEGORIAS_COM_VEICULO), e
+ * isso e proposital: as colunas sao independentes no banco e no saneamento
+ * abaixo — nada zera uma por causa da outra. O carro diz de QUAL VEICULO foi a
+ * infracao (o gasto dele conta a multa inteira, independentemente de quem
+ * reembolsa) e o funcionario diz QUEM a cometeu.
+ *
+ * O funcionario continua OPCIONAL, como em Salario e Adiantamento: nem toda
+ * infracao e atribuivel a alguem (radar sem condutor identificado), e exigir a
+ * escolha faria o usuario inventar um culpado. Multa sem funcionario e so
+ * custo do veiculo.
  */
-const CATEGORIAS_COM_FUNCIONARIO = new Set<string>(['Salário', 'Adiantamento de salário'])
+const CATEGORIAS_COM_FUNCIONARIO = new Set<string>(['Salário', 'Adiantamento de salário', 'Multa'])
 
 /**
  * `veiculo_id` so faz sentido nas despesas do PROPRIO carro — e o que
@@ -272,9 +298,15 @@ lancamentos.post('/', async (c) => {
   if (erroCampo) return c.json({ erro: erroCampo }, 400)
 
   // Registro novo: a categoria do proprio payload decide se funcionario_id
-  // se aplica. Fora de Salario/Adiantamento o valor enviado e ignorado (nao
-  // rejeitado) — nao e erro do usuario, e um campo que nao se aplica aquela
-  // categoria (ver CATEGORIAS_COM_FUNCIONARIO acima).
+  // se aplica. Fora de CATEGORIAS_COM_FUNCIONARIO o valor enviado e ignorado
+  // (nao rejeitado) — nao e erro do usuario, e um campo que nao se aplica
+  // aquela categoria (ver CATEGORIAS_COM_FUNCIONARIO acima).
+  //
+  // AS DUAS LINHAS SAO INDEPENDENTES, e precisam continuar sendo: em 'Multa',
+  // que esta nas duas listas, nenhum dos dois `if` dispara e os dois vinculos
+  // sobrevivem juntos. Uma condicao que zerasse um por causa do outro
+  // ("veiculo preenchido, entao funcionario nao") apagaria em silencio o
+  // vinculo que faz a multa abater o salario.
   if (!CATEGORIAS_COM_FUNCIONARIO.has(dados.categoria)) dados.funcionario_id = null
   // Mesma regra, mesmo motivo, para o veiculo (ver CATEGORIAS_COM_VEICULO).
   if (!CATEGORIAS_COM_VEICULO.has(dados.categoria)) dados.veiculo_id = null
@@ -350,6 +382,11 @@ lancamentos.put('/:id', async (c) => {
   // caso que o comentario acima descreve); quando ela NAO muda, so se mexe
   // no campo que o corpo de fato enviou — zerar o outro apagaria um vinculo
   // que ninguem pediu para apagar.
+  //
+  // Em 'Multa' os dois vinculos sao validos ao mesmo tempo, e o `if` de cada
+  // um le so a sua propria lista: trocar a categoria PARA Multa nao zera nem o
+  // carro nem o funcionario, e um PUT que envia so um dos dois nao encosta no
+  // outro.
   if ('categoria' in dados) {
     const categoria = dados.categoria as string
     if (!CATEGORIAS_COM_FUNCIONARIO.has(categoria)) dados.funcionario_id = null

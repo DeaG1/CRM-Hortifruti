@@ -302,6 +302,14 @@
   color: #9a4a2e;
 }
 
+/* A mesma cor de alerta do desconto, e de proposito: as duas colunas abatem o
+   "a pagar". A distincao entre elas esta no rotulo e na nota de rodape (num
+   caso nenhum dinheiro saiu, no outro saiu e o funcionario reembolsa), nao
+   numa terceira cor que ninguem consegue decodificar sem legenda. */
+.funcionarios-mono--multa {
+  color: #9a4a2e;
+}
+
 .funcionarios-numero--apagar {
   padding-left: 26px;
   border-left: 1px solid #eee9da;
@@ -492,6 +500,27 @@
   padding: 3px 10px;
   border-radius: 14px;
   white-space: nowrap;
+}
+
+/* O selo da categoria e a placa dividem a mesma celula do grid: a placa
+   pertence ao selo ("Multa · ABC-1234"), nao a descricao — que continua sendo
+   o texto livre que o usuario escreveu. `min-width: 0` para o selo poder
+   encolher em vez de estourar a coluna. */
+.funcionarios-lancamento-selo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.funcionarios-lancamento-placa {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5a584a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .funcionarios-lancamento-descricao {

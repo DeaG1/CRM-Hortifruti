@@ -6,6 +6,7 @@ import {
   gastoPorCategoria,
   derivarVeiculos,
   estatisticasVeiculos,
+  placaDeVeiculo,
   type Veiculo,
 } from './veiculos'
 import type { Lancamento } from './lancamentos'
@@ -220,5 +221,71 @@ describe('estatisticasVeiculos', () => {
     const somaDasPartes = Object.values(stats.porCategoria!).reduce((a, b) => a + b, 0)
     expect(stats.gastoPeriodo).toBe(somaDasPartes)
     expect(stats.gastoPeriodo).toBe(910)
+  })
+})
+
+describe('placaDeVeiculo — a etiqueta que o histórico do funcionário usa', () => {
+  const frota = [veiculo({ id: 'v-1', placa: 'ABC-1234' }), veiculo({ id: 'v-2', placa: 'XYZ-9876' })]
+
+  it('acha a placa pelo id', () => {
+    expect(placaDeVeiculo(frota, 'v-2')).toBe('XYZ-9876')
+  })
+
+  it('sem veículo no lançamento: null (a maioria dos lançamentos)', () => {
+    expect(placaDeVeiculo(frota, null)).toBeNull()
+    expect(placaDeVeiculo(frota, '')).toBeNull()
+    expect(placaDeVeiculo(frota, undefined)).toBeNull()
+  })
+
+  it('lista indisponível: null — nunca uma placa inventada', () => {
+    expect(placaDeVeiculo(null, 'v-1')).toBeNull()
+  })
+
+  it('id que não está na lista (carro excluído do cadastro): null', () => {
+    expect(placaDeVeiculo(frota, 'v-99')).toBeNull()
+  })
+
+  it('lista vazia: null, e não estoura', () => {
+    expect(placaDeVeiculo([], 'v-1')).toBeNull()
+  })
+})
+
+/**
+ * O GASTO DO CARRO NÃO SABE DE FUNCIONÁRIO, e é isso que estes testes fixam: a
+ * multa foi paga ao órgão de trânsito, é custo daquele veículo, e continua
+ * inteira na conta dele independentemente de quem reembolsa pela folha. Quem
+ * subtrai do salário é derive/funcionarios.ts, do outro lado.
+ */
+describe('gasto do veículo — a multa conta inteira, com ou sem funcionário vinculado', () => {
+  const multaComCulpado = lanc({
+    id: 'm1', categoria: 'Multa', valor: 293.47, data: '2026-06-12',
+    veiculo_id: 'v-1', funcionario_id: 'f-1',
+  })
+  const multaSemCulpado = { ...multaComCulpado, id: 'm2', funcionario_id: null }
+
+  it('lancamentosDoVeiculo filtra por veículo, não por funcionário', () => {
+    expect(lancamentosDoVeiculo([multaComCulpado], 'v-1', '2026-06')).toHaveLength(1)
+  })
+
+  it('o gasto é o mesmo com e sem funcionário vinculado', () => {
+    const comCulpado = gastoDoVeiculo(lancamentosDoVeiculo([multaComCulpado], 'v-1', '2026-06'))
+    const semCulpado = gastoDoVeiculo(lancamentosDoVeiculo([multaSemCulpado], 'v-1', '2026-06'))
+    expect(comCulpado).toBe(293.47)
+    expect(semCulpado).toBe(293.47)
+  })
+
+  it('a abertura por categoria também não muda', () => {
+    expect(gastoPorCategoria([multaComCulpado]).Multa).toBe(293.47)
+    expect(gastoPorCategoria([multaSemCulpado]).Multa).toBe(293.47)
+  })
+
+  it('derivarVeiculos e os cartões do topo somam a multa vinculada como qualquer outra', () => {
+    const [derivado] = derivarVeiculos([veiculo({ id: 'v-1' })], [multaComCulpado], '2026-06')
+    expect(derivado.gasto).toBe(293.47)
+    expect(derivado.historico).toHaveLength(1)
+
+    const stats = estatisticasVeiculos([veiculo({ id: 'v-1' })], [multaComCulpado], '2026-06')
+    expect(stats.gastoPeriodo).toBe(293.47)
+    expect(stats.porCategoria?.Multa).toBe(293.47)
   })
 })

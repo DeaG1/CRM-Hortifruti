@@ -55,8 +55,8 @@ function montar() {
 }
 
 function folha(container: HTMLElement): HTMLElement {
-  const el = container.querySelector('.romaneio-folha')
-  if (!el) throw new Error('a folha (.romaneio-folha) não está na tela')
+  const el = container.querySelector('.folha')
+  if (!el) throw new Error('a folha (.folha) não está na tela')
   return el as HTMLElement
 }
 
@@ -115,7 +115,7 @@ describe('RomaneioEntregas — a seleção por dia', () => {
 
     fireEvent.change(screen.getByLabelText('Entregas de'), { target: { value: '2026-08-24' } })
     await waitFor(() => {
-      expect(container.querySelector('.romaneio-folha-data')?.textContent)
+      expect(container.querySelector('.folha-data')?.textContent)
         .toBe('segunda-feira, 24/08/2026')
     })
 
@@ -167,7 +167,7 @@ describe('RomaneioEntregas — a seleção por dia', () => {
 
     fireEvent.change(screen.getByLabelText('Entregas de'), { target: { value: '' } })
     await screen.findByText('Escolha um dia para montar o romaneio.')
-    expect(container.querySelector('.romaneio-folha')).toBeNull()
+    expect(container.querySelector('.folha')).toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
   })
 })
@@ -188,7 +188,7 @@ describe('RomaneioEntregas — a data na folha impressa', () => {
     fireEvent.change(screen.getByLabelText('Entregas de'), { target: { value: '2026-08-28' } })
     await screen.findByText('Mercado Boa Safra')
 
-    const destaque = container.querySelector('.romaneio-folha-data')
+    const destaque = container.querySelector('.folha-data')
     expect(destaque?.textContent).toBe('sexta-feira, 28/08/2026')
   })
 
@@ -203,7 +203,7 @@ describe('RomaneioEntregas — a data na folha impressa', () => {
     fireEvent.change(screen.getByLabelText('Entregas de'), { target: { value: '2026-08-28' } })
     await screen.findByText('Dois')
 
-    const selos = container.querySelectorAll('.romaneio-cliente-selo')
+    const selos = container.querySelectorAll('.folha-bloco-selo')
     expect(selos).toHaveLength(2)
     for (const s of selos) expect(s.textContent).toBe('sexta-feira, 28/08/2026')
   })
@@ -231,7 +231,7 @@ describe('RomaneioEntregas — a venda que não pertence a dia nenhum', () => {
     const { container } = montar()
     await screen.findByText('Mercado Boa Safra')
 
-    const aviso = container.querySelector('.romaneio-aviso-sem-data')
+    const aviso = container.querySelector('.folha-aviso')
     expect(aviso).not.toBeNull()
     expect(aviso?.getAttribute('data-no-print')).toBe('1')
   })
@@ -240,7 +240,7 @@ describe('RomaneioEntregas — a venda que não pertence a dia nenhum', () => {
     mockDias({ [HOJE]: [linha()] })
     const { container } = montar()
     await screen.findByText('Mercado Boa Safra')
-    expect(container.querySelector('.romaneio-aviso-sem-data')).toBeNull()
+    expect(container.querySelector('.folha-aviso')).toBeNull()
   })
 
   it('o aviso aparece mesmo num dia SEM entrega nenhuma — é onde ele mais importa', async () => {
@@ -261,7 +261,7 @@ describe('RomaneioEntregas — dia sem entrega', () => {
 
     expect(vazio.textContent).toContain(HOJE.slice(8) + '/' + HOJE.slice(5, 7))
     expect(screen.queryByRole('alert')).toBeNull()
-    expect(container.querySelector('.romaneio-folha')).toBeNull()
+    expect(container.querySelector('.folha')).toBeNull()
   })
 
   it('explica que o corte é a DATA DE ENTREGA, não a do pedido', async () => {
@@ -309,7 +309,7 @@ describe('RomaneioEntregas — a folha', () => {
     const { container } = montar()
     await screen.findByText('Hortifruti Zé')
 
-    const blocos = container.querySelectorAll('.romaneio-cliente')
+    const blocos = container.querySelectorAll('.folha-bloco')
     expect(blocos).toHaveLength(2)
     expect(within(blocos[0] as HTMLElement).getByText('Alface')).toBeTruthy()
     expect(within(blocos[0] as HTMLElement).getByText('Rúcula')).toBeTruthy()
@@ -344,7 +344,7 @@ describe('RomaneioEntregas — a folha', () => {
     })
     const { container } = montar()
     await screen.findByText('Alface')
-    expect(container.querySelectorAll('.romaneio-check')).toHaveLength(2)
+    expect(container.querySelectorAll('.folha-check')).toHaveLength(2)
   })
 
   it('a folha traz a conferência de topo (clientes · pedidos · itens)', async () => {
@@ -356,7 +356,7 @@ describe('RomaneioEntregas — a folha', () => {
     })
     const { container } = montar()
     await screen.findByText('Rúcula')
-    expect(container.querySelector('.romaneio-folha-resumo')?.textContent)
+    expect(container.querySelector('.folha-resumo')?.textContent)
       .toBe('1 cliente · 1 pedido · 2 itens')
   })
 })
@@ -429,7 +429,7 @@ describe('RomaneioEntregas — escolher o que sai na folha', () => {
     comDados()
     const { container } = montar()
     await screen.findByText('Mercado Boa Safra')
-    const fixos = container.querySelector('.romaneio-campos-fixos')?.textContent ?? ''
+    const fixos = container.querySelector('.folha-campos-fixos')?.textContent ?? ''
     expect(fixos).toContain('Nome do cliente')
     expect(fixos).toContain('quantidade')
   })
@@ -438,7 +438,7 @@ describe('RomaneioEntregas — escolher o que sai na folha', () => {
     comDados()
     const { container } = montar()
     await screen.findByText('Mercado Boa Safra')
-    expect(container.querySelector('.romaneio-campos')?.getAttribute('data-no-print')).toBe('1')
+    expect(container.querySelector('.folha-campos')?.getAttribute('data-no-print')).toBe('1')
   })
 })
 
@@ -509,7 +509,7 @@ describe('RomaneioEntregas — a impressão', () => {
     const { container } = montar()
     await screen.findByText('Mercado Boa Safra')
 
-    for (const seletor of ['.romaneio-barra', '.romaneio-campos']) {
+    for (const seletor of ['.folha-barra', '.folha-campos']) {
       expect(container.querySelector(seletor)?.getAttribute('data-no-print')).toBe('1')
     }
     // E nenhum botão sobrou fora de uma região marcada.
@@ -524,9 +524,9 @@ describe('RomaneioEntregas — a impressão', () => {
     await screen.findByText('Mercado Boa Safra')
     // É esta classe que dá orientação retrato só a esta impressão, sem virar
     // os relatórios (que são paisagem) junto.
-    expect(document.body.classList.contains('romaneio-imprimindo')).toBe(true)
+    expect(document.body.classList.contains('folha-imprimindo')).toBe(true)
     unmount()
-    expect(document.body.classList.contains('romaneio-imprimindo')).toBe(false)
+    expect(document.body.classList.contains('folha-imprimindo')).toBe(false)
   })
 })
 
@@ -542,7 +542,7 @@ describe('RomaneioEntregas — isolação de falha', () => {
     const aviso = await screen.findByRole('status')
     expect(aviso.textContent).toContain('Não foi possível montar a folha')
     expect(screen.getByLabelText('Entregas de')).toBeTruthy()
-    expect(container.querySelector('.romaneio-campos')).not.toBeNull()
+    expect(container.querySelector('.folha-campos')).not.toBeNull()
   })
 
   it('o botão de voltar devolve a lista de saídas', async () => {

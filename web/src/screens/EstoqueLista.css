@@ -438,6 +438,35 @@
   background: #f2ede0;
 }
 
+.estoque-posicao-espaco {
+  flex: 1;
+}
+
+/* Secundário, ao lado do controle de data: contar o depósito é uma vez por
+   semana, não o trabalho de todo dia desta tela. O estilo é o MESMO do botão
+   de imprimir de Saídas e de Entradas, de propósito — as três telas de
+   operação têm o mesmo botão, no mesmo canto, com rótulo começando por
+   "Imprimir". */
+.estoque-botao-imprimir {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  color: #3f6b33;
+  border: 1px solid #cfe0c2;
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.estoque-botao-imprimir:hover {
+  background: #eef4e8;
+  border-color: #b6d0a4;
+}
+
 /* O aviso de que NÃO se está olhando hoje. Âmbar e com borda à esquerda, para
    ser impossível passar por ele sem ver — uma tela de estoque histórico com a
    mesma cara da atual é um convite a decidir com o número errado. */

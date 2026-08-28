@@ -6,7 +6,10 @@ import {
   type CampoRomaneio, type CamposRomaneio, type Romaneio, type RespostaRomaneio,
 } from '../derive/romaneio'
 import { camposSalvosRomaneio, salvarCamposRomaneio } from '../preferenciaRomaneio'
-import './RomaneioEntregas.css'
+import {
+  useModoFolha, BarraDaFolha, PainelDeCampos, TopoDaFolha,
+  CaixaDeMarcar, LinhaAssinatura,
+} from '../components/FolhaImpressa'
 
 /**
  * O ROMANEIO DE ENTREGAS — a tela que produz a folha de conferência do
@@ -24,6 +27,17 @@ import './RomaneioEntregas.css'
  *      novo, e a resposta certa seria a mesma.
  *   3. Imprimir é uma AÇÃO sobre a lista de saídas, como exportar CSV é uma
  *      ação sobre um relatório — não um lugar onde se mora.
+ *
+ * ---- A CASCA É COMPARTILHADA COM AS OUTRAS DUAS FOLHAS ----
+ *
+ * Esta tela foi a primeira das três (93972c3) e resolveu sozinha a barra, o
+ * painel de campos, o topo do documento e o `@media print`. Quando Estoque e
+ * Entradas ganharam folha, tudo isso saiu daqui para
+ * components/FolhaImpressa.tsx + .css: três cópias do mesmo CSS de impressão
+ * seria três lugares para corrigir o mesmo defeito, e o que acontece na
+ * prática é que dois são corrigidos e o terceiro fica para trás. O que
+ * continua sendo desta tela é o MIOLO — o bloco por cliente, que é o que
+ * distingue um romaneio de uma folha de contagem.
  *
  * ---- O DIA É INDEPENDENTE DO PERÍODO GLOBAL, E ISSO É DELIBERADO ----
  *
@@ -74,25 +88,8 @@ export function RomaneioEntregas({ onVoltar, onSessaoExpirada }: RomaneioEntrega
 
   const dataPorExtenso = dataPorExtensoRomaneio(data)
 
-  /**
-   * MARCA O DOCUMENTO ENQUANTO A FOLHA ESTÁ MONTADA — é o que dá orientação
-   * de retrato só a esta impressão.
-   *
-   * Regra de `@page` é do DOCUMENTO, não do componente, e `RelatoriosTela.css`
-   * já declara `@page { size: A4 landscape }` para o app inteiro (o bundle
-   * carrega o CSS de todas as telas). Um segundo `@page` sem nome aqui
-   * brigaria por ordem de bundle e, vencendo, viraria os relatórios de
-   * paisagem para retrato — regressão numa tela que ninguém tocou. A saída é
-   * uma página NOMEADA (`@page romaneio`, em RomaneioEntregas.css) pedida por
-   * `body.romaneio-imprimindo`, e esta classe é o interruptor dela.
-   *
-   * O `remove` na limpeza é obrigatório: sair do romaneio e imprimir
-   * Relatórios não pode herdar o retrato daqui.
-   */
-  useEffect(() => {
-    document.body.classList.add('romaneio-imprimindo')
-    return () => document.body.classList.remove('romaneio-imprimindo')
-  }, [])
+  // Retrato só enquanto esta folha está montada — ver `useModoFolha`.
+  useModoFolha()
 
   useEffect(() => {
     // `<input type="date">` pode ficar vazio (o usuário apaga o campo), e uma
@@ -122,7 +119,7 @@ export function RomaneioEntregas({ onVoltar, onSessaoExpirada }: RomaneioEntrega
   function alternarCampo(chave: CampoRomaneio) {
     const novos = { ...campos, [chave]: !campos[chave] }
     setCampos(novos)
-    // Gravar é o BÔNUS; a folha já mudou na tela. Ver preferenciaRomaneio.ts.
+    // Gravar é o BÔNUS; a folha já mudou na tela. Ver preferenciaFolha.ts.
     setPreferenciaNaoGravou(!salvarCamposRomaneio(novos))
   }
 
@@ -150,114 +147,84 @@ export function RomaneioEntregas({ onVoltar, onSessaoExpirada }: RomaneioEntrega
   const temEntregas = !!romaneio && romaneio.grupos.length > 0
 
   return (
-    <div className="romaneio">
-      <div className="romaneio-barra" data-no-print="1">
-        <button type="button" className="romaneio-voltar" onClick={onVoltar}>
-          ← Voltar para a lista
-        </button>
-
-        <div className="romaneio-dia">
+    <div className="folha-tela">
+      <BarraDaFolha
+        onVoltar={onVoltar}
+        aoImprimir={temEntregas ? () => window.print() : null}
+        rotuloImprimir="Imprimir romaneio"
+      >
+        <div className="folha-controle">
           <button
             type="button"
-            className="romaneio-passo"
+            className="folha-passo"
             aria-label="Dia anterior"
             onClick={() => irPara(diaVizinho(data, -1))}
           >
             ◀
           </button>
-          <label className="romaneio-dia-rotulo" htmlFor="romaneio-data">Entregas de</label>
+          <label className="folha-controle-rotulo" htmlFor="romaneio-data">Entregas de</label>
           <input
             id="romaneio-data"
-            className="romaneio-dia-input"
+            className="folha-controle-campo"
             type="date"
             value={data}
             onChange={e => irPara(e.target.value)}
           />
           <button
             type="button"
-            className="romaneio-passo"
+            className="folha-passo"
             aria-label="Próximo dia"
             onClick={() => irPara(diaVizinho(data, 1))}
           >
             ▶
           </button>
           {data !== hoje && (
-            <button type="button" className="romaneio-hoje" onClick={() => irPara(hoje)}>
+            <button type="button" className="folha-hoje" onClick={() => irPara(hoje)}>
               Hoje
             </button>
           )}
         </div>
+      </BarraDaFolha>
 
-        <div className="romaneio-flex-espaco" />
-
-        {temEntregas && (
-          <button type="button" className="romaneio-imprimir" onClick={() => window.print()}>
-            Imprimir romaneio
-          </button>
-        )}
-      </div>
-
-      <fieldset className="romaneio-campos" data-no-print="1">
-        <legend className="romaneio-campos-titulo">O que sai na folha</legend>
-        <div className="romaneio-campos-grade">
-          {['Cliente', 'Pedido', 'Preços'].map(grupo => (
-            <div key={grupo} className="romaneio-campos-grupo">
-              <div className="romaneio-campos-grupo-nome">{grupo}</div>
-              {CAMPOS_ROMANEIO.filter(c => c.grupo === grupo).map(c => (
-                <label key={c.chave} className="romaneio-campo" title={c.ajuda}>
-                  <input
-                    type="checkbox"
-                    checked={campos[c.chave]}
-                    onChange={() => alternarCampo(c.chave)}
-                  />
-                  <span className="romaneio-campo-rotulo">{c.rotulo}</span>
-                </label>
-              ))}
-            </div>
-          ))}
-        </div>
-
-        {/* A escolha só é honesta se disser também o que NÃO se escolhe. */}
-        <p className="romaneio-campos-fixos">
-          <strong>Sempre sai:</strong> {CAMPOS_FIXOS_ROMANEIO.join(' · ')}.
-        </p>
-        <p className="romaneio-campos-nota">
-          Os três campos de <strong>Preços</strong> vêm desmarcados de propósito: a folha leva
-          vários clientes juntos, e um cliente lê o preço do outro se ela ficar à vista. A escolha
-          fica gravada neste navegador para a próxima impressão.
-        </p>
-        {preferenciaNaoGravou && (
-          <p className="romaneio-campos-aviso" role="status">
-            A escolha vale para esta impressão, mas não pôde ser gravada neste navegador — no
-            próximo acesso ela volta ao padrão.
-          </p>
-        )}
-      </fieldset>
+      <PainelDeCampos
+        defs={CAMPOS_ROMANEIO}
+        campos={campos}
+        aoAlternar={alternarCampo}
+        fixos={CAMPOS_FIXOS_ROMANEIO}
+        naoGravou={preferenciaNaoGravou}
+        nota={
+          <>
+            Os três campos de <strong>Preços</strong> vêm desmarcados de propósito: a folha leva
+            vários clientes juntos, e um cliente lê o preço do outro se ela ficar à vista. A escolha
+            fica gravada neste navegador para a próxima impressão.
+          </>
+        }
+      />
 
       {romaneio && romaneio.avisoSemData && (
         // Só na tela (data-no-print): é trabalho do escritório, não do
         // motorista — ele não tem como agir sobre isso no pátio, e a folha
         // dele não pode ganhar um alerta que ele precisa ignorar.
-        <p className="romaneio-aviso-sem-data" role="status" data-no-print="1">
+        <p className="folha-aviso" role="status" data-no-print="1">
           {romaneio.avisoSemData}
         </p>
       )}
 
       {montagemFalhou && (
-        <p className="romaneio-estado-aviso" role="status" data-no-print="1">
+        <p className="folha-estado-aviso" role="status" data-no-print="1">
           Não foi possível montar a folha deste dia. O controle de data e a escolha de campos
           continuam funcionando — troque o dia ou recarregue a tela.
         </p>
       )}
 
-      {carregando && <p className="romaneio-estado" data-no-print="1">Carregando…</p>}
+      {carregando && <p className="folha-estado" data-no-print="1">Carregando…</p>}
 
       {!carregando && erro && (
-        <p className="romaneio-estado romaneio-estado--erro" role="alert" data-no-print="1">{erro}</p>
+        <p className="folha-estado folha-estado--erro" role="alert" data-no-print="1">{erro}</p>
       )}
 
       {!carregando && !erro && !dataPorExtenso && (
-        <p className="romaneio-estado" data-no-print="1">
+        <p className="folha-estado" data-no-print="1">
           Escolha um dia para montar o romaneio.
         </p>
       )}
@@ -266,11 +233,11 @@ export function RomaneioEntregas({ onVoltar, onSessaoExpirada }: RomaneioEntrega
         // VAZIO, NÃO ERRO: um dia sem entrega é um fato do negócio (feriado,
         // domingo, dia sem rota), não uma falha. A frase repete a data por
         // extenso para não deixar dúvida sobre QUAL dia está vazio.
-        <div className="estado-vazio romaneio-vazio" data-no-print="1">
-          <div className="romaneio-vazio-titulo">
+        <div className="estado-vazio folha-vazio" data-no-print="1">
+          <div className="folha-vazio-titulo">
             Nenhuma entrega marcada para {romaneio.dataPorExtenso ?? data}.
           </div>
-          <div className="romaneio-vazio-sub">
+          <div className="folha-vazio-sub">
             O romaneio usa a <strong>data de entrega</strong> do pedido, não a data em que ele foi
             lançado. Use ◀ e ▶ para ver outro dia.
           </div>
@@ -291,71 +258,63 @@ function Folha({ romaneio }: { romaneio: Romaneio }) {
   const dataFolha = romaneio.dataPorExtenso ?? romaneio.data
 
   return (
-    <div className="romaneio-folha">
-      <div className="romaneio-folha-topo">
-        <div className="romaneio-folha-titulo">ROMANEIO DE ENTREGAS</div>
-        {/* A DATA GRANDE. É o maior texto da folha de propósito — ver o
-            comentário de `dataPorExtensoRomaneio` em derive/romaneio.ts. */}
-        <div className="romaneio-folha-data">{dataFolha}</div>
-        <div className="romaneio-folha-resumo">{resumoRomaneio(romaneio)}</div>
-      </div>
+    <div className="folha">
+      <TopoDaFolha
+        titulo="ROMANEIO DE ENTREGAS"
+        data={dataFolha}
+        resumo={resumoRomaneio(romaneio)}
+      />
 
       {romaneio.grupos.map(g => (
-        <section className="romaneio-cliente" key={g.clienteId ?? g.cliente}>
-          <div className="romaneio-cliente-topo">
-            <div className="romaneio-cliente-nome">{g.cliente}</div>
+        <section className="folha-bloco" key={g.clienteId ?? g.cliente}>
+          <div className="folha-bloco-topo">
+            <div className="folha-bloco-nome">{g.cliente}</div>
             {/* A data repetida em cada bloco: `break-inside: avoid` mantém o
                 cliente inteiro numa página, então cada página carrega pelo
                 menos um destes. Quem separar as folhas continua sabendo de
                 que dia cada uma é. */}
-            <div className="romaneio-cliente-selo">{dataFolha}</div>
+            <div className="folha-bloco-selo">{dataFolha}</div>
           </div>
 
           {(g.rota || g.endereco || g.telefone) && (
-            <div className="romaneio-cliente-dados">
-              {g.rota && <span className="romaneio-cliente-dado">Rota: {g.rota}</span>}
-              {g.endereco && <span className="romaneio-cliente-dado">{g.endereco}</span>}
-              {g.telefone && <span className="romaneio-cliente-dado">Tel.: {g.telefone}</span>}
+            <div className="folha-bloco-dados">
+              {g.rota && <span className="folha-bloco-dado">Rota: {g.rota}</span>}
+              {g.endereco && <span className="folha-bloco-dado">{g.endereco}</span>}
+              {g.telefone && <span className="folha-bloco-dado">Tel.: {g.telefone}</span>}
             </div>
           )}
 
           {g.pedidos.map(p => (
-            <div className="romaneio-pedido" key={p.id}>
+            <div className="folha-bloco-secao" key={p.id}>
               {(p.numero || p.total) && (
-                <div className="romaneio-pedido-topo">
-                  {p.numero && <span className="romaneio-pedido-numero">Pedido {p.numero}</span>}
-                  {p.total && <span className="romaneio-pedido-total">Total {p.total}</span>}
+                <div className="folha-nao-quebrar folha-bloco-linha">
+                  {p.numero && <span>Pedido {p.numero}</span>}
+                  {p.total && <span>Total {p.total}</span>}
                 </div>
               )}
-              {p.obs && <div className="romaneio-pedido-obs">Obs.: {p.obs}</div>}
+              {p.obs && <div className="folha-nao-quebrar folha-bloco-obs">Obs.: {p.obs}</div>}
 
-              <table className="romaneio-itens">
+              <table className="folha-tabela">
                 <thead>
                   <tr>
-                    <th className="romaneio-col-check" scope="col"><span aria-hidden="true">✓</span></th>
+                    <th className="folha-col-check" scope="col"><span aria-hidden="true">✓</span></th>
                     <th scope="col">PRODUTO</th>
-                    <th className="romaneio-col-qtd" scope="col">QUANTIDADE</th>
-                    {campos.precoUnitario && <th className="romaneio-col-num" scope="col">PREÇO UN.</th>}
-                    {campos.totalItem && <th className="romaneio-col-num" scope="col">TOTAL</th>}
+                    <th className="folha-col-qtd" scope="col">QUANTIDADE</th>
+                    {campos.precoUnitario && <th className="folha-col-num" scope="col">PREÇO UN.</th>}
+                    {campos.totalItem && <th className="folha-col-num" scope="col">TOTAL</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {p.itens.map(i => (
-                    <tr key={i.id} className="romaneio-item">
-                      <td className="romaneio-col-check">
-                        {/* O quadradinho é uma caixa desenhada com borda, não
-                            um caractere: caractere depende da fonte instalada
-                            na máquina que imprime e some em impressora
-                            monocromática antiga. */}
-                        <span className="romaneio-check" aria-hidden="true" />
-                      </td>
-                      <td className="romaneio-item-produto">{i.produto}</td>
-                      <td className="romaneio-col-qtd">{i.quantidade}</td>
+                    <tr key={i.id} className="folha-item">
+                      <td className="folha-col-check"><CaixaDeMarcar /></td>
+                      <td className="folha-produto">{i.produto}</td>
+                      <td className="folha-col-qtd">{i.quantidade}</td>
                       {campos.precoUnitario && (
-                        <td className="romaneio-col-num">{i.precoUnitario ?? '—'}</td>
+                        <td className="folha-col-num">{i.precoUnitario ?? '—'}</td>
                       )}
                       {campos.totalItem && (
-                        <td className="romaneio-col-num">{i.total ?? '—'}</td>
+                        <td className="folha-col-num">{i.total ?? '—'}</td>
                       )}
                     </tr>
                   ))}
@@ -364,17 +323,17 @@ function Folha({ romaneio }: { romaneio: Romaneio }) {
             </div>
           ))}
 
-          <div className="romaneio-cliente-rodape">
+          <div className="folha-bloco-rodape">
             {g.totalItens === 1 ? '1 item' : `${g.totalItens} itens`} · Recebido por
-            <span className="romaneio-linha-assinatura" />
+            <LinhaAssinatura />
           </div>
         </section>
       ))}
 
-      <div className="romaneio-folha-rodape">
-        <span>Conferido por<span className="romaneio-linha-assinatura" /></span>
-        <span>Motorista<span className="romaneio-linha-assinatura" /></span>
-        <span>Saída às<span className="romaneio-linha-assinatura romaneio-linha-assinatura--curta" /></span>
+      <div className="folha-rodape">
+        <span>Conferido por<LinhaAssinatura /></span>
+        <span>Motorista<LinhaAssinatura /></span>
+        <span>Saída às<LinhaAssinatura curta /></span>
       </div>
     </div>
   )

@@ -71,8 +71,10 @@
 
 /* Secundário ao lado do "Novo pedido": lançar venda é o trabalho de todo dia
    desta tela; imprimir o romaneio é uma vez por manhã. A hierarquia visual
-   diz isso. */
-.saidas-botao-romaneio {
+   diz isso — e o estilo é o MESMO do botão de imprimir de Entradas e de
+   Estoque, de propósito: as três telas de operação têm o mesmo botão, no
+   mesmo canto, com rótulo começando por "Imprimir". */
+.saidas-botao-imprimir {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -87,7 +89,7 @@
   font-family: 'Public Sans', sans-serif;
 }
 
-.saidas-botao-romaneio:hover {
+.saidas-botao-imprimir:hover {
   background: #eef4e8;
   border-color: #b6d0a4;
 }

@@ -767,7 +767,7 @@ describe('SaidasLista — o romaneio de entregas', () => {
     await screen.findByText('S-0001')
 
     const topo = document.querySelector('.saidas-topo') as HTMLElement
-    expect(within(topo).getByRole('button', { name: 'Romaneio de entregas' })).toBeInTheDocument()
+    expect(within(topo).getByRole('button', { name: 'Imprimir romaneio' })).toBeInTheDocument()
     expect(within(topo).getByRole('button', { name: /Novo pedido/ })).toBeInTheDocument()
   })
 
@@ -776,7 +776,7 @@ describe('SaidasLista — o romaneio de entregas', () => {
     render(<SaidasLista onSessaoExpirada={() => {}} />)
     await screen.findByText('S-0001')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Romaneio de entregas' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Imprimir romaneio' }))
     await screen.findByLabelText('Entregas de')
     // A tabela de saídas saiu de cena — nada sobreposto a nada.
     expect(screen.queryByText('S-0001')).toBeNull()
@@ -788,11 +788,11 @@ describe('SaidasLista — o romaneio de entregas', () => {
     render(<SaidasLista onSessaoExpirada={() => {}} />)
     await screen.findByText('S-0001')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Romaneio de entregas' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Imprimir romaneio' }))
     await screen.findByLabelText('Entregas de')
     fireEvent.click(screen.getByRole('button', { name: '← Voltar para a lista' }))
     await screen.findByText('S-0001')
-    expect(screen.getByRole('button', { name: 'Romaneio de entregas' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Imprimir romaneio' })).toBeInTheDocument()
   })
 
   it('a folha não depende do período do cabeçalho — ela tem o DIA dela', async () => {
@@ -806,7 +806,7 @@ describe('SaidasLista — o romaneio de entregas', () => {
     render(<SaidasLista periodo="2020-01" onSessaoExpirada={() => {}} />)
     await screen.findByText(/Nenhuma saída em Janeiro\/2020/)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Romaneio de entregas' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Imprimir romaneio' }))
     expect(await screen.findByText('Alface')).toBeInTheDocument()
     expect(screen.getByText('45 UN')).toBeInTheDocument()
   })

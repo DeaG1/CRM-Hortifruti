@@ -9,6 +9,7 @@ import { perdaColetaPct } from '../derive/coleta'
 import { perdaColetaEfetiva, type EntradaResumo } from '../derive/relatorios'
 import { derivarResumoEntradas, type ResumoEntradas } from '../derive/resumoOperacional'
 import { filtrarPorPeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
+import { FolhaConferenciaEntrada } from './FolhaConferenciaEntrada'
 import './EntradasLista.css'
 
 /** Forma de um item de GET /api/entradas (api/src/routes/entradas.ts,
@@ -320,6 +321,17 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
   const [excluindo, setExcluindo] = useState(false)
   const [erroExclusao, setErroExclusao] = useState('')
 
+  /**
+   * A folha de conferência da carga (screens/FolhaConferenciaEntrada.tsx) abre
+   * NO LUGAR da lista, e não numa camada por cima dela — mesma decisão do
+   * romaneio em Saídas: sobreposição em `position: fixed` é exatamente o que o
+   * navegador imprime pior (a camada vira uma página só, ou repete em todas), e
+   * este é um componente que existe para virar papel. Trocar a lista pela folha
+   * deixa o documento em fluxo normal, que é o arranjo em que a impressão é
+   * previsível.
+   */
+  const [folhaAberta, setFolhaAberta] = useState(false)
+
   useEffect(() => {
     let cancelado = false
     setCarregando(true)
@@ -447,6 +459,23 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
     }
   }
 
+  // A folha tem busca própria (itens da coleta escolhida) e não depende do
+  // período do cabeçalho — por isso vem ANTES dos estados de carregamento/erro
+  // daqui. O que ela precisa desta tela é só a lista de coletas para o
+  // seletor, e essa lista é a INTEIRA (`entradas`), não a recortada pelo
+  // período: o recorte do cabeçalho serve para ler a tabela, não para decidir
+  // o que se consegue imprimir.
+  if (folhaAberta) {
+    return (
+      <FolhaConferenciaEntrada
+        entradas={entradas}
+        nomeFornecedor={id => (id ? fornecedores.find(f => f.id === id)?.nome ?? null : null)}
+        onVoltar={() => setFolhaAberta(false)}
+        onSessaoExpirada={onSessaoExpirada}
+      />
+    )
+  }
+
   if (carregando) return <p className="entradas-estado">Carregando…</p>
   if (erro) return <p className="entradas-estado entradas-estado--erro" role="alert">{erro}</p>
 
@@ -504,6 +533,16 @@ export function EntradasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Ent
           Coletas e compras dos fornecedores · clique numa entrada para editar ·{' '}
           <strong>{rotuloPeriodo(periodo)}</strong>
         </div>
+        {/* O botão de imprimir fica AQUI, no mesmo canto e com o mesmo rótulo
+            começando por "Imprimir" das outras duas telas de operação: quem
+            aprendeu a imprimir numa precisa achar nas outras sem procurar. */}
+        <button
+          type="button"
+          className="entradas-botao-imprimir"
+          onClick={() => setFolhaAberta(true)}
+        >
+          Imprimir conferência
+        </button>
         <button type="button" className="entradas-botao-novo" onClick={abrirNovo}>
           <span className="entradas-botao-novo-icone">＋</span> Nova entrada
         </button>

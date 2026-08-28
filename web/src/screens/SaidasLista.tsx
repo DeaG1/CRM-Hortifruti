@@ -198,6 +198,46 @@ interface SaidasListaProps {
   onSessaoExpirada: () => void
 }
 
+/**
+ * A BARRA DO TOPO DE SAÍDAS — e ela existe COM A LISTA VAZIA TAMBÉM.
+ *
+ * O defeito que isto conserta: o estado vazio retornava cedo e a barra
+ * inteira — com o botão do romaneio — não chegava a renderizar. O dono
+ * procurou o botão, não achou, e concluiu que a funcionalidade não existia.
+ * Se o funcionário não acha, a funcionalidade não existe na prática.
+ *
+ * E a ausência era ERRADA, não só inconveniente: o romaneio imprime QUALQUER
+ * DATA, inclusive dias que têm entrega. "Nenhuma saída no período filtrado"
+ * não quer dizer "não há o que imprimir" — quer dizer que o recorte do
+ * cabeçalho não alcança aquele dia. Esconder o botão justamente aí é
+ * escondê-lo do caso em que ele é mais necessário.
+ *
+ * Por isso a barra é UM componente, fora do corpo da tela, usado pelos dois
+ * caminhos de renderização: assim não existe um "outro topo" que alguém possa
+ * esquecer de atualizar — que é exatamente como o botão sumiu.
+ *
+ * O rótulo é "Imprimir romaneio", começando por IMPRIMIR, igual ao de
+ * Entradas ("Imprimir conferência") e ao de Estoque ("Imprimir contagem"):
+ * era "Romaneio de entregas", e a palavra que o dono procurou não estava lá.
+ */
+function BarraDoTopo({ dica, aoImprimir, aoNovo }: {
+  dica: string
+  aoImprimir: () => void
+  aoNovo: () => void
+}) {
+  return (
+    <div className="saidas-topo">
+      <div className="saidas-topo-dica">{dica}</div>
+      <button type="button" className="saidas-botao-imprimir" onClick={aoImprimir}>
+        Imprimir romaneio
+      </button>
+      <button type="button" className="saidas-botao-novo" onClick={aoNovo}>
+        ＋ Novo pedido
+      </button>
+    </div>
+  )
+}
+
 export function SaidasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: SaidasListaProps) {
   const [saidas, setSaidas] = useState<Saida[]>([])
   const [clientes, setClientes] = useState<Cliente[]>([])
@@ -329,7 +369,15 @@ export function SaidasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Saida
 
   if (saidas.length === 0) {
     return (
-      <>
+      <div className="saidas-lista">
+        {/* A dica muda (não há lista para clicar), mas o BOTÃO É O MESMO, no
+            mesmo lugar. Quem aprendeu a imprimir com a lista cheia acha do
+            mesmo jeito com ela vazia. */}
+        <BarraDoTopo
+          dica="O romaneio imprime qualquer data de entrega, inclusive dias sem saída aqui"
+          aoImprimir={() => setRomaneioAberto(true)}
+          aoNovo={() => setModal(null)}
+        />
         <div className="estado-vazio saidas-vazio">
           <div className="saidas-vazio-titulo">Nenhuma saída lançada ainda.</div>
           <div className="saidas-vazio-sub">
@@ -340,7 +388,7 @@ export function SaidasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Saida
           </button>
         </div>
         {modalAtivo}
-      </>
+      </div>
     )
   }
 
@@ -413,21 +461,11 @@ export function SaidasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Saida
 
   return (
     <div className="saidas-lista">
-      <div className="saidas-topo">
-        <div className="saidas-topo-dica">Clique numa saída para editar</div>
-        {/* O romaneio fica AQUI, e não no estado vazio nem num menu: quem vai
-            imprimir a folha do dia já está olhando as entregas. */}
-        <button
-          type="button"
-          className="saidas-botao-romaneio"
-          onClick={() => setRomaneioAberto(true)}
-        >
-          Romaneio de entregas
-        </button>
-        <button type="button" className="saidas-botao-novo" onClick={() => setModal(null)}>
-          ＋ Novo pedido
-        </button>
-      </div>
+      <BarraDoTopo
+        dica="Clique numa saída para editar"
+        aoImprimir={() => setRomaneioAberto(true)}
+        aoNovo={() => setModal(null)}
+      />
 
       {resumoFalhou && (
         <p className="saidas-aviso-resumo" role="status">

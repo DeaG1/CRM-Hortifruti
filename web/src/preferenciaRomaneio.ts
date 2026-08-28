@@ -1,6 +1,5 @@
-import {
-  normalizarCampos, CAMPOS_ROMANEIO_PADRAO, type CamposRomaneio,
-} from './derive/romaneio'
+import { CAMPOS_ROMANEIO, type CamposRomaneio } from './derive/romaneio'
+import { camposSalvosDaFolha, salvarCamposDaFolha } from './preferenciaFolha'
 
 /**
  * A escolha de "o que sai na folha" do romaneio de entregas
@@ -55,6 +54,12 @@ import {
  * motivo: string corrompida na chave é lixo, não pane.
  */
 
+/**
+ * A CHAVE NÃO MUDA. A mecânica de gravar/ler passou para
+ * `preferenciaFolha.ts` (as três folhas usam a mesma), mas a string aqui é a
+ * mesma de sempre: trocá-la faria todo mundo que já configurou o romaneio
+ * perder a escolha em silêncio, no dia da atualização.
+ */
 const CHAVE = 'crm_hf_romaneio_campos'
 
 /**
@@ -69,13 +74,7 @@ const CHAVE = 'crm_hf_romaneio_campos'
  * morto disfarçado de cuidado.
  */
 export function camposSalvosRomaneio(): CamposRomaneio {
-  try {
-    const bruto = window.localStorage?.getItem(CHAVE)
-    if (bruto === null || bruto === undefined) return { ...CAMPOS_ROMANEIO_PADRAO }
-    return normalizarCampos(JSON.parse(bruto))
-  } catch {
-    return { ...CAMPOS_ROMANEIO_PADRAO }
-  }
+  return camposSalvosDaFolha(CHAVE, CAMPOS_ROMANEIO)
 }
 
 /**
@@ -85,12 +84,5 @@ export function camposSalvosRomaneio(): CamposRomaneio {
  * no próximo F5. Mudar a folha é a resposta ao clique; persistir é o bônus.
  */
 export function salvarCamposRomaneio(campos: CamposRomaneio): boolean {
-  try {
-    const store = window.localStorage
-    if (!store) return false
-    store.setItem(CHAVE, JSON.stringify(normalizarCampos(campos)))
-    return true
-  } catch {
-    return false
-  }
+  return salvarCamposDaFolha(CHAVE, CAMPOS_ROMANEIO, campos)
 }

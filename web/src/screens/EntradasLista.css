@@ -50,6 +50,31 @@
   line-height: 1;
 }
 
+/* Secundário ao lado do "Nova entrada": lançar coleta é o trabalho de todo
+   dia desta tela; imprimir a folha de conferência é uma vez por carga que
+   chega. A hierarquia visual diz isso — e o estilo é o MESMO do botão de
+   imprimir de Saídas e de Estoque, de propósito: as três telas de operação
+   têm o mesmo botão, no mesmo canto, com rótulo começando por "Imprimir". */
+.entradas-botao-imprimir {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  color: #3f6b33;
+  border: 1px solid #cfe0c2;
+  border-radius: 9px;
+  padding: 9px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.entradas-botao-imprimir:hover {
+  background: #eef4e8;
+  border-color: #b6d0a4;
+}
+
 .entradas-erro-abrir {
   margin: 0 0 14px;
   background: #f6e4dc;

@@ -1,0 +1,656 @@
+/* ==================================================== A FOLHA IMPRESSA
+   O CSS DE IMPRESSÃO DAS TRÊS FOLHAS, NUM LUGAR SÓ.
+
+   Existem três documentos que este sistema manda para o papel:
+
+     - ROMANEIO de entregas (Saídas) — a folha que o motorista leva;
+     - CONTAGEM FÍSICA (Estoque) — a prancheta da câmara fria;
+     - CONFERÊNCIA DA CARGA (Entradas) — o que chegou do produtor.
+
+   Eles dizem coisas diferentes e têm colunas diferentes, mas a MECÂNICA de
+   virar papel é a mesma: soltar o Shell, sumir com menu e botão, imprimir
+   preto no branco e não cortar um bloco ao meio. Esse pedaço mora aqui, e só
+   aqui.
+
+   POR QUE NÃO TRÊS CÓPIAS. A cópia é como uma das três fica para trás na
+   próxima correção — e a que ficar para trás vai ser justamente a que ninguém
+   abriu no mês em que o defeito apareceu. Este arquivo já nasce com uma
+   cicatriz que prova o ponto: `.shell` tem `height: 100vh; overflow: hidden`,
+   e esquecer de soltá-lo faz a folha sair CORTADA na primeira página. Isso
+   aconteceu de verdade (RelatoriosTela.css, corrigido em af3abcb) e voltaria
+   a acontecer na terceira cópia.
+
+   O arquivo tem duas metades:
+
+     1. a TELA (monitor): barra de ações, painel de campos, estados. É o que
+        `data-no-print` esconde depois.
+     2. o PAPEL (@media print, no fim). É a metade que importa. Uma tela
+        bonita que imprime péssimo é o modo de falha comum aqui: quem confere
+        o resultado no monitor não vê nada errado, e o defeito só aparece na
+        mão de quem está com a prancheta.
+
+   As três telas usam as classes `folha-*` daqui para tudo que é genérico e
+   guardam as próprias classes só para o que é delas (o bloco por cliente do
+   romaneio, por exemplo). */
+
+.folha-tela {
+  max-width: 1000px;
+  font-family: 'Public Sans', sans-serif;
+  color: #2a2a24;
+}
+
+/* ---------------------------------------------------------- barra de ações */
+
+.folha-barra {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.folha-barra-espaco {
+  flex: 1;
+}
+
+.folha-voltar {
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 9px;
+  padding: 8px 13px;
+  font-size: 13px;
+  color: #4a4838;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.folha-voltar:hover {
+  border-color: #cfc9b4;
+}
+
+/* O botão que manda para a impressora. Verde cheio nas três telas, no mesmo
+   canto: quem aprendeu a imprimir numa precisa achar nas outras sem procurar.
+   O rótulo começa com "Imprimir" pela mesma razão — o dono procurou
+   "imprimir" e não achou "Romaneio de entregas". */
+.folha-imprimir {
+  background: #5a7d3a;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.folha-imprimir:hover {
+  background: #4c6b31;
+}
+
+/* ---------------------------------------------- controle de data / seleção */
+
+.folha-controle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 9px;
+  padding: 5px 10px;
+}
+
+.folha-controle-rotulo {
+  font-size: 12px;
+  color: #8a8775;
+}
+
+.folha-controle-campo {
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: #21331f;
+  outline: none;
+  max-width: 360px;
+}
+
+.folha-passo {
+  border: 1px solid #e6e2d4;
+  background: #faf9f3;
+  border-radius: 7px;
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
+  color: #4a4838;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+}
+
+.folha-passo:hover {
+  background: #f1eee2;
+}
+
+.folha-hoje {
+  border: 1px solid #cfe0c2;
+  background: #eef4e8;
+  color: #3f6b33;
+  border-radius: 7px;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* --------------------------------------------------- escolha de campos */
+
+.folha-campos {
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 13px;
+  padding: 14px 18px 16px;
+  margin: 0 0 14px;
+}
+
+.folha-campos-titulo {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: #8a8775;
+  text-transform: uppercase;
+  padding: 0 6px;
+}
+
+.folha-campos-grade {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 22px;
+}
+
+.folha-campos-grupo-nome {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #a3a08c;
+  margin-bottom: 6px;
+}
+
+.folha-campo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 3px 0;
+  cursor: pointer;
+}
+
+.folha-campos-fixos,
+.folha-campos-nota {
+  font-size: 12px;
+  color: #8a8775;
+  line-height: 1.5;
+  margin: 12px 0 0;
+}
+
+.folha-campos-nota {
+  margin-top: 6px;
+}
+
+.folha-campos-aviso {
+  font-size: 12px;
+  color: #8a5a20;
+  background: #f6efd8;
+  border: 1px solid #e6d9ae;
+  border-radius: 8px;
+  padding: 8px 11px;
+  margin: 10px 0 0;
+}
+
+/* ------------------------------------------------------------- avisos */
+
+.folha-aviso {
+  background: #f6efd8;
+  border: 1px solid #e6d9ae;
+  border-left: 4px solid #c79320;
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #6b5316;
+  margin: 0 0 14px;
+}
+
+.folha-estado-aviso {
+  background: #f6e4dc;
+  border: 1px solid #e6c3b4;
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 13px;
+  color: #8a3a20;
+  margin: 0 0 14px;
+}
+
+.folha-estado {
+  font-size: 13px;
+  color: #8a8775;
+  padding: 18px 2px;
+}
+
+.folha-estado--erro {
+  color: #c2502f;
+}
+
+.folha-vazio {
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 13px;
+  padding: 34px 24px;
+  text-align: center;
+  max-width: 620px;
+}
+
+.folha-vazio-titulo {
+  font-size: 15px;
+  font-weight: 700;
+  color: #4a4838;
+}
+
+.folha-vazio-sub {
+  font-size: 13px;
+  color: #8a8775;
+  margin-top: 7px;
+  line-height: 1.55;
+}
+
+/* ============================================================== A FOLHA */
+
+.folha {
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 13px;
+  padding: 26px 28px 22px;
+  color: #1c1c17;
+}
+
+.folha-topo {
+  border-bottom: 2px solid #1c1c17;
+  padding-bottom: 12px;
+  margin-bottom: 18px;
+}
+
+.folha-titulo {
+  font-family: 'Archivo', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #4a4838;
+}
+
+/* A DATA GRANDE. Maior que o título do documento de propósito: quem pega a
+   folha errada tem de perceber antes de conferir a primeira linha. */
+.folha-data {
+  font-family: 'Archivo', sans-serif;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.5px;
+  margin-top: 2px;
+  color: #1c1c17;
+}
+
+.folha-resumo {
+  font-size: 13px;
+  color: #4a4838;
+  margin-top: 4px;
+}
+
+/* O AVISO QUE VAI PARA O PAPEL — não confundir com `.folha-aviso`, que é da
+   tela. Este existe para um caso só, e é o caso que motiva a folha de
+   contagem ter data própria: conferir o estoque físico de hoje contra uma
+   posição de duas semanas atrás e não perceber. Fica na folha, com moldura,
+   porque quem anda com a prancheta não tem a tela na frente.
+
+   Moldura preta e texto preto: em impressora monocromática o amarelo do aviso
+   de tela viraria cinza-claro e sumiria — a MOLDURA é o que sobrevive. */
+.folha-alerta {
+  border: 2px solid #1c1c17;
+  border-radius: 6px;
+  padding: 9px 12px;
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1c1c17;
+  background: #f6efd8;
+}
+
+/* Um bloco que não pode ser cortado ao meio pela quebra de página: um cliente
+   do romaneio, o cabeçalho de uma entrada. Ver o @media print. */
+.folha-bloco {
+  border: 1px solid #1c1c17;
+  border-radius: 8px;
+  padding: 12px 14px 10px;
+  margin-bottom: 16px;
+}
+
+.folha-tabela {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 13.5px;
+}
+
+.folha-tabela th {
+  text-align: left;
+  font-size: 10.5px;
+  letter-spacing: 0.6px;
+  color: #4a4838;
+  font-weight: 700;
+  border-bottom: 1px solid #1c1c17;
+  padding: 3px 6px;
+}
+
+/* Linha ALTA de propósito: quem confere risca item por item com a folha
+   apoiada no caminhão ou numa prateleira. Densidade aqui não é economia, é
+   folha inutilizável. */
+.folha-tabela td {
+  padding: 9px 6px;
+  border-bottom: 1px solid #cfc9b4;
+  vertical-align: middle;
+}
+
+.folha-col-check {
+  width: 30px;
+  text-align: center;
+}
+
+.folha-col-qtd {
+  width: 130px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.folha-col-num {
+  width: 110px;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Caixa desenhada com borda — não um caractere, que depende da fonte
+   instalada na máquina que imprime e some em impressora monocromática
+   antiga. */
+.folha-check {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  border: 1.4px solid #1c1c17;
+  border-radius: 2px;
+}
+
+/* A COLUNA EM BRANCO — o motivo de a folha de contagem existir. É espaço para
+   escrever À MÃO o que se contou de verdade, e por isso ela precisa de duas
+   coisas: largura suficiente para caber um número escrito a caneta e uma
+   linha visível onde escrever. Sem ela a folha não serve ao que motiva
+   imprimi-la: viraria uma segunda cópia do que a tela já diz. */
+.folha-branco {
+  display: block;
+  min-width: 92px;
+  height: 20px;
+  border-bottom: 1px solid #1c1c17;
+}
+
+/* O selo escrito ("Acabou", "Nunca comprado", "Conferir lançamento"). Na tela
+   ele tem cor; no papel a cor não sobrevive, então o que informa é a PALAVRA
+   e o contorno. Sem preenchimento de propósito: fundo escuro numa impressora
+   fraca engole o texto que ele deveria destacar. */
+.folha-selo {
+  display: inline-block;
+  border: 1px solid #1c1c17;
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+.folha-linha-assinatura {
+  display: inline-block;
+  flex: 1;
+  min-width: 90px;
+  border-bottom: 1px solid #1c1c17;
+  height: 13px;
+  margin-left: 6px;
+}
+
+.folha-linha-assinatura--curta {
+  flex: 0 0 70px;
+  min-width: 70px;
+}
+
+.folha-rodape {
+  display: flex;
+  gap: 26px;
+  align-items: baseline;
+  border-top: 1px solid #1c1c17;
+  padding-top: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #35352c;
+}
+
+.folha-rodape > span {
+  display: flex;
+  align-items: baseline;
+  flex: 1;
+}
+
+/* Um "vazio" que sai NO PAPEL. Diferente de `.folha-vazio` (tela): quando a
+   folha é impressa mesmo sem linha nenhuma, ela precisa dizer isso em vez de
+   sair como uma página em branco que ninguém sabe interpretar. */
+.folha-sem-linhas {
+  border: 1px dashed #1c1c17;
+  border-radius: 8px;
+  padding: 22px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: #35352c;
+}
+
+/* ------------------------------------------- o miolo de um bloco da folha
+
+   O cabeçalho de um bloco (o cliente do romaneio, o fornecedor da folha de
+   conferência) e as linhas de apoio dele. Estas classes nasceram
+   `romaneio-*`, dentro de RomaneioEntregas.css; vieram para cá quando a folha
+   de Entradas passou a desenhar o mesmo cabeçalho — nome à esquerda, data
+   carimbada à direita — e começou a importar CSS de uma tela vizinha, que é
+   o tipo de acoplamento que ninguém percebe até apagar o arquivo errado. */
+
+.folha-bloco-topo {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.folha-bloco-nome {
+  font-family: 'Archivo', sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  color: #1c1c17;
+}
+
+/* A data repetida em cada bloco. `break-inside: avoid` mantém o bloco inteiro
+   numa página, então cada página carrega pelo menos um destes: quem separar
+   as folhas continua sabendo de que dia cada uma é. */
+.folha-bloco-selo {
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  color: #4a4838;
+  white-space: nowrap;
+}
+
+.folha-bloco-dados {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12.5px;
+  color: #35352c;
+  margin-top: 3px;
+}
+
+.folha-bloco-secao {
+  margin-top: 11px;
+}
+
+.folha-bloco-linha {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #35352c;
+}
+
+.folha-bloco-obs {
+  font-size: 12.5px;
+  color: #35352c;
+  margin-top: 2px;
+}
+
+.folha-bloco-rodape {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: #4a4838;
+  margin-top: 9px;
+}
+
+.folha-produto {
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------- responsivo */
+
+@media (max-width: 760px) {
+  .folha-campos-grade {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================= IMPRESSÃO
+
+   ORIENTAÇÃO — POR QUE UMA PÁGINA NOMEADA, E NÃO UM `@page` SOLTO.
+
+   `RelatoriosTela.css` já declara `@page { size: A4 landscape }`, e regra de
+   `@page` é do DOCUMENTO, não do componente: como o bundle carrega o CSS de
+   todas as telas, aquela regra vale para qualquer impressão do app. Declarar
+   aqui um segundo `@page` sem nome faria as duas brigarem por ordem de
+   bundle — e, se esta vencesse, os relatórios (tabelas largas, feitas para
+   paisagem) passariam a sair em retrato. Regressão silenciosa numa tela que
+   ninguém tocou.
+
+   A página NOMEADA resolve sem tocar em nada: `@page folha` só se aplica a
+   quem pedir `page: folha`, e quem pede é o `body` — mas SÓ enquanto uma
+   folha está montada, via a classe que `useModoFolha` põe e tira. Navegador
+   sem suporte a página nomeada ignora as duas regras e imprime na paisagem
+   global: mais larga que o ideal, ainda perfeitamente legível. Degradação,
+   não quebra. */
+
+@page folha {
+  size: A4 portrait;
+  margin: 12mm 12mm 14mm;
+}
+
+@media print {
+  body.folha-imprimindo {
+    page: folha;
+    background: #fff !important;
+  }
+
+  /* Some tudo que não é a folha: menu lateral, cabeçalho da aplicação e todo
+     controle (`data-no-print`, a mesma marcação de RelatoriosTela). Botão
+     impresso é tinta gasta em coisa que não se pode clicar. */
+  body.folha-imprimindo .shell-sidebar,
+  body.folha-imprimindo .shell-header,
+  body.folha-imprimindo [data-no-print] {
+    display: none !important;
+  }
+
+  /* A CICATRIZ. O Shell é uma coluna de altura fixa com rolagem interna
+     (`height: 100vh; overflow: hidden`); em papel isso recorta a folha na
+     PRIMEIRA página e nada mais é impresso. Aconteceu em produção
+     (RelatoriosTela.css, corrigido em af3abcb) e é o defeito mais fácil de
+     não perceber, porque a tela continua perfeita. Soltar os três é o que
+     deixa o conteúdo fluir por quantas páginas precisar. */
+  body.folha-imprimindo .shell,
+  body.folha-imprimindo .shell-main,
+  body.folha-imprimindo .shell-conteudo {
+    display: block !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    background: #fff !important;
+    padding: 0 !important;
+  }
+
+  /* PRETO NO BRANCO. Sem fundo cinza (gasta tinta e cinza claro em impressora
+     monocromática vira quase branco), sem sombra, sem canto arredondado
+     desenhado com cor. As bordas viram pretas para as tabelas continuarem
+     tendo estrutura visível numa impressão fraca.
+
+     A regra é escrita no descendente (`.folha *`) e não numa lista de
+     seletores nomeados de propósito: uma lista precisa ser lembrada toda vez
+     que uma folha ganha um elemento novo, e o que acontece quando ela é
+     esquecida é um texto cinza-claro que some no papel sem ninguém notar na
+     tela. */
+  .folha {
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  .folha,
+  .folha * {
+    color: #000 !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+    border-color: #000 !important;
+  }
+
+  /* UM BLOCO NÃO É CORTADO AO MEIO. Meia parada numa página e metade na
+     seguinte é como se erra uma caixa: quem confere confere o que vê, vira a
+     folha e não volta. `break-inside` é o nome atual; `page-break-inside`
+     fica para navegador antigo. (Um bloco com mais itens do que cabe numa
+     página inteira quebra assim mesmo — não há como evitar; por isso as
+     linhas de item também pedem para não ser cortadas.) */
+  .folha-bloco,
+  .folha-item,
+  .folha-nao-quebrar {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Cabeçalho da tabela repetido quando uma tabela longa atravessa a página —
+     sem isso a segunda página traz colunas sem nome. É o que torna a folha de
+     contagem utilizável com 40 produtos: a partir da página 2 ninguém saberia
+     mais qual coluna é o saldo do sistema e qual é a de escrever. */
+  .folha-tabela thead {
+    display: table-header-group;
+  }
+
+  /* O topo da folha não repete a cada página, então ele não pode ficar
+     sozinho no fim de uma. */
+  .folha-topo {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+}

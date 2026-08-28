@@ -1,4 +1,8 @@
-import { dataBrCurta } from './pagamento'
+import {
+  normalizarCamposFolha, padroesDeCampos, dataPorExtensoFolha, diaVizinhoFolha,
+  quantidadeNaUnidade, dinheiroFolha, contagemPorExtenso,
+  type DefinicaoCampoFolha,
+} from './folha'
 
 /**
  * O ROMANEIO DE ENTREGAS — a folha que o motorista leva na mão para conferir
@@ -123,17 +127,10 @@ export type CampoRomaneio =
 /** A escolha do usuário: um booleano por campo opcional. */
 export type CamposRomaneio = Record<CampoRomaneio, boolean>
 
-/** Um campo oferecido no painel "O que sai na folha". */
-export interface DefinicaoCampoRomaneio {
-  chave: CampoRomaneio
-  rotulo: string
-  /** Em que bloco da folha ele aparece — vira o agrupamento do painel. */
+/** Um campo oferecido no painel "O que sai na folha" — a forma comum das
+ * três folhas (derive/folha.ts), com o grupo restrito aos três desta. */
+export interface DefinicaoCampoRomaneio extends DefinicaoCampoFolha<CampoRomaneio> {
   grupo: 'Cliente' | 'Pedido' | 'Preços'
-  /** Marcado ao abrir pela primeira vez (e sempre que a preferência gravada
-   * não puder ser lida). */
-  padrao: boolean
-  /** Por que ele vem (ou não vem) marcado — texto mostrado ao usuário. */
-  ajuda: string
 }
 
 /**
@@ -206,7 +203,7 @@ export const CAMPOS_FIXOS_ROMANEIO: readonly string[] = [
  * preferência gravada não pode ser lida ou está corrompida. Note que preço
  * está desmarcado nela, então nenhuma falha de armazenamento vaza preço. */
 export const CAMPOS_ROMANEIO_PADRAO: CamposRomaneio = Object.freeze(
-  Object.fromEntries(CAMPOS_ROMANEIO.map(c => [c.chave, c.padrao])),
+  padroesDeCampos(CAMPOS_ROMANEIO),
 ) as CamposRomaneio
 
 /**
@@ -227,15 +224,7 @@ export const CAMPOS_ROMANEIO_PADRAO: CamposRomaneio = Object.freeze(
  * certa liga, e o padrão dele é `false`.
  */
 export function normalizarCampos(bruto: unknown): CamposRomaneio {
-  const objeto = (typeof bruto === 'object' && bruto !== null && !Array.isArray(bruto))
-    ? bruto as Record<string, unknown>
-    : {}
-  const campos = {} as CamposRomaneio
-  for (const def of CAMPOS_ROMANEIO) {
-    const valor = objeto[def.chave]
-    campos[def.chave] = typeof valor === 'boolean' ? valor : def.padrao
-  }
-  return campos
+  return normalizarCamposFolha(CAMPOS_ROMANEIO, bruto)
 }
 
 // ================================================== formatação de número
@@ -254,10 +243,7 @@ export function normalizarCampos(bruto: unknown): CamposRomaneio {
  * quanto".
  */
 export function quantidadeRomaneio(qtd: number, un: string): string {
-  if (!Number.isFinite(qtd)) return '—'
-  const numero = qtd.toLocaleString('pt-BR', { maximumFractionDigits: 3 })
-  const unidade = (un ?? '').trim()
-  return unidade ? `${numero} ${unidade}` : numero
+  return quantidadeNaUnidade(qtd, un)
 }
 
 /**
@@ -275,16 +261,8 @@ export function quantidadeRomaneio(qtd: number, un: string): string {
  * de nota, "R$ 12,5" é uma ambiguidade cara.
  */
 export function dinheiroRomaneio(valor: number): string | null {
-  if (!Number.isFinite(valor) || valor <= 0) return null
-  return 'R$ ' + valor.toLocaleString('pt-BR', {
-    minimumFractionDigits: 2, maximumFractionDigits: 2,
-  })
+  return dinheiroFolha(valor)
 }
-
-const DIAS_DA_SEMANA = [
-  'domingo', 'segunda-feira', 'terça-feira', 'quarta-feira',
-  'quinta-feira', 'sexta-feira', 'sábado',
-]
 
 /**
  * A DATA GRANDE DA FOLHA: "sexta-feira, 28/08/2026".
@@ -310,19 +288,7 @@ const DIAS_DA_SEMANA = [
  * para a folha.
  */
 export function dataPorExtensoRomaneio(iso: string | null | undefined): string | null {
-  const curta = dataBrCurta(iso)
-  if (!curta) return null
-  const texto = String(iso)
-  const ano = Number(texto.slice(0, 4))
-  const mes = Number(texto.slice(5, 7))
-  const dia = Number(texto.slice(8, 10))
-  const d = new Date(Date.UTC(ano, mes - 1, dia))
-  // Round-trip: 2026-02-30 vira 02/03 no Date, e os componentes deixam de
-  // bater. Data impossível não pode virar uma data plausível na folha.
-  if (d.getUTCFullYear() !== ano || d.getUTCMonth() !== mes - 1 || d.getUTCDate() !== dia) {
-    return null
-  }
-  return `${DIAS_DA_SEMANA[d.getUTCDay()]}, ${curta}/${ano}`
+  return dataPorExtensoFolha(iso)
 }
 
 /**
@@ -576,12 +542,10 @@ export function montarRomaneio(
  * duvidar do resto do documento.
  */
 export function resumoRomaneio(romaneio: Romaneio): string {
-  const um = (n: number, singular: string, plural: string) =>
-    `${n} ${n === 1 ? singular : plural}`
   return [
-    um(romaneio.totalClientes, 'cliente', 'clientes'),
-    um(romaneio.totalPedidos, 'pedido', 'pedidos'),
-    um(romaneio.totalItens, 'item', 'itens'),
+    contagemPorExtenso(romaneio.totalClientes, 'cliente', 'clientes'),
+    contagemPorExtenso(romaneio.totalPedidos, 'pedido', 'pedidos'),
+    contagemPorExtenso(romaneio.totalItens, 'item', 'itens'),
   ].join(' · ')
 }
 
@@ -600,11 +564,5 @@ export function resumoRomaneio(romaneio: Romaneio): string {
  * plausível.
  */
 export function diaVizinho(iso: string | null | undefined, passo: number): string {
-  const texto = String(iso ?? '')
-  if (!dataPorExtensoRomaneio(texto)) return texto
-  const d = new Date(Date.UTC(
-    Number(texto.slice(0, 4)), Number(texto.slice(5, 7)) - 1, Number(texto.slice(8, 10)),
-  ))
-  d.setUTCDate(d.getUTCDate() + passo)
-  return d.toISOString().slice(0, 10)
+  return diaVizinhoFolha(iso, passo)
 }

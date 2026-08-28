@@ -16,6 +16,7 @@ import {
   type SituacaoSaldo,
 } from '../derive/estoque'
 import { PerdasLista } from './PerdasLista'
+import { FolhaContagemEstoque } from './FolhaContagemEstoque'
 import './EstoqueLista.css'
 
 /** A mesma conta da linha EM QUILOS — leitura secundária por linha, e a
@@ -399,6 +400,18 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
   const [carregandoHistorico, setCarregandoHistorico] = useState(false)
   const [erroHistorico, setErroHistorico] = useState('')
 
+  /**
+   * A folha de contagem física (screens/FolhaContagemEstoque.tsx) abre NO
+   * LUGAR da tela, e não numa camada por cima — mesma decisão do romaneio em
+   * Saídas: sobreposição em `position: fixed` é o que o navegador imprime
+   * pior, e este é um componente que existe para virar papel.
+   *
+   * Ela NÃO refaz busca nenhuma: recebe as linhas que já estão aqui, com o
+   * corte de "Posição em" já aplicado. É o que garante que a folha impressa
+   * traga exatamente os números que estavam na tela no momento do clique.
+   */
+  const [folhaAberta, setFolhaAberta] = useState(false)
+
   // A busca do histórico acontece UMA vez por montagem, na primeira expansão.
   // O ref (não estado) porque o guarda precisa valer já na mesma chamada que
   // dispara a busca — um estado só estaria atualizado no render seguinte, e
@@ -492,6 +505,21 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
     : 0
   const historicoPorChave = movimentacoes ? agruparMovimentacoes(movimentacoes) : null
 
+  // A folha carrega a DATA DA POSIÇÃO junto, nunca "hoje" por presunção:
+  // conferir o estoque físico de hoje contra uma posição de duas semanas atrás
+  // é o erro que ela pode causar, e é por isso que a data desce como parâmetro
+  // em vez de a folha perguntar o dia ao relógio.
+  if (folhaAberta) {
+    return (
+      <FolhaContagemEstoque
+        linhas={linhas}
+        dataPosicao={posicao.corte ?? hoje}
+        hoje={hoje}
+        onVoltar={() => setFolhaAberta(false)}
+      />
+    )
+  }
+
   return (
     <div className="estoque-modulo">
       <section
@@ -522,6 +550,29 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
               onClick={() => escolherData(hoje)}
             >
               Voltar para hoje
+            </button>
+          )}
+
+          <div className="estoque-posicao-espaco" />
+
+          {/* O botão de imprimir fica AQUI, no mesmo canto e com o mesmo
+              rótulo começando por "Imprimir" das outras duas telas de
+              operação. Ele acompanha o controle de data de propósito: a folha
+              carimba a posição escolhida, e ver as duas coisas juntas é o que
+              impede alguém de imprimir a contagem de 15/08 achando que é a de
+              hoje.
+
+              Fora dos estados de carregando/erro, como o próprio controle de
+              data: o que ele NÃO pode é sumir quando a lista está vazia — foi
+              o defeito que Saídas tinha, e a folha sabe explicar o vazio
+              melhor do que um botão ausente. */}
+          {!carregando && !erro && (
+            <button
+              type="button"
+              className="estoque-botao-imprimir"
+              onClick={() => setFolhaAberta(true)}
+            >
+              Imprimir contagem
             </button>
           )}
         </div>

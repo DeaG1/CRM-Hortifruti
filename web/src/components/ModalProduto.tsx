@@ -3,7 +3,7 @@ import { api, ErroApi } from '../api/client'
 import { PRODUTO_NOVO, UNIDADES, type Produto } from '../derive/produtos'
 import { DeclaracaoDeAutoria } from './DeclaracaoDeAutoria'
 import { HistoricoCadastro } from './HistoricoCadastro'
-import { podeVerHistoricoCadastro, precisaDeclararAutoria, type Papel } from '../telas'
+import { podeVerHistoricoCadastro, precisaDeclararAutoriaAoSalvarProduto, type Papel } from '../telas'
 import './ModalProduto.css'
 
 type Rascunho = typeof PRODUTO_NOVO
@@ -29,9 +29,10 @@ interface ModalProdutoProps {
    * sobre um botão, resolvida fora), o papel entra inteiro porque muda três
    * coisas independentes: se os campos de declaração aparecem, se o histórico
    * aparece, e a redação do que é dito sobre autoria. O modal continua sem
-   * decidir nada sozinho — quem responde é `precisaDeclararAutoria` /
-   * `podeVerHistoricoCadastro` (web/src/telas.ts). Sem default, pelo mesmo
-   * motivo de `podeExcluir`.
+   * decidir nada sozinho — quem responde é `precisaDeclararAutoriaAoSalvarProduto`
+   * (que também olha se é criação ou edição — só em produto, só ao criar, a
+   * declaração deixou de ser exigida) / `podeVerHistoricoCadastro`
+   * (web/src/telas.ts). Sem default, pelo mesmo motivo de `podeExcluir`.
    */
   papel: Papel
   onSalvo: (p: Produto) => void
@@ -45,7 +46,6 @@ interface ModalProdutoProps {
 export function ModalProduto(
   { produto, podeExcluir, papel, onSalvo, onExcluido, onFechar, onSessaoExpirada }: ModalProdutoProps,
 ) {
-  const declara = precisaDeclararAutoria(papel)
   const veHistorico = podeVerHistoricoCadastro(papel)
   const [rascunho, setRascunho] = useState<Rascunho>({ ...PRODUTO_NOVO, ...(produto ?? {}) })
   // Começa vazio: escolha ativa, nunca um nome pré-selecionado que todo mundo
@@ -62,6 +62,10 @@ export function ModalProduto(
   const [excluindo, setExcluindo] = useState(false)
   const [erroExclusao, setErroExclusao] = useState('')
   const editando = Boolean(produto?.id)
+  // So exige (e so mostra) declaracao ao EDITAR — criar produto dispensou a
+  // exigencia (pedido do dono, POST /api/produtos nao recusa mais sem ela).
+  // Ver precisaDeclararAutoriaAoSalvarProduto em web/src/telas.ts.
+  const declara = precisaDeclararAutoriaAoSalvarProduto(papel, editando)
 
   function campo<K extends keyof Rascunho>(chave: K) {
     return {

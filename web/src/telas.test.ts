@@ -5,6 +5,7 @@ import {
   podeExcluirCadastro,
   podeVerHistoricoCadastro,
   precisaDeclararAutoria,
+  precisaDeclararAutoriaAoSalvarProduto,
   type Tela,
 } from './telas'
 
@@ -87,6 +88,36 @@ describe('precisaDeclararAutoria', () => {
   // CONHECE num dado digitado — pior, nao melhor.
   it('admin nao declara nada', () => {
     expect(precisaDeclararAutoria('admin')).toBe(false)
+  })
+})
+
+describe('precisaDeclararAutoriaAoSalvarProduto', () => {
+  // A MUDANÇA: criar produto deixou de exigir declaração. Este é o teste que
+  // pega uma regressão que reintroduzisse a exigência na criação — e também
+  // o teste sensível à mutação inversa: se alguém trocar `editando` por
+  // `!editando` aqui (ou em `precisaDeclararAutoriaAoSalvarProduto`), a
+  // criação passaria a EXIGIR e a edição passaria a DISPENSAR — o oposto do
+  // pedido do dono.
+  it('colaborador CRIANDO produto: nao precisa declarar (a mudanca deste commit)', () => {
+    expect(precisaDeclararAutoriaAoSalvarProduto('colaborador', false)).toBe(false)
+  })
+
+  it('colaborador EDITANDO produto: continua precisando declarar', () => {
+    expect(precisaDeclararAutoriaAoSalvarProduto('colaborador', true)).toBe(true)
+  })
+
+  it('admin nunca declara, criando ou editando', () => {
+    expect(precisaDeclararAutoriaAoSalvarProduto('admin', false)).toBe(false)
+    expect(precisaDeclararAutoriaAoSalvarProduto('admin', true)).toBe(false)
+  })
+
+  it('e a composicao de precisaDeclararAutoria com o estado de edicao — nao uma regra nova', () => {
+    for (const papel of ['admin', 'colaborador'] as const) {
+      for (const editando of [true, false]) {
+        expect(precisaDeclararAutoriaAoSalvarProduto(papel, editando))
+          .toBe(precisaDeclararAutoria(papel) && editando)
+      }
+    }
   })
 })
 

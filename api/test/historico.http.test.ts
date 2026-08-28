@@ -184,10 +184,17 @@ async function criarClienteComoColab(nome: string, extra: Record<string, unknown
 // 1. A EXIGENCIA VALE NO SERVIDOR
 // ===================================================================
 
+// `/api/produtos` SAIU desta lista de proposito: a partir deste commit,
+// CRIAR produto nao exige mais declaracao (pedido do dono — ver
+// api/src/historico.ts, `tentouDeclarar`, e o describe proprio logo abaixo,
+// "criacao de produto dispensa declaracao"). `PUT /api/produtos/:id`
+// continua exigindo — os casos de PUT ficam no describe seguinte, que NAO
+// mudou. Cliente e fornecedor continuam AQUI, exigindo tambem na criacao: e
+// esta lista, inalterada para os dois, que prova que a mudanca nao vazou
+// para as outras entidades.
 describe('colaborador: POST sem autor ou sem motivo e recusado com 400', () => {
   const casos: [string, Record<string, unknown>][] = [
     ['/api/clientes', { nome: 'Sem declaracao 1' }],
-    ['/api/produtos', { nome: 'Sem declaracao 2' }],
     ['/api/fornecedores', { nome: 'Sem declaracao 3' }],
   ]
 
@@ -228,6 +235,92 @@ describe('colaborador: POST sem autor ou sem motivo e recusado com 400', () => {
     const [linha] = await admin`
       select id from clientes where tenant_id = ${tenantId} and nome = 'Fantasma sem declaracao'`
     expect(linha).toBeUndefined()
+  })
+})
+
+// ===================================================================
+// A EXCECAO: CRIAR PRODUTO NAO EXIGE DECLARACAO
+// ===================================================================
+//
+// Pedido do dono (28/08/2026): ele cadastra dezenas de produtos de uma vez,
+// e duas perguntas por cadastro e atrito real. A razao de fundo, e nao so o
+// pedido: nao ha "alteracao" a atribuir quando o registro esta nascendo —
+// sem valor anterior, sem de/para. So esta rota, so este metodo: PUT
+// continua no describe anterior, e clientes/fornecedores nem entram aqui.
+describe('criacao de produto dispensa declaracao (excecao desta rota, so na criacao)', () => {
+  it('colaborador cria produto SEM declarar -> 201', async () => {
+    const res = await pedir('/api/produtos', comoColab({
+      method: 'POST', ...json({ nome: 'Produto Sem Declaracao Nenhuma' }),
+    }))
+    expect(res.status).toBe(201)
+    const { id, nome } = await res.json() as { id: string; nome: string }
+    expect(nome).toBe('Produto Sem Declaracao Nenhuma')
+
+    // NAO ENTRA LINHA NO HISTORICO: nao ha valor honesto para gravar em
+    // autor_origem/autor_nome quando ninguem declarou e a sessao nao e
+    // individual (017: as duas colunas sao not null, e autor_origem so
+    // aceita 'declarado'/'login' por CHECK). A data de criacao nao se
+    // perde — fica em produtos.criado_em, no proprio cadastro.
+    const historico = await linhasNoBanco(id)
+    expect(historico).toHaveLength(0)
+
+    const [produto] = await admin`select criado_em from produtos where id = ${id}`
+    expect(produto.criado_em).toBeTruthy()
+  })
+
+  it('colaborador cria produto declarando por livre e espontanea vontade -> grava normalmente, origem "declarado"', async () => {
+    const res = await pedir('/api/produtos', comoColab({
+      method: 'POST',
+      ...json({ nome: 'Produto Declarado Por Escolha', declarado_por: joaoId, motivo: 'gosto de deixar registrado' }),
+    }))
+    expect(res.status).toBe(201)
+    const { id } = await res.json() as { id: string }
+
+    const historico = await historicoDe('produto', id)
+    expect(historico).toHaveLength(1)
+    expect(historico[0]).toMatchObject({
+      acao: 'criou',
+      autor_origem: 'declarado',
+      autor_nome: 'Joao da Silva',
+      autor_funcionario_id: joaoId,
+      motivo: 'gosto de deixar registrado',
+    })
+  })
+
+  it('colaborador manda declarado_por invalido -> 400 (declarar mal continua pior que nao declarar)', async () => {
+    const res = await pedir('/api/produtos', comoColab({
+      method: 'POST',
+      ...json({ nome: 'Produto Declaracao Ruim', declarado_por: '00000000-0000-4000-8000-000000000000', motivo: 'x' }),
+    }))
+    expect(res.status).toBe(400)
+    const [linha] = await admin`
+      select id from produtos where tenant_id = ${tenantId} and nome = 'Produto Declaracao Ruim'`
+    expect(linha).toBeUndefined()
+  })
+
+  it('admin cria produto normalmente -> 201, historico grava origem "login" (nada mudou para o admin)', async () => {
+    const res = await pedir('/api/produtos', comoAdmin({
+      method: 'POST', ...json({ nome: 'Produto Do Dono Sem Declarar' }),
+    }))
+    expect(res.status).toBe(201)
+    const { id } = await res.json() as { id: string }
+
+    const historico = await historicoDe('produto', id)
+    expect(historico).toHaveLength(1)
+    expect(historico[0]).toMatchObject({ acao: 'criou', autor_origem: 'login', motivo: '' })
+  })
+
+  it('e PUT continua exigindo, no mesmo produto que acabou de nascer sem declaracao', async () => {
+    const criado = await pedir('/api/produtos', comoColab({
+      method: 'POST', ...json({ nome: 'Produto Recem Criado Sem Declaracao' }),
+    }))
+    const { id } = await criado.json() as { id: string }
+
+    const res = await pedir(`/api/produtos/${id}`, comoColab({
+      method: 'PUT', ...json({ peso_medio: 5 }),
+    }))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ erro: 'informe quem esta fazendo esta alteracao' })
   })
 })
 

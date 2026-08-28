@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { withTenant, type EnvBanco } from '../db'
 import { exigirSessao, exigirAdmin, type Vars } from '../middleware/sessao'
 import {
-  autorDaAlteracao, diferencas, erroDeDeclaracao, registrarHistorico, vaiGravar,
+  autorDaAlteracao, diferencas, erroDeDeclaracao, registrarHistorico, tentouDeclarar, vaiGravar,
 } from '../historico'
 
 const CAMPOS = ['nome', 'un', 'peso_medio'] as const
@@ -158,6 +158,22 @@ produtos.get('/:id', async (c) => {
 // cadastro e o do historico na MESMA transacao, e a exigencia de declarar
 // vindo do papel da sessao, nunca do corpo). Comentado la; aqui so o que e
 // especifico de produtos.
+//
+// EXCECAO NESTA ROTA, E SO NELA: CRIAR produto nao exige declaracao.
+// Pedido do dono (28/08/2026) — ele cadastra dezenas de produtos de uma vez
+// e duas perguntas por cadastro e atrito real, e a razao de fundo tambem
+// procede: nao ha "alteracao" a atribuir quando o registro esta nascendo,
+// sem valor anterior e sem de/para. Por isso NAO HA chamada a
+// `erroDeDeclaracao` aqui embaixo — compare com o PUT logo depois, que
+// continua chamando, e com clientes.ts/fornecedores.ts, que nao mudaram em
+// nada. `tentouDeclarar` (historico.ts) decide se ha autor para resolver:
+// admin sempre tem (login), colaborador so se mandou `declarado_por` por
+// livre e espontanea vontade — quem quer se declarar ao criar continua
+// podendo, e continua validado do mesmo jeito. Sem isso, o produto e criado
+// e NAO entra linha nenhuma em `historico_cadastros` (ver o comentario de
+// `tentouDeclarar` para o porque: nao ha valor honesto para gravar em
+// autor_origem/autor_nome sem migration). `produtos.criado_em` preserva a
+// data de criacao de qualquer forma, no proprio cadastro.
 produtos.post('/', async (c) => {
   const corpo = await c.req.json() as Record<string, unknown>
   const dados = sanear(corpo)
@@ -166,24 +182,32 @@ produtos.post('/', async (c) => {
   const erroCampo = erroDeCampoInvalido(dados)
   if (erroCampo) return c.json({ erro: erroCampo }, 400)
   const papel = c.get('papel')
-  const erroDecl = erroDeDeclaracao(papel, corpo)
-  if (erroDecl) return c.json({ erro: erroDecl }, 400)
   const tenantId = c.get('tenantId')
   const usuarioId = c.get('usuarioId')
   try {
     const feito = await withTenant(c.get('sql'), tenantId, async (tx) => {
-      const autor = await autorDaAlteracao(tx, papel, usuarioId, corpo)
-      if ('erro' in autor) return { erro: autor.erro } as const
+      // Resolvido numa unica atribuicao, sem reatribuir `let` entre blocos:
+      // e o jeito de o TypeScript estreitar `autor` para `AutorHistorico | null`
+      // (nunca `{ erro }`) dali em diante sem ambiguidade de fluxo.
+      const resolucao = tentouDeclarar(papel, corpo)
+        ? await autorDaAlteracao(tx, papel, usuarioId, corpo)
+        : null
+      if (resolucao && 'erro' in resolucao) return { erro: resolucao.erro } as const
+      const autor = resolucao
       const [linha] = await tx`insert into produtos ${tx({ ...dados, tenant_id: tenantId })} returning *`
-      await registrarHistorico(tx, {
-        tenantId,
-        entidade: 'produto',
-        registroId: linha.id as string,
-        registroNome: linha.nome as string,
-        acao: 'criou',
-        autor,
-        alteracoes: [],
-      })
+      // So grava historico quando ha autor conhecido — ver o comentario
+      // acima da rota para o porque de `autor` poder ser `null` aqui.
+      if (autor) {
+        await registrarHistorico(tx, {
+          tenantId,
+          entidade: 'produto',
+          registroId: linha.id as string,
+          registroNome: linha.nome as string,
+          acao: 'criou',
+          autor,
+          alteracoes: [],
+        })
+      }
       return { linha } as const
     })
     if ('erro' in feito) return c.json({ erro: feito.erro }, 400)

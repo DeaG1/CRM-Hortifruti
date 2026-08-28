@@ -130,6 +130,46 @@ export function erroDeDeclaracao(
   return null
 }
 
+/**
+ * SO PARA A CRIACAO DE PRODUTO (routes/produtos.ts, POST): decide se ha
+ * autoria para resolver nesta escrita, agora que declarar deixou de ser
+ * OBRIGATORIO ali — pedido do dono (28/08/2026): "na hora de cadastrar um
+ * produto exclusivamente nao precisa dessa questao de falar quem foi o
+ * usuario que criou — exclusivamente para criacao do produto". PUT continua
+ * chamando `erroDeDeclaracao` do jeito de sempre, e clientes/fornecedores
+ * nao chamam esta funcao em rota nenhuma — o relaxamento e so deste caso.
+ *
+ * O PORQUE DE FUNDO, E NAO SO O PEDIDO: nao existe "alteracao" a atribuir
+ * quando o registro esta nascendo. Nao ha valor anterior, nao ha de/para,
+ * nao ha o que auditar alem do fato de ter sido criado — a mesma logica que
+ * ja faz `vaiGravar` recusar registrar um PUT que nao mudou nada, aplicada
+ * do outro lado: aqui nao e "nada mudou", e "nao ha ninguem para apontar".
+ *
+ * ADMIN: sempre `true`. O login e individual, o autor ('login') sempre
+ * existe, e a criacao continua indo para o historico exatamente como antes
+ * desta mudanca — nada no comportamento do admin foi alterado.
+ *
+ * COLABORADOR: `true` so quando ele MANDOU um `declarado_por` nao-vazio
+ * (mesma checagem que `erroDeDeclaracao` faz quando a declaracao e
+ * obrigatoria) — quem QUER se declarar ao criar continua podendo, e a
+ * declaracao continua validada por `autorDaAlteracao` (funcionario desta
+ * empresa, lista fechada, nunca texto livre). Sem `declarado_por`, `false`:
+ * a rota grava o produto e NAO chama `autorDaAlteracao` nem
+ * `registrarHistorico` — nao ha valor HONESTO para gravar em
+ * `autor_origem`/`autor_nome` quando ninguem declarou e a sessao nao e
+ * individual (migration 017: as duas colunas sao `not null`, e
+ * `autor_origem` so aceita 'declarado' ou 'login' por CHECK — usar
+ * qualquer um dos dois aqui seria mentir sobre o que o sistema sabe, o
+ * problema exato que aquela coluna existe para evitar). A data de criacao
+ * nao se perde: `produtos.criado_em` ja a registra, no proprio cadastro,
+ * independente do historico.
+ */
+export function tentouDeclarar(papel: Vars['papel'], corpo: Record<string, unknown>): boolean {
+  if (papel === 'admin') return true
+  const declaradoPor = corpo.declarado_por
+  return typeof declaradoPor === 'string' && declaradoPor.trim() !== ''
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**

@@ -367,44 +367,82 @@ describe('ModalProduto — botao Excluir por permissao', () => {
 // Declaração de autoria — o raciocínio inteiro está em ModalCliente.test.tsx.
 // Aqui ficam os mesmos cinco fatos, contra o formulário de produto: sem eles,
 // uma regressão que apagasse a declaração SÓ desta tela passaria verde.
+//
+// SÓ AO EDITAR: criar produto dispensou a exigência (pedido do dono,
+// 28/08/2026) — ver o bloco "criação dispensa declaração" logo abaixo, que é
+// o espelho destes mesmos testes contra `produto={null}`.
 
-describe('ModalProduto — declaração de autoria (colaborador)', () => {
+describe('ModalProduto — declaração de autoria (colaborador, editando)', () => {
   it('mostra os dois campos, e o de quem é abre vazio', async () => {
-    render(<ModalProduto papel="colaborador" podeExcluir={false} produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto papel="colaborador" podeExcluir={false} produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     expect(await screen.findByLabelText(/quem está fazendo esta alteração/i)).toHaveValue('')
     expect(screen.getByLabelText(/motivo da alteração/i)).toHaveValue('')
   })
 
   it('salvar sem escolher quem é: bloqueado', async () => {
-    render(<ModalProduto papel="colaborador" podeExcluir={false} produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto papel="colaborador" podeExcluir={false} produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     await screen.findByRole('option', { name: 'Ana Souza' })
-    fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: 'Chuchu' } })
     fireEvent.change(screen.getByLabelText(/motivo da alteração/i), { target: { value: 'faltava' } })
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Escolha quem está fazendo esta alteração.')
-    expect(mockPost).not.toHaveBeenCalled()
+    expect(mockPut).not.toHaveBeenCalled()
   })
 
   it('salvar sem motivo: bloqueado', async () => {
-    render(<ModalProduto papel="colaborador" podeExcluir={false} produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto papel="colaborador" podeExcluir={false} produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     await screen.findByRole('option', { name: 'Ana Souza' })
-    fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: 'Chuchu' } })
     fireEvent.change(screen.getByLabelText(/quem está fazendo esta alteração/i), { target: { value: 'f-1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Informe o motivo da alteração.')
-    expect(mockPost).not.toHaveBeenCalled()
+    expect(mockPut).not.toHaveBeenCalled()
   })
 
   it('com os dois, o corpo leva declarado_por e motivo', async () => {
+    mockPut.mockResolvedValue(produtoExistente)
+    render(<ModalProduto papel="colaborador" podeExcluir={false} produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    await screen.findByRole('option', { name: 'Ana Souza' })
+    fireEvent.change(screen.getByLabelText(/quem está fazendo esta alteração/i), { target: { value: 'f-1' } })
+    fireEvent.change(screen.getByLabelText(/motivo da alteração/i), { target: { value: 'pesamos a caixa de novo' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPut).toHaveBeenCalled())
+    expect(mockPut.mock.calls[0][1]).toMatchObject({ declarado_por: 'f-1', motivo: 'pesamos a caixa de novo' })
+  })
+})
+
+/**
+ * A MUDANÇA DESTE COMMIT: criar produto não pede mais autor nem motivo.
+ * Pedido do dono — cadastra dezenas de produtos de uma vez, e duas perguntas
+ * por cadastro é atrito real. A razão de fundo: não há "alteração" a
+ * atribuir quando o registro está nascendo. `PUT` (bloco acima) e
+ * cliente/fornecedor (ModalCliente.test.tsx, ModalFornecedor.test.tsx) não
+ * mudam em nada — só a criação de produto relaxou.
+ */
+describe('ModalProduto — criação dispensa declaração (colaborador)', () => {
+  it('nao mostra os campos de declaracao ao criar', async () => {
+    render(<ModalProduto papel="colaborador" podeExcluir={false} produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    expect(screen.queryByLabelText(/quem está fazendo esta alteração/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/motivo da alteração/i)).not.toBeInTheDocument()
+  })
+
+  it('salva sem escolher autor nem motivo, e sem chamar a lista de funcionarios', async () => {
     mockPost.mockResolvedValue({ id: 'p-9' })
     render(<ModalProduto papel="colaborador" podeExcluir={false} produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
-    await screen.findByRole('option', { name: 'Ana Souza' })
     fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: 'Chuchu' } })
-    fireEvent.change(screen.getByLabelText(/quem está fazendo esta alteração/i), { target: { value: 'f-1' } })
-    fireEvent.change(screen.getByLabelText(/motivo da alteração/i), { target: { value: 'faltava no cadastro' } })
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     await waitFor(() => expect(mockPost).toHaveBeenCalled())
-    expect(mockPost.mock.calls[0][1]).toMatchObject({ declarado_por: 'f-1', motivo: 'faltava no cadastro' })
+    // DeclaracaoDeAutoria nao monta, entao a rota de funcionarios nem e chamada.
+    expect(mockGet).not.toHaveBeenCalledWith('/api/funcionarios/opcoes')
+  })
+
+  it('o corpo enviado nao leva declarado_por nem motivo', async () => {
+    mockPost.mockResolvedValue({ id: 'p-10' })
+    render(<ModalProduto papel="colaborador" podeExcluir={false} produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: 'Chuchu' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    await waitFor(() => expect(mockPost).toHaveBeenCalled())
+    const corpo = mockPost.mock.calls[0][1] as Record<string, unknown>
+    expect(corpo).not.toHaveProperty('declarado_por')
+    expect(corpo).not.toHaveProperty('motivo')
   })
 })
 

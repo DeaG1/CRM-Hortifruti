@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  diferencas, erroDeDeclaracao, textoDoValor, vaiGravar, ENTIDADES_HISTORICO,
+  diferencas, erroDeDeclaracao, tentouDeclarar, textoDoValor, vaiGravar, ENTIDADES_HISTORICO,
 } from '../src/historico'
 
 /**
@@ -153,6 +153,36 @@ describe('erroDeDeclaracao — a exigencia que vale no servidor', () => {
       .toBe('informe quem esta fazendo esta alteracao')
     expect(erroDeDeclaracao('colaborador', { admin: true, autor_origem: 'login' }))
       .toBe('informe quem esta fazendo esta alteracao')
+  })
+})
+
+describe('tentouDeclarar — so a criacao de produto chama isto', () => {
+  it('admin: sempre true (login sempre disponivel, nada mudou pra ele)', () => {
+    expect(tentouDeclarar('admin', {})).toBe(true)
+    expect(tentouDeclarar('admin', { declarado_por: 'x' })).toBe(true)
+  })
+
+  it('colaborador sem declarado_por: false — cria sem autor a resolver', () => {
+    expect(tentouDeclarar('colaborador', {})).toBe(false)
+  })
+
+  it('colaborador com declarado_por vazio ou so espacos: false, mesma regra de ausente', () => {
+    expect(tentouDeclarar('colaborador', { declarado_por: '' })).toBe(false)
+    expect(tentouDeclarar('colaborador', { declarado_por: '   ' })).toBe(false)
+  })
+
+  it('colaborador com declarado_por que nao e string: false', () => {
+    for (const valor of [1, null, undefined, {}, [], true]) {
+      expect(tentouDeclarar('colaborador', { declarado_por: valor })).toBe(false)
+    }
+  })
+
+  it('colaborador com declarado_por preenchido: true — quer se declarar, e vai por autorDaAlteracao', () => {
+    expect(tentouDeclarar('colaborador', { declarado_por: 'id-1' })).toBe(true)
+  })
+
+  it('motivo sozinho, sem declarado_por, NAO conta — quem decide e o autor, nao o motivo', () => {
+    expect(tentouDeclarar('colaborador', { motivo: 'um motivo qualquer' })).toBe(false)
   })
 })
 

@@ -119,6 +119,31 @@ export function precisaDeclararAutoria(papel: Papel): boolean {
 }
 
 /**
+ * `precisaDeclararAutoria`, só que para PRODUTO — a única das três telas de
+ * cadastro em que a resposta também depende de estar CRIANDO ou EDITANDO.
+ *
+ * Pedido do dono (28/08/2026): ao cadastrar produto ele não quer mais
+ * declarar quem é — "na hora de cadastrar um produto exclusivamente não
+ * precisa dessa questão de falar quem foi o usuário que criou". Cliente e
+ * fornecedor NÃO mudam (continuam chamando `precisaDeclararAutoria` direto,
+ * sem editando), e editar produto também não muda — só a criação relaxou.
+ *
+ * O porquê de fundo: não existe "alteração" a atribuir quando o registro
+ * está nascendo — sem valor anterior, sem de/para, nada para auditar além
+ * do fato de ter sido criado. `POST /api/produtos` deixou de exigir autor e
+ * motivo pelo mesmo motivo (api/src/historico.ts, `tentouDeclarar`); esta
+ * função é o espelho do lado da tela, para o `&&` não ficar solto dentro do
+ * JSX de ModalProduto — mesma regra de `precisaDeclararAutoria` acima.
+ *
+ * QUEM EXIGE DE VERDADE CONTINUA SENDO O SERVIDOR: esconder o bloco aqui é
+ * conveniência, não segurança. `POST /api/produtos` aceita colaborador sem
+ * autor/motivo agora; `PUT /api/produtos/:id` continua recusando com 400.
+ */
+export function precisaDeclararAutoriaAoSalvarProduto(papel: Papel, editando: boolean): boolean {
+  return precisaDeclararAutoria(papel) && editando
+}
+
+/**
  * Quem lê o histórico de alterações de um cadastro. Só o admin — decisão do
  * dono, e ela se sustenta sozinha: o log responde "quem mexeu nisto e por
  * quê", uma pergunta de supervisão. Aberto a quem é supervisionado, viraria a

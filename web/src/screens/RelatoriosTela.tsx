@@ -5,6 +5,7 @@ import {
   derivarRelatorioCompras, derivarRelatorioProdutos, derivarRelatorioPerdas, derivarRelatorioLedger,
   gerarCsv,
   type SaidaResumo, type EntradaResumo, type PerdaDeposito, type ProdutoAgregado,
+  type QuantidadeRelatada,
 } from '../derive/relatorios'
 import type { Cliente, StatusCliente, Health } from '../derive/clientes'
 import type { Fornecedor } from '../derive/fornecedores'
@@ -110,6 +111,25 @@ const pct1 = (n: number) => n.toFixed(1).replace('.', ',') + '%'
 const pctInt = (n: number) => Math.round(n) + '%'
 
 /**
+ * Uma quantidade do relatório de produtos, com a UNIDADE COLADA no número —
+ * "45 UN", "10 CX", "100 KG" — e travessão quando não há número.
+ *
+ * A unidade vai junto do valor porque é o único rótulo que não pode divergir
+ * dele: a tabela tem um cabeçalho só e as linhas saem em unidades diferentes,
+ * então "COMPRADO (KG)" mentiria na maioria delas. Mesma decisão, e mesma
+ * forma, da tela de Estoque (`comUn` em EstoqueLista.tsx) — duas convenções
+ * para a mesma coisa ensinariam o dono a desconfiar das duas.
+ *
+ * `un` vazio é o zero de quem não teve movimento nesta ponta: não há unidade
+ * lançada para citar, e inventar "KG" ali seria afirmar uma medição em quilos
+ * que ninguém fez.
+ */
+function qtdComUn(q: QuantidadeRelatada): string {
+  if (q.qtd == null) return '—'
+  return q.un ? `${qtd(q.qtd)} ${q.un}` : qtd(q.qtd)
+}
+
+/**
  * Texto do aviso de quantidade incompleta — usado por quatro abas (Compras,
  * Pedidos, Produtos e Perdas), com a mesma primeira metade e uma
  * `consequencia` própria de cada uma.
@@ -135,11 +155,27 @@ function avisoSemConversao(n: number, consequencia: string): string {
  * fechado enquanto houver lançamento fora da conta. */
 const CONSEQ_PRECO_MEDIO = 'O preço médio acima está calculado sobre uma quantidade incompleta.'
 const CONSEQ_QTD = 'A quantidade acima está incompleta.'
+/**
+ * A aba Produtos mudou de sentido junto com a correção que passou a mostrar
+ * cada quantidade na unidade em que foi lançada: quando ela sai assim, ela é
+ * EXATA e não leva marca nenhuma. O que continua faltando é o PESO — e é o
+ * peso que sustenta margem, markup e perda %, que comparam compra com venda e
+ * perda com compra e por isso precisam de uma unidade comum.
+ *
+ * Daí duas consequências, e não uma: a de um número em quilos que saiu
+ * incompleto, e a de uma comparação que não pôde ser feita. Dizer as duas com
+ * a mesma frase marcaria de "incompleto" um número exato.
+ */
 const CONSEQ_METRICAS_PRODUTO =
-  'Os números desta linha (quantidades, margem, markup e perda) estão calculados sobre '
-  + 'quantidade incompleta.'
+  'Os números em quilos desta linha (quantidade convertida, margem, markup e perda) estão '
+  + 'calculados sobre quantidade incompleta.'
+const CONSEQ_SEM_BASE =
+  'Sem o peso não há unidade comum entre o que se comprou e o que se vendeu, então margem, '
+  + 'markup e perda % desta linha não têm base de comparação e saem em travessão — a '
+  + 'quantidade ao lado continua exata, na unidade em que foi lançada.'
 const CONSEQ_PERDA_PRODUTO =
-  'A quantidade comprada e a perda % desta linha estão calculadas sobre quantidade incompleta.'
+  'A quantidade comprada em quilos e a perda % desta linha estão calculadas sobre quantidade '
+  + 'incompleta.'
 /**
  * A aba Perdas precisa de duas consequências próprias porque nela o desvio
  * tem direção — e direção oposta à das outras abas.
@@ -424,16 +460,24 @@ export function RelatoriosTela({ periodo = PERIODO_TODOS, onSessaoExpirada }: Re
         }
       case 'produtos':
         return {
-          header: ['Produto', 'Qtd comprada (kg)', 'Qtd vendida (kg)', 'Faturamento', 'Margem', 'Markup', 'Perda'],
+          // Sem "(kg)" no cabeçalho: a unidade viaja com cada valor, porque
+          // varia de linha para linha. Mesma razão da tela.
+          header: ['Produto', 'Qtd comprada', 'Qtd vendida', 'Faturamento', 'Margem', 'Markup', 'Perda'],
           rows: relProdutos.linhas.map(l => {
-            // Mesmo asterisco da tela, nas mesmas cinco colunas: o CSV sai da
-            // mesma leitura, não de uma versão "limpa".
+            // Mesmos asteriscos da tela, nas mesmas colunas e pelos mesmos
+            // dois contadores: o CSV sai da mesma leitura, não de uma versão
+            // "limpa". Ver o comentário na tabela de AbaProdutos.
             const marca = l.itensSemConversao > 0 ? '*' : ''
+            const marcaSemBase = l.itensSemBase > 0 ? '*' : ''
+            const marcaColuna = (q: QuantidadeRelatada) => (q.semConversao > 0 ? '*' : '')
             return [
-              l.nome, qtd(l.compradoQtd) + marca, qtd(l.vendidoQtd) + marca, money(l.faturamento),
-              l.vendidoQtd ? money(l.margem) + marca : '—',
-              l.markupPct != null ? pctInt(l.markupPct) + marca : '—',
-              l.perdaPct != null ? pct1(l.perdaPct) + marca : '—',
+              l.nome,
+              qtdComUn(l.comprado) + marcaColuna(l.comprado),
+              qtdComUn(l.vendido) + marcaColuna(l.vendido),
+              money(l.faturamento),
+              l.vendidoQtd ? money(l.margem) + marca : '—' + marcaSemBase,
+              l.markupPct != null ? pctInt(l.markupPct) + marca : '—' + marcaSemBase,
+              l.perdaPct != null ? pct1(l.perdaPct) + marca : '—' + marcaSemBase,
             ]
           }),
         }
@@ -458,13 +502,14 @@ export function RelatoriosTela({ periodo = PERIODO_TODOS, onSessaoExpirada }: Re
               m.ocorrencias, pctInt(m.pct),
             ]),
             [],
-            ['Produto', 'Qtd comprada (kg)', 'Perda %', ''],
-            // Mesmo asterisco da tela: o CSV sai da mesma leitura, não de
-            // uma versão "limpa".
+            // Sem "(kg)": a unidade vem colada em cada valor, como na tela.
+            ['Produto', 'Qtd comprada', 'Perda %', ''],
+            // Mesmo asterisco da tela, na mesma célula: o CSV sai da mesma
+            // leitura, não de uma versão "limpa".
             ...relPerdas.porProduto.map(p => {
               const marca = p.itensSemConversao > 0 ? '*' : ''
               return [
-                p.nome, qtd(p.compradoQtd) + marca,
+                p.nome, qtdComUn(p.comprado) + (p.comprado.semConversao > 0 ? '*' : ''),
                 p.perdaPct != null ? pct1(p.perdaPct) + marca : '—', '',
               ]
             }),
@@ -786,45 +831,71 @@ function AbaProdutos({ dados }: { dados: ReturnType<typeof derivarRelatorioProdu
           <div className="relatorios-num">MARKUP</div><div className="relatorios-num">PERDA</div>
         </div>
         {linhas.map(l => {
-          // Uma linha com lançamento não convertível tem TODOS os números
-          // derivados de quantidade errados na mesma medida — comprado,
-          // vendido, margem, markup e perda. Só FATURAMENTO escapa: reais são
-          // reais, independem da unidade. Marcar só um deles sugeriria que os
-          // outros estão fechados.
+          // Dois contadores, e não um, porque a linha tem duas espécies de
+          // número. COMPRADO e VENDIDO saem na unidade em que foram lançados
+          // sempre que há uma só, e aí são EXATOS: quem os marca é o contador
+          // da própria coluna (`comprado.semConversao`), que é 0 nesse caso.
+          //
+          // MARGEM, MARKUP e PERDA % são razões e vivem em quilos — comparar
+          // compra com venda, ou perda com compra, exige unidade comum, e o
+          // quilo é a única. Quando há quilo dos dois lados elas saem, e o
+          // `*` delas é o da LINHA (`inc`): qualquer lançamento fora da
+          // conversão as desloca todas na mesma medida. Quando não há, elas
+          // saem em travessão marcado por `semBase` — o travessão precisa
+          // dizer que a causa tem conserto (cadastrar o peso médio) e não é
+          // ausência de movimento. Só FATURAMENTO nunca leva marca: reais são
+          // reais, independem de unidade.
           const inc = l.itensSemConversao
+          const semBase = l.itensSemBase
           return (
             <div key={l.produtoId} className="relatorios-linha relatorios-grid-produtos">
               <div className="relatorios-forte">{l.nome}</div>
               <div className="relatorios-num relatorios-mono relatorios-suave">
-                <NumIncompleto texto={qtd(l.compradoQtd)} n={inc} consequencia={CONSEQ_METRICAS_PRODUTO} />
+                <NumIncompleto
+                  texto={qtdComUn(l.comprado)}
+                  n={l.comprado.semConversao}
+                  consequencia={CONSEQ_METRICAS_PRODUTO}
+                />
               </div>
               <div className="relatorios-num relatorios-mono relatorios-suave">
-                <NumIncompleto texto={qtd(l.vendidoQtd)} n={inc} consequencia={CONSEQ_METRICAS_PRODUTO} />
+                <NumIncompleto
+                  texto={qtdComUn(l.vendido)}
+                  n={l.vendido.semConversao}
+                  consequencia={CONSEQ_METRICAS_PRODUTO}
+                />
               </div>
               <div className="relatorios-num relatorios-mono relatorios-forte">{money(l.faturamento)}</div>
               <div className="relatorios-num relatorios-mono" style={{ color: '#2f5d3f' }}>
                 {l.vendidoQtd
                   ? <NumIncompleto texto={money(l.margem)} n={inc} consequencia={CONSEQ_METRICAS_PRODUTO} />
-                  : '—'}
+                  : <NumIncompleto texto="—" n={semBase} consequencia={CONSEQ_SEM_BASE} />}
               </div>
               <div className="relatorios-num relatorios-mono" style={{ color: corMarkup(l.markupPct) }}>
                 {l.markupPct != null
                   ? <NumIncompleto texto={pctInt(l.markupPct)} n={inc} consequencia={CONSEQ_METRICAS_PRODUTO} />
-                  : '—'}
+                  : <NumIncompleto texto="—" n={semBase} consequencia={CONSEQ_SEM_BASE} />}
               </div>
               <div className="relatorios-num relatorios-mono" style={{ color: l.perdaPct != null ? corPerda(l.perdaPct) : NEUTRO }}>
                 {l.perdaPct != null
                   ? <NumIncompleto texto={pct1(l.perdaPct)} n={inc} consequencia={CONSEQ_METRICAS_PRODUTO} />
-                  : '—'}
+                  : <NumIncompleto texto="—" n={semBase} consequencia={CONSEQ_SEM_BASE} />}
               </div>
             </div>
           )
         })}
         {linhas.length === 0 && <div className="relatorios-tabela-vazia">Nenhum produto movimentado no período.</div>}
       </div>
+      {/* A nota antiga dizia "Quantidades em kg (caixas convertidas pelo peso
+          médio)". Desde que cada coluna passou a sair na unidade em que foi
+          lançada, isso descreve só metade das linhas — e a metade errada, se
+          o dono lança em UN. */}
       <div className="relatorios-nota">
-        Ordenado por faturamento. Quantidades em <strong>kg</strong> (caixas convertidas pelo peso médio do
-        produto). <strong>Margem</strong> = faturamento menos o custo de compra da quantidade vendida.
+        Ordenado por faturamento. Cada quantidade sai <strong>na unidade em que foi lançada</strong>, com a
+        unidade escrita ao lado do número; quando o mesmo produto foi movimentado em unidades
+        diferentes, ela sai em <strong>kg</strong> (caixas convertidas pelo peso médio do produto), a única
+        unidade em que caixa e quilo fecham a mesma conta. <strong>Margem</strong>, <strong>markup</strong> e{' '}
+        <strong>perda</strong> comparam compra com venda e por isso são sempre em kg — sem kg dos dois lados
+        não há comparação, e a coluna mostra travessão em vez de um número.
       </div>
       <NotaSemConversao n={totais.itensSemConversao} consequencia={CONSEQ_METRICAS_PRODUTO} />
     </>
@@ -903,13 +974,15 @@ function AbaPerdas({ dados }: { dados: ReturnType<typeof derivarRelatorioPerdas>
           </div>
           {porProduto.map(p => (
             // Esta tabela reaproveita as linhas de derivarRelatorioProdutos,
-            // então herda o mesmo problema e a mesma marca: quantidade
-            // comprada e perda % saem da MESMA quantidade em kg, e um
-            // lançamento não convertível deixa as duas incompletas.
+            // então mostra a MESMA quantidade que a aba Produtos, com a mesma
+            // unidade: divergir aqui seria o mesmo produto com dois números em
+            // duas telas. COMPRADO sai na unidade lançada (exato, sem marca) e
+            // PERDA % continua em kg sobre kg — só entra neste painel quem tem
+            // kg comprado, então aqui a % sempre existe.
             <div key={p.nome} className="relatorios-linha relatorios-grid-perda-produto">
               <div className="relatorios-forte">{p.nome}</div>
               <div className="relatorios-num relatorios-mono relatorios-suave">
-                <NumIncompleto texto={qtd(p.compradoQtd)} n={p.itensSemConversao} consequencia={CONSEQ_PERDA_PRODUTO} />
+                <NumIncompleto texto={qtdComUn(p.comprado)} n={p.comprado.semConversao} consequencia={CONSEQ_PERDA_PRODUTO} />
               </div>
               <div className="relatorios-num relatorios-mono" style={{ color: p.perdaPct != null ? corPerda(p.perdaPct) : NEUTRO }}>
                 {p.perdaPct != null
@@ -923,7 +996,10 @@ function AbaPerdas({ dados }: { dados: ReturnType<typeof derivarRelatorioPerdas>
       <div className="relatorios-nota">
         Soma a perda registrada na <strong>coleta</strong> (dentro de cada entrada) com as perdas lançadas no{' '}
         <strong>depósito</strong>, sempre em <strong>quilos</strong>: a perda de coleta já é lançada em kg,
-        e a de depósito é convertida pelo peso médio da embalagem quando foi lançada em caixas.
+        e a de depósito é convertida pelo peso médio da embalagem quando foi lançada em caixas. A{' '}
+        <strong>perda %</strong> por produto é essa perda em kg sobre o comprado em kg — por isso só entram
+        aqui os produtos que têm peso; a coluna <strong>COMPRADO</strong> ao lado sai na unidade em que a
+        compra foi lançada, igual à aba Produtos.
       </div>
       {/* Duas notas, e não uma: os dois painéis desta aba saem de rotas
           diferentes (perdas + entradas de um lado, o agregado por produto do

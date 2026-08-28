@@ -7,6 +7,7 @@ import {
   derivarRelatorioPedidos,
   derivarRelatorioCompras,
   derivarRelatorioProdutos,
+  quantidadeRelatada,
   derivarRelatorioPerdas,
   derivarRelatorioLedger,
   perdaColetaEfetiva,
@@ -993,8 +994,8 @@ describe('derivarRelatorioPerdas', () => {
 
   it('por produto reaproveita a view de produtos ja calculada, filtrando perdaPct null', () => {
     const produtosView = [
-      { produtoId: 'p1', nome: 'Com perda', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
-      { produtoId: 'p2', nome: 'Sem compra', compradoQtd: 0, vendidoQtd: 0, faturamento: 0, itensSemConversao: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: null },
+      { produtoId: 'p1', nome: 'Com perda', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 0, comprado: { qtd: 100, un: 'KG', semConversao: 0 }, vendido: { qtd: 10, un: 'KG', semConversao: 0 }, itensSemBase: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p2', nome: 'Sem compra', compradoQtd: 0, vendidoQtd: 0, faturamento: 0, itensSemConversao: 0, comprado: { qtd: 0, un: 'KG', semConversao: 0 }, vendido: { qtd: 0, un: 'KG', semConversao: 0 }, itensSemBase: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: null },
     ]
     const { porProduto } = derivarRelatorioPerdas([], [], produtosView, '', '')
     expect(porProduto).toHaveLength(1)
@@ -1033,8 +1034,8 @@ describe('derivarRelatorioPerdas', () => {
 
   it('repassa itensSemConversao de cada linha de produtos para "perdas por produto"', () => {
     const produtosView = [
-      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 2, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
-      { produtoId: 'p2', nome: 'Batata', compradoQtd: 200, vendidoQtd: 20, faturamento: 20, itensSemConversao: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 5 },
+      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 2, comprado: { qtd: 100, un: 'KG', semConversao: 0 }, vendido: { qtd: 10, un: 'KG', semConversao: 0 }, itensSemBase: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p2', nome: 'Batata', compradoQtd: 200, vendidoQtd: 20, faturamento: 20, itensSemConversao: 0, comprado: { qtd: 200, un: 'KG', semConversao: 0 }, vendido: { qtd: 20, un: 'KG', semConversao: 0 }, itensSemBase: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 5 },
     ]
     const { porProduto } = derivarRelatorioPerdas([], [], produtosView, '', '')
     expect(porProduto.find(p => p.nome === 'Alface')!.itensSemConversao).toBe(2)
@@ -1043,13 +1044,13 @@ describe('derivarRelatorioPerdas', () => {
 
   it('totais.itensSemConversaoProduto soma as linhas exibidas — 0 quando a tabela esta completa', () => {
     const completa = [
-      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 0, comprado: { qtd: 100, un: 'KG', semConversao: 0 }, vendido: { qtd: 10, un: 'KG', semConversao: 0 }, itensSemBase: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
     ]
     expect(derivarRelatorioPerdas([], [], completa, '', '').totais.itensSemConversaoProduto).toBe(0)
 
     const incompleta = [
-      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 2, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
-      { produtoId: 'p2', nome: 'Tomate', compradoQtd: 50, vendidoQtd: 5, faturamento: 5, itensSemConversao: 3, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 8 },
+      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 2, comprado: { qtd: 100, un: 'KG', semConversao: 0 }, vendido: { qtd: 10, un: 'KG', semConversao: 0 }, itensSemBase: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p2', nome: 'Tomate', compradoQtd: 50, vendidoQtd: 5, faturamento: 5, itensSemConversao: 3, comprado: { qtd: 50, un: 'KG', semConversao: 0 }, vendido: { qtd: 5, un: 'KG', semConversao: 0 }, itensSemBase: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 8 },
     ]
     expect(derivarRelatorioPerdas([], [], incompleta, '', '').totais.itensSemConversaoProduto).toBe(5)
   })
@@ -1143,7 +1144,7 @@ describe('derivarRelatorioPerdas', () => {
     // "perdas por produto" sai de outra rota (o agregado por produto): o que
     // ficou de fora la nao diz nada sobre a perda total nem sobre o indice.
     const produtosView = [
-      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 5, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
+      { produtoId: 'p1', nome: 'Alface', compradoQtd: 100, vendidoQtd: 10, faturamento: 10, itensSemConversao: 5, comprado: { qtd: 100, un: 'KG', semConversao: 0 }, vendido: { qtd: 10, un: 'KG', semConversao: 0 }, itensSemBase: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: 20 },
     ]
     const { totais } = derivarRelatorioPerdas([entrada({ peso_total: 1000 })], [], produtosView, '', '')
     expect(totais.itensSemConversaoProduto).toBe(5)
@@ -1153,7 +1154,7 @@ describe('derivarRelatorioPerdas', () => {
 
   it('linha sem perdaPct nao entra na tabela nem no contador (nao e exibida)', () => {
     const produtosView = [
-      { produtoId: 'p1', nome: 'Sem compra', compradoQtd: 0, vendidoQtd: 0, faturamento: 0, itensSemConversao: 7, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: null },
+      { produtoId: 'p1', nome: 'Sem compra', compradoQtd: 0, vendidoQtd: 0, faturamento: 0, itensSemConversao: 7, comprado: { qtd: 0, un: 'KG', semConversao: 0 }, vendido: { qtd: 0, un: 'KG', semConversao: 0 }, itensSemBase: 0, margem: 0, margemUnit: null, margemPct: null, markupPct: null, perdaPct: null },
     ]
     const { porProduto, totais } = derivarRelatorioPerdas([], [], produtosView, '', '')
     expect(porProduto).toHaveLength(0)
@@ -1483,5 +1484,209 @@ describe('derivarRelatorioProdutos — perda media realizada (P-1)', () => {
       produtoAgregado({ produto_id: 'p2', compra_qtd: 0, perda_deposito_qtd: 5 }),
     ], 2)
     expect(totais.perdaMediaPct).toBeCloseTo(15, 10)
+  })
+})
+
+// ============================================================================
+// Cada quantidade na unidade em que foi lancada (2026-08-28)
+// ============================================================================
+// Mesmo defeito que a tela de Estoque corrigiu em 88318ee, no relatorio de
+// produtos: um produto comprado so em UN, sem peso medio cadastrado, saia com
+// `0*` em COMPRADO e VENDIDO — "nao sei converter" exibido como "nao ha nada".
+//
+// O kg NAO foi desfeito: compradoQtd/vendidoQtd continuam em quilos e
+// continuam sendo a base de markup, margem e perda %. O que mudou e que
+// `comprado`/`vendido` — o que a tela mostra — saem na unidade lancada quando
+// a ponta inteira esta numa unidade so.
+
+describe('quantidadeRelatada', () => {
+  it('ponta numa unidade so: sai a quantidade lancada, exata e sem marca', () => {
+    // O caso real: 45 UN de alface, produto sem peso medio. O kg da ponta e 0
+    // e o contador dela e 1 — e mesmo assim a quantidade EXIBIDA e exata,
+    // porque nao ha conversao nenhuma no caminho dela.
+    expect(quantidadeRelatada({ qtd: 45, un: 'UN' }, 0, 1))
+      .toEqual({ qtd: 45, un: 'UN', semConversao: 0 })
+  })
+
+  it('KG tambem e uma unidade lancada: mesmo numero de sempre, com o rotulo junto', () => {
+    expect(quantidadeRelatada({ qtd: 100, un: 'KG' }, 100, 0))
+      .toEqual({ qtd: 100, un: 'KG', semConversao: 0 })
+  })
+
+  it('duas unidades com kg apurado: sai o kg, marcado pelo que ficou de fora', () => {
+    expect(quantidadeRelatada(null, 270, 0))
+      .toEqual({ qtd: 270, un: 'KG', semConversao: 0 })
+    expect(quantidadeRelatada(null, 30, 1))
+      .toEqual({ qtd: 30, un: 'KG', semConversao: 1 })
+  })
+
+  it('duas unidades e NENHUMA converte: travessao marcado, nunca zero', () => {
+    // Zero aqui afirmaria que nao se comprou nada, exatamente onde ha
+    // mercadoria que nao se soube somar. E o mesmo erro do defeito original.
+    expect(quantidadeRelatada(null, 0, 2))
+      .toEqual({ qtd: null, un: '', semConversao: 2 })
+  })
+
+  it('sem movimento na ponta: zero MEDIDO, limpo e sem unidade inventada', () => {
+    expect(quantidadeRelatada(null, 0, 0))
+      .toEqual({ qtd: 0, un: '', semConversao: 0 })
+    expect(quantidadeRelatada(undefined, 0, 0))
+      .toEqual({ qtd: 0, un: '', semConversao: 0 })
+  })
+
+  it('os dois zeros nao se confundem: so o contador da ponta os separa', () => {
+    const medido = quantidadeRelatada(null, 0, 0)
+    const semConversao = quantidadeRelatada(null, 0, 2)
+    expect(medido.qtd).toBe(0)
+    expect(semConversao.qtd).toBeNull()
+  })
+})
+
+describe('derivarRelatorioProdutos — quantidade na unidade lancada', () => {
+  it('comprado so em UN sem peso medio: 45 UN, nao 0', () => {
+    const [linha] = derivarRelatorioProdutos([produtoAgregado({
+      nome: 'Alface Hidro',
+      compra_qtd: 0, compra_valor: 135,
+      compra_na_unidade: { qtd: 45, un: 'UN' }, compra_sem_conversao: 1,
+      itens_sem_conversao: 1,
+    })], 1).linhas
+    expect(linha.comprado).toEqual({ qtd: 45, un: 'UN', semConversao: 0 })
+    // O kg continua o que era — e continua sendo a base das razoes.
+    expect(linha.compradoQtd).toBe(0)
+  })
+
+  it('so em KG: TUDO identico ao que a funcao ja devolvia, campo a campo', () => {
+    const agregado = produtoAgregado({
+      compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 5, perda_deposito_qtd: 5,
+      venda_qtd: 80, venda_valor: 400,
+    })
+    // O mesmo agregado sem os campos novos — literalmente o que a API mandava
+    // antes desta mudanca — e com eles. As razoes tem de bater byte a byte.
+    const antes = derivarRelatorioProdutos([agregado], 1).linhas[0]
+    const depois = derivarRelatorioProdutos([{
+      ...agregado,
+      compra_na_unidade: { qtd: 100, un: 'KG' }, venda_na_unidade: { qtd: 80, un: 'KG' },
+      compra_sem_conversao: 0, venda_sem_conversao: 0,
+    }], 1).linhas[0]
+
+    expect(depois.compradoQtd).toBe(antes.compradoQtd)
+    expect(depois.vendidoQtd).toBe(antes.vendidoQtd)
+    expect(depois.faturamento).toBe(antes.faturamento)
+    expect(depois.margem).toBe(antes.margem)
+    expect(depois.margemUnit).toBe(antes.margemUnit)
+    expect(depois.margemPct).toBe(antes.margemPct)
+    expect(depois.markupPct).toBe(antes.markupPct)
+    expect(depois.perdaPct).toBe(antes.perdaPct)
+    // E o numero exibido e o mesmo numero, agora com a unidade junto.
+    expect(depois.comprado).toEqual({ qtd: 100, un: 'KG', semConversao: 0 })
+    expect(depois.vendido).toEqual({ qtd: 80, un: 'KG', semConversao: 0 })
+    expect(depois.itensSemBase).toBe(0)
+  })
+
+  it('movimentado em duas unidades: continua em kg, com o asterisco', () => {
+    const [linha] = derivarRelatorioProdutos([produtoAgregado({
+      compra_qtd: 30, compra_valor: 260,
+      compra_na_unidade: null, compra_sem_conversao: 1,
+      itens_sem_conversao: 1,
+    })], 1).linhas
+    // 30 KG lancados + 5 CX sem peso medio: o kg e o unico denominador comum,
+    // e o `*` diz que ele nao tem tudo dentro.
+    expect(linha.comprado).toEqual({ qtd: 30, un: 'KG', semConversao: 1 })
+  })
+
+  it('duas unidades SEM peso medio: travessao marcado, e o kg segue zerado', () => {
+    const [linha] = derivarRelatorioProdutos([produtoAgregado({
+      compra_qtd: 0, compra_valor: 212,
+      compra_na_unidade: null, compra_sem_conversao: 2,
+      itens_sem_conversao: 2,
+    })], 1).linhas
+    expect(linha.comprado.qtd).toBeNull()
+    expect(linha.comprado.semConversao).toBe(2)
+  })
+
+  it('comprado em CX e vendido em KG: cada coluna na unidade DELA', () => {
+    const [linha] = derivarRelatorioProdutos([produtoAgregado({
+      compra_qtd: 200, compra_valor: 450, compra_na_unidade: { qtd: 10, un: 'CX' },
+      venda_qtd: 150, venda_valor: 600, venda_na_unidade: { qtd: 150, un: 'KG' },
+    })], 1).linhas
+    expect(linha.comprado).toEqual({ qtd: 10, un: 'CX', semConversao: 0 })
+    expect(linha.vendido).toEqual({ qtd: 150, un: 'KG', semConversao: 0 })
+    // markup cruza as duas pontas e por isso sai do KG das duas: 450/200 =
+    // R$ 2,25/kg contra 600/150 = R$ 4,00/kg. Sobre CX contra KG daria 77%,
+    // um numero, e errado.
+    expect(linha.markupPct).toBeCloseTo(((4 - 2.25) / 2.25) * 100)
+    expect(linha.itensSemBase).toBe(0)
+  })
+})
+
+describe('derivarRelatorioProdutos — as razoes continuam sobre base comparavel', () => {
+  it('sem quilo na compra: markup, margem e perda em travessao, nunca numero', () => {
+    const [linha] = derivarRelatorioProdutos([produtoAgregado({
+      compra_qtd: 0, compra_valor: 135, compra_na_unidade: { qtd: 45, un: 'UN' },
+      compra_sem_conversao: 1,
+      venda_qtd: 0, venda_valor: 200, venda_na_unidade: { qtd: 40, un: 'UN' },
+      venda_sem_conversao: 1,
+      itens_sem_conversao: 2,
+    })], 1).linhas
+    // As quantidades sao exatas...
+    expect(linha.comprado).toEqual({ qtd: 45, un: 'UN', semConversao: 0 })
+    expect(linha.vendido).toEqual({ qtd: 40, un: 'UN', semConversao: 0 })
+    // ...e as razoes, que precisam de uma unidade comum, nao saem.
+    expect(linha.markupPct).toBeNull()
+    expect(linha.margemUnit).toBeNull()
+    expect(linha.margemPct).toBeNull()
+    expect(linha.perdaPct).toBeNull()
+    // E o travessao delas e marcado: a causa tem conserto (cadastrar o peso
+    // medio), e sem a marca ele pareceria ausencia de movimento.
+    expect(linha.itensSemBase).toBe(2)
+  })
+
+  it('travessao por falta de movimento sai LIMPO — nada a cadastrar', () => {
+    const [linha] = derivarRelatorioProdutos([produtoAgregado({
+      compra_qtd: 100, compra_valor: 200, compra_na_unidade: { qtd: 100, un: 'KG' },
+      venda_qtd: 0, venda_valor: 0,
+    })], 1).linhas
+    expect(linha.markupPct).toBeNull()
+    // Nao houve venda: o travessao nao tem causa que o cadastro resolva.
+    expect(linha.itensSemBase).toBe(0)
+  })
+
+  it('com quilo dos dois lados a razao sai, e itensSemBase e zero mesmo com lancamento fora', () => {
+    const [linha] = derivarRelatorioProdutos([produtoAgregado({
+      compra_qtd: 100, compra_valor: 200, compra_sem_conversao: 3,
+      venda_qtd: 80, venda_valor: 400, venda_sem_conversao: 1,
+      itens_sem_conversao: 4,
+    })], 1).linhas
+    expect(linha.markupPct).not.toBeNull()
+    // A razao tem base; quem marca as celulas dela e o contador da LINHA.
+    expect(linha.itensSemBase).toBe(0)
+    expect(linha.itensSemConversao).toBe(4)
+  })
+})
+
+describe('derivarRelatorioPerdas — a aba Perdas mostra a mesma quantidade da aba Produtos', () => {
+  it('repassa `comprado` da linha de produtos, sem recalcular', () => {
+    const { linhas } = derivarRelatorioProdutos([produtoAgregado({
+      compra_qtd: 200, compra_valor: 450, compra_na_unidade: { qtd: 10, un: 'CX' },
+      perda_coleta_qtd: 6,
+    })], 1)
+    const { porProduto } = derivarRelatorioPerdas([], [], linhas, '', '')
+    expect(porProduto).toHaveLength(1)
+    expect(porProduto[0].comprado).toEqual(linhas[0].comprado)
+    // A % continua kg sobre kg — 6 de 200 —, que e a unica base em que ela
+    // significa alguma coisa.
+    expect(porProduto[0].perdaPct).toBeCloseTo(3)
+  })
+
+  it('produto sem quilo continua fora do painel, em vez de entrar com % inventada', () => {
+    const { linhas } = derivarRelatorioProdutos([produtoAgregado({
+      compra_qtd: 0, compra_valor: 135, compra_na_unidade: { qtd: 45, un: 'UN' },
+      compra_sem_conversao: 1, itens_sem_conversao: 1,
+    })], 1)
+    // Na aba Produtos ele aparece inteiro, com 45 UN.
+    expect(linhas[0].comprado.qtd).toBe(45)
+    // Na aba Perdas, nao: perda % sem denominador nao e perda zero.
+    const { porProduto } = derivarRelatorioPerdas([], [], linhas, '', '')
+    expect(porProduto).toHaveLength(0)
   })
 })

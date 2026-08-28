@@ -186,7 +186,9 @@ export interface ProdutoAgregado {
   produto_id: string
   nome: string
   /** Unidade PADRÃO do cadastro do produto (produtos.un) — só um rótulo do
-   * cadastro. As quantidades abaixo NÃO estão nela: saem todas em kg. */
+   * cadastro. As quantidades em kg abaixo NÃO estão nela; a unidade em que
+   * cada ponta foi de fato lançada vem em `compra_na_unidade`/
+   * `venda_na_unidade`, e pode ser outra. */
   un: string
   /** Em kg (a API converte cada lançamento pela unidade dele). */
   compra_qtd: number
@@ -213,6 +215,89 @@ export interface ProdutoAgregado {
    * ausente significa exatamente 0 (nada ficou de fora).
    */
   itens_sem_conversao?: number
+  /**
+   * A quantidade COMPRADA na unidade em que foi lançada — exata, sem fator
+   * nenhum no meio — quando TODAS as compras do produto no período estão na
+   * mesma unidade. `null` quando o produto foi comprado em unidades
+   * diferentes (aí só o kg reconcilia) ou quando não foi comprado.
+   *
+   * A quantidade e a unidade vêm amarradas de propósito: quantidade sem
+   * unidade não significa nada, e um número solto convidaria a somá-lo com
+   * outra coisa. Mesma decisão de `em_kg` na tela de Estoque.
+   *
+   * Opcional como os irmãos acima; ausente = `null` = "use o kg".
+   */
+  compra_na_unidade?: { qtd: number; un: string } | null
+  /** Idem, para a VENDA. É uma ponta separada: um produto comprado em CX e
+   * vendido em KG tem unidade única dos dois lados, e nenhuma delas é comum
+   * às duas — por isso markup e margem, que cruzam as pontas, continuam
+   * saindo do kg. Ver `derivarRelatorioProdutos`. */
+  venda_na_unidade?: { qtd: number; un: string } | null
+  /** Quantos lançamentos de COMPRA ficaram fora de `compra_qtd` por não
+   * converterem em quilos. É a fatia de `itens_sem_conversao` desta ponta, e
+   * existe separada porque só ela distingue `compra_qtd = 0` MEDIDO (não
+   * houve compra) de `compra_qtd = 0` por ausência de conversão. Ver
+   * `quantidadeRelatada`. */
+  compra_sem_conversao?: number
+  /** Idem, para a VENDA. */
+  venda_sem_conversao?: number
+}
+
+/**
+ * O que uma coluna de quantidade deste relatório tem para MOSTRAR — a saída
+ * de `quantidadeRelatada`, que é quem decide.
+ */
+export interface QuantidadeRelatada {
+  /** O número a exibir. `null` quando não há número que se possa afirmar:
+   * houve movimentação, ela não cabe numa unidade só e nenhuma parte dela
+   * converte em quilos. Travessão na tela — nunca zero, que afirmaria
+   * ausência de mercadoria. */
+  qtd: number | null
+  /** A unidade de `qtd`, colada nela na tela. `''` só quando não há unidade a
+   * afirmar: o zero medido de quem não teve movimento nesta ponta, e o
+   * travessão. */
+  un: string
+  /** Quantos lançamentos ficaram fora de `qtd`. `0` quando ela é exata — e é
+   * exata sempre que sai na unidade lançada. É o `n` do `*` na tela. */
+  semConversao: number
+}
+
+/**
+ * Em que unidade — e com que ressalva — uma ponta (compra ou venda) deve ser
+ * exibida.
+ *
+ * A ORDEM DAS PERGUNTAS É A DECISÃO, e ela vai do exato para o reconciliado:
+ *
+ *   1. A ponta inteira está numa unidade só? Então a quantidade lançada é
+ *      exata e não ambígua, e é ela que sai — em UN, CX ou KG, tanto faz.
+ *      Nada ficou de fora dela: não há conversão nenhuma no caminho, então
+ *      `semConversao` é 0 mesmo que o kg desta linha esteja incompleto. Este
+ *      é o conserto: 45 UN de alface sem peso médio saíam como `0*`.
+ *   2. Não está, e o kg está VAZIO (nenhum lançamento converteu)? Então não
+ *      há número: travessão marcado. Zero ali seria a leitura mais
+ *      tranquilizadora possível ("não se comprou nada") exatamente onde há
+ *      mercadoria que não se soube somar.
+ *   3. Não está, e há kg? Sai o kg — a única unidade em que caixa e quilo
+ *      fecham a mesma conta —, marcado quando algum lançamento ficou fora.
+ *   4. Não houve movimento nesta ponta? Zero MEDIDO, limpo e sem unidade: não
+ *      há unidade lançada para citar, e "0 KG" inventaria uma.
+ *
+ * Trocar 2 por 4 seria o defeito de novo, ao contrário: os dois casos chegam
+ * aqui com `qtd = 0`, e é `semConversao` — o contador DESTA ponta, não o
+ * somado da linha — quem os separa.
+ */
+export function quantidadeRelatada(
+  naUnidade: { qtd: number; un: string } | null | undefined,
+  qtdKg: number,
+  semConversao: number,
+): QuantidadeRelatada {
+  if (naUnidade) return { qtd: naUnidade.qtd, un: naUnidade.un, semConversao: 0 }
+  if (semConversao > 0) {
+    return qtdKg === 0
+      ? { qtd: null, un: '', semConversao }
+      : { qtd: qtdKg, un: 'KG', semConversao }
+  }
+  return { qtd: qtdKg, un: qtdKg === 0 ? '' : 'KG', semConversao: 0 }
 }
 
 // ------------------------------------------------------------- utilidades
@@ -764,11 +849,31 @@ export function derivarRelatorioCompras(
 export interface LinhaRelatorioProduto {
   produtoId: string
   nome: string
-  /** Em kg — a API já converte cada lançamento pela unidade dele. Incompleta
-   * quando `itensSemConversao > 0`. */
+  /**
+   * Em kg — a API já converte cada lançamento pela unidade dele. Incompleta
+   * quando `itensSemConversao > 0`.
+   *
+   * NÃO É O QUE A TELA MOSTRA (isso é `comprado`, logo abaixo). Este número
+   * é a BASE DAS RAZÕES: preço médio de compra, markup, margem e perda %
+   * saem todos dele, e continuam saindo — cruzar compra com venda, ou perda
+   * com compra, exige uma unidade comum, e o quilo é a única que existe.
+   * Ver `derivarRelatorioProdutos`.
+   */
   compradoQtd: number
-  /** Em kg, mesma regra de `compradoQtd`. */
+  /** Em kg, mesma regra de `compradoQtd` — inclusive a de não ser o número
+   * exibido. */
   vendidoQtd: number
+  /**
+   * O que a coluna COMPRADO mostra: a quantidade na unidade em que foi
+   * lançada quando todas as compras do período estão na mesma unidade
+   * (exata), o kg quando houve mais de uma unidade, travessão quando não há
+   * nem uma coisa nem outra. Ver `quantidadeRelatada`.
+   */
+  comprado: QuantidadeRelatada
+  /** Idem, para a coluna VENDIDO. Pode sair numa unidade DIFERENTE da de
+   * `comprado` — cada uma diz a verdade sobre o que ela agrega, e nenhuma
+   * afirma uma unidade comum que não existe. */
+  vendido: QuantidadeRelatada
   faturamento: number
   /**
    * Lançamentos deste produto, no período, que ficaram fora das quantidades
@@ -811,6 +916,22 @@ export interface LinhaRelatorioProduto {
   markupPct: number | null
   /** null quando compradoQtd===0 (sem base para a %; vira '—' na tela). */
   perdaPct: number | null
+  /**
+   * Quantos lançamentos desta linha deixaram as RAZÕES (markup, margem,
+   * margem/kg e perda %) sem base em quilos — os que não converteram numa
+   * ponta que ficou, por isso, com `compradoQtd`/`vendidoQtd` zerados.
+   *
+   * É o que separa os dois travessões dessas colunas, que a tela precisa
+   * distinguir: o de "não houve compra/venda no período" (nada a fazer, sai
+   * limpo) e o de "houve, mas sem peso médio cadastrado não há como comparar"
+   * (sai marcado, e a nota de rodapé diz onde cadastrar). Sem essa marca, a
+   * saída honesta — travessão em vez de um markup calculado sobre um preço
+   * por caixa contra um preço por quilo — pareceria ausência de movimento.
+   *
+   * `0` sempre que a razão tem número: se as duas pontas têm quilo, nenhuma
+   * delas ficou sem base.
+   */
+  itensSemBase: number
 }
 
 export interface RelatorioProdutosTotais {
@@ -869,6 +990,43 @@ export interface RelatorioProdutosTotais {
  * é repassado por linha e somado no total, para as duas telas que consomem
  * este relatório (Relatórios/aba Produtos e Produtos) marcarem os números
  * afetados em vez de exibi-los limpos.
+ *
+ * ---- o que a tela mostra e o que a conta usa são coisas diferentes ----
+ *
+ * O parágrafo acima continua inteiro: o kg é a base de TODA razão calculada
+ * aqui, e nenhuma delas mudou de fórmula. O que mudou é que ele deixou de ser
+ * também o número EXIBIDO nas colunas COMPRADO e VENDIDO.
+ *
+ * Um produto comprado só em UN, sem peso médio cadastrado, saía dessas duas
+ * colunas como `0*`: o kg dele não existe, e o zero de "não sei converter"
+ * era indistinguível do zero de "não houve compra" — enquanto a tela de
+ * Estoque, corrigida em 88318ee, mostrava `45 UN` para a MESMA mercadoria. A
+ * quantidade lançada é exata quando a ponta inteira está numa unidade só, e é
+ * ela que `comprado`/`vendido` publicam (via `quantidadeRelatada`). O kg
+ * continua em `compradoQtd`/`vendidoQtd`, intocado.
+ *
+ * ---- por que as razões continuam presas ao quilo ----
+ *
+ * `cm` e `vm` são preços POR UNIDADE DE QUANTIDADE, e markup, margem,
+ * margem/kg e margem % os comparam entre si; `perdaPct` compara perda com
+ * quantidade comprada. Toda comparação dessas exige que os dois lados estejam
+ * na MESMA unidade — e compra e venda são pontas independentes: um produto
+ * comprado em CX e vendido em KG tem unidade única dos dois lados e nenhuma
+ * em comum. Calcular markup sobre `comprado.qtd` e `vendido.qtd` daria, nesse
+ * caso, R$/CX contra R$/kg: um número, e errado. Um número errado é pior que
+ * um número faltando.
+ *
+ * Por isso as fórmulas abaixo não foram tocadas — leem `compra_qtd`/
+ * `venda_qtd`, em kg, exatamente como liam. Quando o kg não existe, o guard
+ * que já existia (`> 0`) as derruba em `null`, e a tela mostra travessão. O
+ * que se acrescentou foi `itensSemBase`, para esse travessão poder dizer que
+ * a causa é peso médio faltando — e não ausência de movimento.
+ *
+ * Consequência que vale registrar: numa linha exibida em CX, `perdaPct` é
+ * perda em kg sobre compra em kg. A razão está certa, mas o leitor não a
+ * confere a partir do número ao lado. É o preço de manter as razões numa base
+ * comparável, e é o lado certo do trade-off — a alternativa era uma razão que
+ * não significa nada.
  */
 export function derivarRelatorioProdutos(
   agregados: ProdutoAgregado[],
@@ -889,13 +1047,26 @@ export function derivarRelatorioProdutos(
     const margemUnit = temComparacao ? vm - cm : null
     const margemPct = temComparacao ? ((vm - cm) / vm) * 100 : null
     const perdaPct = o.compra_qtd > 0 ? (perda / o.compra_qtd) * 100 : null
+    // Os lançamentos que custaram a BASE de uma ponta: só contam quando a
+    // ponta ficou mesmo sem quilo (`=== 0`), porque é aí que a razão cai em
+    // travessão. Com quilo dos dois lados a razão sai, e o `*` dela é o da
+    // linha (`itensSemConversao`), não este.
+    const compraSemConversao = o.compra_sem_conversao || 0
+    const vendaSemConversao = o.venda_sem_conversao || 0
+    const itensSemBase = (o.compra_qtd === 0 ? compraSemConversao : 0)
+      + (o.venda_qtd === 0 ? vendaSemConversao : 0)
     return {
       produtoId: o.produto_id,
       nome: o.nome,
       compradoQtd: o.compra_qtd,
       vendidoQtd: o.venda_qtd,
+      // O que a tela mostra — na unidade lançada quando há uma só. As duas
+      // linhas acima continuam em kg e continuam sendo o que as razões usam.
+      comprado: quantidadeRelatada(o.compra_na_unidade, o.compra_qtd, compraSemConversao),
+      vendido: quantidadeRelatada(o.venda_na_unidade, o.venda_qtd, vendaSemConversao),
       faturamento: o.venda_valor,
       itensSemConversao: o.itens_sem_conversao || 0,
+      itensSemBase,
       margem,
       margemUnit,
       margemPct,
@@ -959,8 +1130,14 @@ export interface LinhaPerdaMotivo {
 export interface LinhaPerdaProduto {
   nome: string
   /** Em kg — vem de `LinhaRelatorioProduto.compradoQtd`, já convertido pela
-   * API. Incompleta quando `itensSemConversao > 0`. */
+   * API. Incompleta quando `itensSemConversao > 0`. É o DENOMINADOR de
+   * `perdaPct`, não o número exibido; ver `comprado`. */
   compradoQtd: number
+  /** O que a coluna COMPRADO deste painel mostra — a mesma
+   * `LinhaRelatorioProduto.comprado` da aba Produtos, repassada e não
+   * recalculada: as duas abas leem o MESMO agregado e divergir aqui seria o
+   * mesmo produto com duas quantidades diferentes em duas telas. */
+  comprado: QuantidadeRelatada
   perdaPct: number | null
   /**
    * Lançamentos deste produto que ficaram fora das quantidades por não serem
@@ -1132,6 +1309,11 @@ export function derivarRelatorioPerdas(
     }))
     .sort((a, b) => b.qtd - a.qtd)
 
+  // O filtro é por `perdaPct != null`, ou seja, por HAVER quilo comprado — e
+  // isso não mudou: um produto comprado só em UN sem peso médio nunca teve
+  // perda % para mostrar, e continua fora deste painel em vez de entrar com
+  // uma % inventada. O que ele ganha é aparecer inteiro na aba Produtos, que
+  // não filtra. Quem entra aqui entra com a MESMA quantidade das duas abas.
   const porProduto = produtosView
     .filter(p => p.perdaPct != null)
     .slice()
@@ -1139,10 +1321,13 @@ export function derivarRelatorioPerdas(
     .map(p => ({
       nome: p.nome,
       compradoQtd: p.compradoQtd,
-      perdaPct: p.perdaPct,
-      // Repassado, não recalculado: é a MESMA linha de
+      // Repassados, não recalculados: é a MESMA linha de
       // derivarRelatorioProdutos, e quantidade incompleta lá é quantidade
-      // incompleta aqui.
+      // incompleta aqui. `comprado` traz junto a unidade em que a compra foi
+      // lançada, para as duas abas mostrarem o mesmo número com o mesmo
+      // rótulo.
+      comprado: p.comprado,
+      perdaPct: p.perdaPct,
       itensSemConversao: p.itensSemConversao,
     }))
 

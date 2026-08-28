@@ -540,8 +540,10 @@ describe('RelatoriosTela — perdas', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Perdas' }))
 
     const painel = (await screen.findByText('Perdas por produto')).closest('.relatorios-painel') as HTMLElement
-    expect(within(painel).getByText('100')).toBeInTheDocument()
-    expect(within(painel).queryByText('100*')).not.toBeInTheDocument()
+    // Mesmo numero de sempre, com a unidade junto — igual a aba Produtos,
+    // que e de onde esta tabela reaproveita a linha.
+    expect(within(painel).getByText('100 KG')).toBeInTheDocument()
+    expect(within(painel).queryByText('100 KG*')).not.toBeInTheDocument()
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
   })
 
@@ -550,7 +552,8 @@ describe('RelatoriosTela — perdas', () => {
       '/api/clientes': [cliente()],
       '/api/entradas': [entrada({ motivo: 'transporte', perda_kg: 10 })],
       'produtos-agregados': [produtoAgregado({
-        compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 5, itens_sem_conversao: 2,
+        compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 5,
+        compra_sem_conversao: 2, itens_sem_conversao: 2,
       })],
     })
     render(<RelatoriosTela onSessaoExpirada={() => {}} />)
@@ -558,9 +561,9 @@ describe('RelatoriosTela — perdas', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Perdas' }))
 
     const painel = (await screen.findByText('Perdas por produto')).closest('.relatorios-painel') as HTMLElement
-    expect(within(painel).getByText('100*')).toBeInTheDocument()
+    expect(within(painel).getByText('100 KG*')).toBeInTheDocument()
     expect(within(painel).getByText('5,0%*')).toBeInTheDocument()
-    expect(within(painel).getByText('100*')).toHaveAttribute('title', expect.stringContaining('2 itens lançados'))
+    expect(within(painel).getByText('100 KG*')).toHaveAttribute('title', expect.stringContaining('2 itens lançados'))
 
     const nota = screen.getByRole('note')
     expect(nota).toHaveTextContent('fora da quantidade')
@@ -642,18 +645,27 @@ describe('RelatoriosTela — produtos: quantidade incompleta', () => {
     const linha = (await screen.findAllByText('Batata'))
       .map(el => el.closest('.relatorios-linha'))
       .find((el): el is HTMLElement => el != null)!
-    expect(within(linha).getByText('100')).toBeInTheDocument()
-    expect(within(linha).getByText('80')).toBeInTheDocument()
-    expect(within(linha).queryByText('100*')).not.toBeInTheDocument()
+    // O NUMERO e o mesmo de sempre (100 e 80 kg); o que ele ganhou foi a
+    // unidade colada nele, porque a coluna agora sai na unidade em que cada
+    // produto foi lancado e um cabecalho so nao daria conta de dizer isso.
+    expect(within(linha).getByText('100 KG')).toBeInTheDocument()
+    expect(within(linha).getByText('80 KG')).toBeInTheDocument()
+    expect(within(linha).queryByText('100 KG*')).not.toBeInTheDocument()
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
   })
 
   it('quantidade incompleta: comprado, vendido, margem, markup e perda marcados com *', async () => {
     mockCarga({
       '/api/clientes': [cliente()],
+      // Sem `compra_na_unidade`/`venda_na_unidade`: e o produto movimentado
+      // em DUAS unidades, o unico caso em que o kg e obrigatorio — e ai o
+      // asterisco continua honesto. Os contadores por ponta sao o que marca
+      // cada coluna: o somado da linha diria "4" numa celula onde so 2
+      // lancamentos ficaram de fora.
       'produtos-agregados': [produtoAgregado({
         compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 5,
-        venda_qtd: 80, venda_valor: 400, itens_sem_conversao: 2,
+        venda_qtd: 80, venda_valor: 400,
+        compra_sem_conversao: 2, venda_sem_conversao: 2, itens_sem_conversao: 4,
       })],
     })
     render(<RelatoriosTela onSessaoExpirada={() => {}} />)
@@ -669,14 +681,14 @@ describe('RelatoriosTela — produtos: quantidade incompleta', () => {
     // Todos os numeros derivados de quantidade: comprado (100), vendido (80),
     // margem (400 - 80*2 = R$ 240), markup ((5-2)/2 = 150%) e perda (5%).
     // Faturamento (R$ 400) escapa — reais sao reais.
-    expect(within(linha).getByText('100*')).toBeInTheDocument()
-    expect(within(linha).getByText('80*')).toBeInTheDocument()
+    expect(within(linha).getByText('100 KG*')).toBeInTheDocument()
+    expect(within(linha).getByText('80 KG*')).toBeInTheDocument()
     expect(within(linha).getByText('R$ 240*')).toBeInTheDocument()
     expect(within(linha).getByText('150%*')).toBeInTheDocument()
     expect(within(linha).getByText('5,0%*')).toBeInTheDocument()
     expect(within(linha).getByText('R$ 400')).toBeInTheDocument()
 
-    expect(within(linha).getByText('100*')).toHaveAttribute('title', expect.stringContaining('2 itens lançados'))
+    expect(within(linha).getByText('100 KG*')).toHaveAttribute('title', expect.stringContaining('2 itens lançados'))
 
     const nota = screen.getByRole('note')
     expect(nota).toHaveTextContent('fora da quantidade')
@@ -719,7 +731,8 @@ describe('RelatoriosTela — CSV das quantidades incompletas', () => {
       '/api/clientes': [cliente()],
       'produtos-agregados': [produtoAgregado({
         compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 5,
-        venda_qtd: 80, venda_valor: 400, itens_sem_conversao: 1,
+        venda_qtd: 80, venda_valor: 400,
+        compra_sem_conversao: 1, venda_sem_conversao: 1, itens_sem_conversao: 2,
       })],
     })
     render(<RelatoriosTela onSessaoExpirada={() => {}} />)
@@ -729,8 +742,9 @@ describe('RelatoriosTela — CSV das quantidades incompletas', () => {
 
     await waitFor(() => expect(blobsCriados).toHaveLength(1))
     const texto = await lerBlobComoTexto(blobsCriados[0])
-    expect(texto).toContain('Qtd comprada (kg)')
-    expect(texto).toContain('100*;80*;R$ 400;R$ 240*;150%*;5,0%*')
+    // Sem "(kg)" no cabecalho: a unidade varia por linha e viaja com o valor.
+    expect(texto).toContain('Qtd comprada;Qtd vendida')
+    expect(texto).toContain('100 KG*;80 KG*;R$ 400;R$ 240*;150%*;5,0%*')
   })
 
   it('CSV de perdas: a tabela por motivo sai em kg e leva o mesmo asterisco da tela', async () => {
@@ -759,7 +773,8 @@ describe('RelatoriosTela — CSV das quantidades incompletas', () => {
       '/api/clientes': [cliente()],
       '/api/entradas': [entrada({ motivo: 'transporte', perda_kg: 10 })],
       'produtos-agregados': [produtoAgregado({
-        compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 5, itens_sem_conversao: 2,
+        compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 5,
+        compra_sem_conversao: 2, itens_sem_conversao: 2,
       })],
     })
     render(<RelatoriosTela onSessaoExpirada={() => {}} />)
@@ -769,8 +784,8 @@ describe('RelatoriosTela — CSV das quantidades incompletas', () => {
 
     await waitFor(() => expect(blobsCriados).toHaveLength(1))
     const texto = await lerBlobComoTexto(blobsCriados[0])
-    expect(texto).toContain('Qtd comprada (kg)')
-    expect(texto).toContain('Batata;100*;5,0%*')
+    expect(texto).toContain('Qtd comprada')
+    expect(texto).toContain('Batata;100 KG*;5,0%*')
   })
 
   it('sem lancamento fora da conversao, o CSV sai sem asterisco nenhum', async () => {
@@ -846,5 +861,262 @@ describe('RelatoriosTela — periodo global alimenta o De/Ate', () => {
     await screen.findByText('Mercado A')
     await waitFor(() =>
       expect(mockGet).toHaveBeenCalledWith('/api/relatorios/produtos?de=2026-06&ate=2026-06'))
+  })
+})
+
+// ============================================================================
+// Cada quantidade na unidade em que foi lancada (2026-08-28)
+// ============================================================================
+// O dono comprou quatro produtos so em UN, sem peso medio cadastrado. A tela
+// de Estoque, corrigida em 88318ee, mostrava `45 UN`; esta aba mostrava `0*`
+// para a MESMA mercadoria — "nao sei converter" exibido como "nao ha nada".
+
+/** A linha da TABELA de um produto — o nome aparece tambem nos cartoes do
+ * topo (mais fatura / maior margem / maior perda), e so a da tabela esta
+ * dentro de `.relatorios-linha`. Mesmo laco dos testes acima. */
+function linhaDaTabela(nome: string): HTMLElement {
+  return screen.getAllByText(nome)
+    .map(el => el.closest('.relatorios-linha'))
+    .find((el): el is HTMLElement => el != null)!
+}
+
+describe('RelatoriosTela — produtos: quantidade na unidade lancada', () => {
+  it('comprado so em UN sem peso medio mostra 45 UN, nao 0*', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      'produtos-agregados': [produtoAgregado({
+        nome: 'Alface Hidro',
+        compra_qtd: 0, compra_valor: 135, perda_coleta_qtd: 0,
+        venda_qtd: 0, venda_valor: 0,
+        compra_na_unidade: { qtd: 45, un: 'UN' }, compra_sem_conversao: 1,
+        itens_sem_conversao: 1,
+      })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+
+    await screen.findAllByText('Alface Hidro')
+    const linha = linhaDaTabela('Alface Hidro')
+    // A mercadoria aparece, na unidade em que foi lancada.
+    expect(within(linha).getByText('45 UN')).toBeInTheDocument()
+    // E o que a tela mostrava antes NAO aparece mais em lugar nenhum da linha.
+    expect(within(linha).queryByText('0*')).not.toBeInTheDocument()
+    // A quantidade exata nao leva marca: nao ha conversao no caminho dela.
+    expect(within(linha).queryByText('45 UN*')).not.toBeInTheDocument()
+  })
+
+  it('as quatro linhas do deposito real aparecem inteiras, 138 unidades', async () => {
+    const reais: [string, number][] = [
+      ['Alface Hidro', 45], ['Alface Roxa', 45], ['Escarola', 18], ['Rucula', 30],
+    ]
+    mockCarga({
+      '/api/clientes': [cliente()],
+      'produtos-agregados': reais.map(([nome, quantidade], i) => produtoAgregado({
+        produto_id: `p${i}`, nome, un: 'KG',
+        compra_qtd: 0, compra_valor: quantidade * 3, perda_coleta_qtd: 0,
+        venda_qtd: 0, venda_valor: 0,
+        compra_na_unidade: { qtd: quantidade, un: 'UN' }, compra_sem_conversao: 1,
+        itens_sem_conversao: 1,
+      })),
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+
+    await screen.findAllByText('Alface Hidro')
+    for (const [nome, quantidade] of reais) {
+      const linha = linhaDaTabela(nome)
+      expect(within(linha).getByText(`${quantidade} UN`)).toBeInTheDocument()
+    }
+  })
+
+  it('produto so em KG mostra o MESMO numero de antes, agora com a unidade junto', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      'produtos-agregados': [produtoAgregado({
+        compra_qtd: 100, compra_valor: 200, venda_qtd: 80, venda_valor: 400,
+        compra_na_unidade: { qtd: 100, un: 'KG' }, venda_na_unidade: { qtd: 80, un: 'KG' },
+      })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+
+    await screen.findAllByText('Batata')
+    const linha = linhaDaTabela('Batata')
+    expect(within(linha).getByText('100 KG')).toBeInTheDocument()
+    expect(within(linha).getByText('80 KG')).toBeInTheDocument()
+    // As razoes saem iguais ao que sempre saiam: markup (5-2)/2 = 150%,
+    // margem 400 - 80*2 = R$ 240. Nada delas mudou de base.
+    expect(within(linha).getByText('150%')).toBeInTheDocument()
+    expect(within(linha).getByText('R$ 240')).toBeInTheDocument()
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
+  it('comprado em CX e vendido em KG: cada coluna com a unidade dela', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      'produtos-agregados': [produtoAgregado({
+        compra_qtd: 200, compra_valor: 450, perda_coleta_qtd: 0,
+        venda_qtd: 150, venda_valor: 600,
+        compra_na_unidade: { qtd: 10, un: 'CX' }, venda_na_unidade: { qtd: 150, un: 'KG' },
+      })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+
+    await screen.findAllByText('Batata')
+    const linha = linhaDaTabela('Batata')
+    expect(within(linha).getByText('10 CX')).toBeInTheDocument()
+    expect(within(linha).getByText('150 KG')).toBeInTheDocument()
+    // markup cruza as duas pontas: 450/200 contra 600/150, os dois em kg.
+    expect(within(linha).getByText('78%')).toBeInTheDocument()
+  })
+
+  it('sem quilo dos dois lados: markup, margem e perda em travessao MARCADO', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      'produtos-agregados': [produtoAgregado({
+        compra_qtd: 0, compra_valor: 135, perda_coleta_qtd: 0,
+        venda_qtd: 0, venda_valor: 200,
+        compra_na_unidade: { qtd: 45, un: 'UN' }, compra_sem_conversao: 1,
+        venda_na_unidade: { qtd: 40, un: 'UN' }, venda_sem_conversao: 1,
+        itens_sem_conversao: 2,
+      })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+
+    await screen.findAllByText('Batata')
+    const linha = linhaDaTabela('Batata')
+    // As quantidades sao exatas e limpas...
+    expect(within(linha).getByText('45 UN')).toBeInTheDocument()
+    expect(within(linha).getByText('40 UN')).toBeInTheDocument()
+    // ...e as tres razoes saem em travessao, nunca em numero: margem, markup
+    // e perda %. Marcados, porque a causa tem conserto no cadastro.
+    const travessoes = within(linha).getAllByText('—*')
+    expect(travessoes).toHaveLength(3)
+    expect(travessoes[0]).toHaveAttribute('title', expect.stringContaining('travessão'))
+    // O faturamento nao e razao nenhuma: reais sao reais.
+    expect(within(linha).getByText('R$ 200')).toBeInTheDocument()
+  })
+
+  it('travessao por falta de venda sai LIMPO — nao ha peso medio a cadastrar', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      'produtos-agregados': [produtoAgregado({
+        compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: 0,
+        venda_qtd: 0, venda_valor: 0,
+        compra_na_unidade: { qtd: 100, un: 'KG' },
+      })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+
+    await screen.findAllByText('Batata')
+    const linha = linhaDaTabela('Batata')
+    expect(within(linha).queryByText('—*')).not.toBeInTheDocument()
+    expect(within(linha).getAllByText('—').length).toBeGreaterThan(0)
+  })
+
+  it('a nota de rodape nao promete mais que tudo esta em kg', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      'produtos-agregados': [produtoAgregado({ compra_na_unidade: { qtd: 100, un: 'KG' } })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+
+    const nota = await screen.findByText(/na unidade em que foi lançada/)
+    expect(nota).toBeInTheDocument()
+    // A regra antiga ("Quantidades em kg (caixas convertidas...)") descrevia
+    // so metade das linhas depois desta mudanca — e a metade errada para quem
+    // lanca em UN.
+    expect(nota.textContent).not.toContain('Quantidades em kg')
+  })
+
+  it('CSV leva a mesma unidade da tela, e o cabecalho para de dizer (kg)', async () => {
+    const blobs: Blob[] = []
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((b: Blob | MediaSource) => {
+      blobs.push(b as Blob)
+      return 'blob:mock'
+    })
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    mockCarga({
+      '/api/clientes': [cliente()],
+      'produtos-agregados': [produtoAgregado({
+        nome: 'Alface Hidro',
+        compra_qtd: 0, compra_valor: 135, perda_coleta_qtd: 0,
+        venda_qtd: 0, venda_valor: 0,
+        compra_na_unidade: { qtd: 45, un: 'UN' }, compra_sem_conversao: 1,
+        itens_sem_conversao: 1,
+      })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar CSV' }))
+
+    await waitFor(() => expect(blobs).toHaveLength(1))
+    const texto = await lerBlobComoTexto(blobs[0])
+    expect(texto).toContain('Qtd comprada;Qtd vendida')
+    expect(texto).not.toContain('Qtd comprada (kg)')
+    expect(texto).toContain('Alface Hidro;45 UN;0;')
+  })
+})
+
+describe('RelatoriosTela — perdas: a mesma quantidade da aba Produtos', () => {
+  it('a coluna COMPRADO do painel sai na unidade lancada, e a perda % continua em kg', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ motivo: 'transporte', perda_kg: 10 })],
+      'produtos-agregados': [produtoAgregado({
+        compra_qtd: 200, compra_valor: 450, perda_coleta_qtd: 6,
+        venda_qtd: 0, venda_valor: 0,
+        compra_na_unidade: { qtd: 10, un: 'CX' },
+      })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Perdas' }))
+
+    const painel = (await screen.findByText('Perdas por produto')).closest('.relatorios-painel') as HTMLElement
+    expect(within(painel).getByText('10 CX')).toBeInTheDocument()
+    // 6 kg de perda sobre 200 kg comprados — a razao segue em kg sobre kg,
+    // que e a unica base em que ela significa alguma coisa.
+    expect(within(painel).getByText('3,0%')).toBeInTheDocument()
+  })
+
+  it('produto sem quilo nao entra no painel de perdas — e continua inteiro na aba Produtos', async () => {
+    mockCarga({
+      '/api/clientes': [cliente()],
+      '/api/entradas': [entrada({ motivo: 'transporte', perda_kg: 10 })],
+      'produtos-agregados': [produtoAgregado({
+        nome: 'Alface Hidro',
+        compra_qtd: 0, compra_valor: 135, perda_coleta_qtd: 0,
+        venda_qtd: 0, venda_valor: 0,
+        compra_na_unidade: { qtd: 45, un: 'UN' }, compra_sem_conversao: 1,
+        itens_sem_conversao: 1,
+      })],
+    })
+    render(<RelatoriosTela onSessaoExpirada={() => {}} />)
+    await screen.findByText('Mercado A')
+    fireEvent.click(screen.getByRole('button', { name: 'Perdas' }))
+
+    const painel = (await screen.findByText('Perdas por produto')).closest('.relatorios-painel') as HTMLElement
+    // Perda % sem denominador nao e perda zero: a linha fica de fora em vez
+    // de entrar com uma % inventada.
+    expect(within(painel).queryByText('Alface Hidro')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+    await screen.findAllByText('Alface Hidro')
+    expect(within(linhaDaTabela('Alface Hidro')).getByText('45 UN')).toBeInTheDocument()
   })
 })

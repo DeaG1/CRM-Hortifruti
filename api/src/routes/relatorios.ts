@@ -83,6 +83,53 @@ import { exigirSessao, exigirAdmin, type Vars } from '../middleware/sessao'
  * (`ei.qtd / et.qtd_itens`) continua sobre as qtd CRUAS: é uma proporção
  * entre itens da mesma entrada, e mexer nela aqui divergiria do rateio
  * idêntico de buscarEstoque — outro conserto, não este.
+ *
+ * ---- e saem TAMBÉM na unidade em que foram lançadas, quando há uma só ----
+ *
+ * O kg acima está certo e continua inteiro: `compra_qtd`, `venda_qtd` e
+ * `perda_deposito_qtd` saem desta rota byte a byte como saíam, e são a base
+ * de toda razão que a tela calcula (preço médio, markup, margem, perda %).
+ * O que estava errado era o ALCANCE, o mesmo defeito que a tela de Estoque
+ * corrigiu em 88318ee: converter à força também onde não havia mistura
+ * nenhuma a reconciliar.
+ *
+ * Somar caixa com quilo só é um problema quando o MESMO produto foi
+ * movimentado em unidades DIFERENTES. Quando todas as compras do período
+ * estão numa unidade só, `sum(qtd)` daquela ponta é uma quantidade exata,
+ * numa unidade só, e forçá-la a virar kg destrói informação em vez de
+ * reconciliá-la: sem `peso_medio` o `case` sem `else` vira NULL, o `sum`
+ * ignora e o `coalesce(..., 0)` do select publica 0 — "não sei converter"
+ * indistinguível de "não houve movimento". Foi assim que 45 UN de alface
+ * apareceram como `0*` nas colunas COMPRADO e VENDIDO da aba Produtos, com a
+ * tela de Estoque mostrando `45 UN` para a MESMA mercadoria.
+ *
+ * Por isso cada uma das duas pontas devolve também `<ponta>_qtd_un` (a mesma
+ * soma SEM o `case`) e `<ponta>_un` (a unidade, quando `count(distinct un)`
+ * = 1; NULL quando houve mais de uma). Os dois juntos formam
+ * `<ponta>_na_unidade` no JSON: um objeto ou `null`, nunca um número solto —
+ * quantidade sem unidade não significa nada, e amarrá-los impede que alguém
+ * some caixas com quilos por engano. NULL significa exatamente "este produto
+ * se moveu em mais de uma unidade nesta ponta, então só o kg reconcilia" (ou
+ * "não se moveu nesta ponta").
+ *
+ * COMPRA E VENDA SÃO PONTAS SEPARADAS de propósito: um produto comprado em CX
+ * e vendido em KG tem uma unidade única de cada lado, e cada coluna diz a
+ * verdade sobre o que ELA agrega. O que não existe nesse caso é uma unidade
+ * comum — por isso nada aqui afirma uma, e por isso as razões que cruzam as
+ * duas pontas (markup, margem) continuam saindo do kg e só do kg, na tela
+ * (ver derivarRelatorioProdutos em web/src/derive/relatorios.ts).
+ *
+ * A perda de depósito NÃO ganha par: ela nunca é publicada sozinha — a tela
+ * só a mostra somada à perda de coleta, que é kg por contrato. Uma quantidade
+ * na unidade lançada não teria onde aparecer, e publicá-la seria contrato sem
+ * consumidor.
+ *
+ * `compra_sem_conversao` e `venda_sem_conversao` são os mesmos contadores que
+ * já compunham `itens_sem_conversao`, agora publicados SEPARADOS. O contador
+ * somado continua (é ele que marca as razões da linha), mas ele não distingue
+ * "não houve compra" de "as compras não converteram" — e essa diferença é a
+ * que separa um zero MEDIDO de um zero que é ausência de conversão. Ver
+ * `quantidadeRelatada` em web/src/derive/relatorios.ts, que é quem decide.
  */
 const PERIODO_RE = /^\d{4}-\d{2}$/
 
@@ -122,6 +169,19 @@ relatorios.get('/produtos', async (c) => {
       coalesce(venda.qtd, 0) as venda_qtd,
       coalesce(venda.valor, 0) as venda_valor,
       coalesce(perda_dep.qtd, 0) as perda_deposito_qtd,
+      -- NA UNIDADE LANCADA, exatas — a mesma soma sem o case de conversao,
+      -- publicada so quando a ponta inteira esta numa unidade so (uns = 1).
+      -- Zero aqui e sempre medicao; ausencia de unidade unica e NULL, nunca
+      -- zero. Ver "e saem TAMBEM na unidade em que foram lancadas" no topo.
+      coalesce(compra.qtd_un, 0) as compra_qtd_un,
+      case when compra.uns = 1 then compra.un_lancada end as compra_un,
+      coalesce(venda.qtd_un, 0) as venda_qtd_un,
+      case when venda.uns = 1 then venda.un_lancada end as venda_un,
+      -- Os mesmos contadores de baixo, agora SEPARADOS por ponta: so eles
+      -- distinguem "nao houve compra" (zero medido) de "as compras nao
+      -- converteram" (zero que e ausencia). Ver o topo do arquivo.
+      coalesce(compra.sem_conversao, 0) as compra_sem_conversao,
+      coalesce(venda.sem_conversao, 0) as venda_sem_conversao,
       -- Um contador so, das tres fontes: as cinco metricas por produto
       -- (compra media, venda media, markup, margem, perda %) saem todas de
       -- quantidades deste mesmo produto, entao qualquer lancamento nao
@@ -142,6 +202,13 @@ relatorios.get('/produtos', async (c) => {
              count(*) filter (
                where ei.un <> 'KG' and coalesce(pc.peso_medio, 0) = 0
              ) as sem_conversao,
+             -- A MESMA soma sem o case: a quantidade na unidade em que foi
+             -- lancada. So faz sentido quando uns = 1 — com mais de uma
+             -- unidade isto somaria caixa com quilo, e e por isso que o
+             -- select externo so publica o par quando a unidade e unica.
+             sum(ei.qtd) as qtd_un,
+             count(distinct ei.un) as uns,
+             min(ei.un) as un_lancada,
              sum(ei.qtd * ei.preco) as valor,
              -- Mesma regra de buscarEstoque (api/src/routes/estoque.ts): a
              -- perda do item, mais — so quando o cabecalho da entrada excede
@@ -181,6 +248,11 @@ relatorios.get('/produtos', async (c) => {
              count(*) filter (
                where si.un <> 'KG' and coalesce(pv.peso_medio, 0) = 0
              ) as sem_conversao,
+             -- Idem compra: a soma crua e a unidade, para o select externo
+             -- publicar o par so quando a venda inteira esta numa unidade so.
+             sum(si.qtd) as qtd_un,
+             count(distinct si.un) as uns,
+             min(si.un) as un_lancada,
              sum(si.qtd * si.preco) as valor
       from saida_itens si
       join saidas s on s.id = si.saida_id
@@ -229,8 +301,22 @@ relatorios.get('/produtos', async (c) => {
     venda_qtd: Number(l.venda_qtd),
     venda_valor: Number(l.venda_valor),
     perda_deposito_qtd: Number(l.perda_deposito_qtd),
+    // A quantidade e a unidade viajam JUNTAS ou não viajam: `null` quando o
+    // produto se moveu em mais de uma unidade nesta ponta (só o kg
+    // reconcilia) ou quando não se moveu nela. Nunca um objeto de zeros —
+    // zero com unidade seria uma medição que não houve, e um número sem
+    // unidade convidaria a somá-lo com outra coisa. Mesma decisão de `em_kg`
+    // em api/src/routes/estoque.ts.
+    compra_na_unidade: l.compra_un == null
+      ? null
+      : { qtd: Number(l.compra_qtd_un), un: l.compra_un as string },
+    venda_na_unidade: l.venda_un == null
+      ? null
+      : { qtd: Number(l.venda_qtd_un), un: l.venda_un as string },
     // count() vem como bigint (string no postgres.js) — mesma conversão na
     // borda que os numeric recebem, igual a paraJsonLista em entradas.ts.
+    compra_sem_conversao: Number(l.compra_sem_conversao),
+    venda_sem_conversao: Number(l.venda_sem_conversao),
     itens_sem_conversao: Number(l.itens_sem_conversao),
   })))
 })

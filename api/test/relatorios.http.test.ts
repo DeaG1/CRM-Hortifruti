@@ -551,3 +551,201 @@ describe('quantidades em KG (conversao por produtos.peso_medio)', () => {
     expect(linha.itens_sem_conversao).toBe(1)
   })
 })
+
+// ============================================================================
+// Cada quantidade tambem NA UNIDADE EM QUE FOI LANCADA (2026-08-28)
+// ============================================================================
+// O dono comprou quatro produtos so em UN, sem peso_medio cadastrado (45, 45,
+// 18 e 30 unidades). A aba Relatorios > Produtos mostrava `0*` em COMPRADO e
+// VENDIDO — enquanto a tela de Estoque, ja corrigida em 88318ee, mostrava
+// `45 UN` para a MESMA mercadoria.
+//
+// A causa e a mesma de la, com o alcance trocado: converter a forca uma ponta
+// que nao mistura unidade nenhuma. `sum(ei.qtd)` de um produto comprado so em
+// UN e uma quantidade exata numa unidade so; o `case` sem `else` a apagava e o
+// `coalesce(..., 0)` publicava zero.
+//
+// O QUE NAO FOI DESFEITO: compra_qtd, venda_qtd e perda_deposito_qtd continuam
+// em kg, byte a byte — sao a base de toda razao da tela (preco medio, markup,
+// margem, perda %), e os testes do bloco acima passam SEM UMA LINHA ALTERADA.
+// O que a rota ganhou foi um par novo por ponta.
+describe('quantidade na unidade lancada (compra_na_unidade / venda_na_unidade)', () => {
+  async function linhaDoProduto(produtoId: string) {
+    const res = await pedir('/api/relatorios/produtos?de=2026-06&ate=2026-06', comoAdmin())
+    expect(res.status).toBe(200)
+    const linhas = await res.json() as Array<Record<string, unknown>>
+    return linhas.find(l => l.produto_id === produtoId)!
+  }
+
+  it('o caso real: comprado so em UN sem peso medio sai 45 UN, nao zero', async () => {
+    const produtoId = await criarProdutoUn(tenantId, 'Alface Hidro UN', 'UN', 0)
+    await criarEntradaComUn(tenantId, {
+      numero: 'UN-E-45', data: '2026-06-08',
+      itens: [{ produtoId, un: 'UN', qtd: 45, preco: 3 }],
+    })
+
+    const linha = await linhaDoProduto(produtoId)
+    // A quantidade lancada, exata, com a unidade colada nela.
+    expect(linha.compra_na_unidade).toEqual({ qtd: 45, un: 'UN' })
+    // O kg continua o que sempre foi: ausente, porque nao ha peso medio. Nao
+    // e zero medido, e por isso ele NAO e o que a tela mostra.
+    expect(linha.compra_qtd).toBe(0)
+    expect(linha.compra_sem_conversao).toBe(1)
+    expect(linha.itens_sem_conversao).toBe(1)
+    // Sem venda: nada a afirmar sobre a unidade da outra ponta.
+    expect(linha.venda_na_unidade).toBeNull()
+    expect(linha.venda_sem_conversao).toBe(0)
+  })
+
+  it('as quatro linhas do deposito real somam 138 unidades, nenhuma zerada', async () => {
+    const reais: [string, number][] = [
+      ['Real Alface Hidro', 45], ['Real Alface Roxa', 45],
+      ['Real Escarola', 18], ['Real Rucula', 30],
+    ]
+    const ids: string[] = []
+    for (const [nome, quantidade] of reais) {
+      const id = await criarProdutoUn(tenantId, nome, 'UN', 0)
+      ids.push(id)
+      await criarEntradaComUn(tenantId, {
+        numero: 'REAL-' + nome, data: '2026-06-09',
+        itens: [{ produtoId: id, un: 'UN', qtd: quantidade, preco: 2 }],
+      })
+    }
+    let total = 0
+    for (let i = 0; i < ids.length; i++) {
+      const linha = await linhaDoProduto(ids[i])
+      const na = linha.compra_na_unidade as { qtd: number; un: string }
+      expect(na).toEqual({ qtd: reais[i][1], un: 'UN' })
+      total += na.qtd
+    }
+    // 138 unidades de mercadoria real, que a tela exibia como quatro zeros.
+    expect(total).toBe(138)
+  })
+
+  it('so KG: o par sai na propria unidade e bate com o kg — nada mudou para quem lanca em quilo', async () => {
+    const produtoId = await criarProduto(tenantId, 'Par So KG')
+    await criarEntradaComUn(tenantId, {
+      numero: 'PAR-E-KG', data: '2026-06-08',
+      itens: [{ produtoId, un: 'KG', qtd: 100, preco: 2, perdaKg: 5 }],
+    })
+    await criarSaidaComUn(tenantId, {
+      numero: 'PAR-S-KG', entrega: '2026-06-10', status: 'Entregue',
+      itens: [{ produtoId, un: 'KG', qtd: 80, preco: 4 }],
+    })
+    await criarPerdaDeposito(tenantId, { data: '2026-06-15', produtoId, un: 'KG', qtd: 7 })
+
+    const linha = await linhaDoProduto(produtoId)
+    // Os seis numeros de antes, identicos — este e o teste que prova que o
+    // caminho que ja funcionava continua funcionando.
+    expect(linha.compra_qtd).toBe(100)
+    expect(linha.compra_valor).toBe(200)
+    expect(linha.perda_coleta_qtd).toBe(5)
+    expect(linha.venda_qtd).toBe(80)
+    expect(linha.venda_valor).toBe(320)
+    expect(linha.perda_deposito_qtd).toBe(7)
+    expect(linha.itens_sem_conversao).toBe(0)
+    // E o par novo repete o mesmo numero, agora com a unidade junto.
+    expect(linha.compra_na_unidade).toEqual({ qtd: 100, un: 'KG' })
+    expect(linha.venda_na_unidade).toEqual({ qtd: 80, un: 'KG' })
+    expect(linha.compra_sem_conversao).toBe(0)
+    expect(linha.venda_sem_conversao).toBe(0)
+  })
+
+  it('CX com peso medio: o par sai em caixas e o kg convertido continua ao lado', async () => {
+    const produtoId = await criarProdutoUn(tenantId, 'Par CX Com Peso', 'CX', 20)
+    await criarEntradaComUn(tenantId, {
+      numero: 'PAR-E-CX', data: '2026-06-08',
+      itens: [{ produtoId, un: 'CX', qtd: 10, preco: 45 }],
+    })
+
+    const linha = await linhaDoProduto(produtoId)
+    expect(linha.compra_na_unidade).toEqual({ qtd: 10, un: 'CX' })
+    expect(linha.compra_qtd).toBe(200)
+    expect(linha.compra_sem_conversao).toBe(0)
+  })
+
+  it('duas unidades na mesma ponta: nao ha unidade unica a afirmar, so o kg reconcilia', async () => {
+    const produtoId = await criarProdutoUn(tenantId, 'Par Duas Unidades', 'CX', 20)
+    await criarEntradaComUn(tenantId, {
+      numero: 'PAR-E-MIX', data: '2026-06-08',
+      itens: [
+        { produtoId, un: 'KG', qtd: 30, preco: 2 },
+        { produtoId, un: 'CX', qtd: 12, preco: 45 },
+      ],
+    })
+
+    const linha = await linhaDoProduto(produtoId)
+    // null, nao um numero solto: 30 + 12 = "42" nao e quantidade de nada.
+    expect(linha.compra_na_unidade).toBeNull()
+    expect(linha.compra_qtd).toBe(270)
+    expect(linha.compra_sem_conversao).toBe(0)
+  })
+
+  it('duas unidades SEM peso medio: nem unidade unica nem kg — e o contador da ponta diz', async () => {
+    const produtoId = await criarProdutoUn(tenantId, 'Par Duas Sem Peso', 'CX', 0)
+    await criarEntradaComUn(tenantId, {
+      numero: 'PAR-E-MIX-SEM', data: '2026-06-08',
+      itens: [
+        { produtoId, un: 'CX', qtd: 5, preco: 40 },
+        { produtoId, un: 'UN', qtd: 3, preco: 4 },
+      ],
+    })
+
+    const linha = await linhaDoProduto(produtoId)
+    expect(linha.compra_na_unidade).toBeNull()
+    expect(linha.compra_qtd).toBe(0)
+    // O zero acima e ausencia de conversao, nao medicao — e so este contador
+    // separa os dois. O somado nao serve: ele misturaria compra com venda.
+    expect(linha.compra_sem_conversao).toBe(2)
+  })
+
+  it('comprado em CX e vendido em KG: cada ponta diz a unidade DELA, nenhuma unidade comum', async () => {
+    const produtoId = await criarProdutoUn(tenantId, 'Par CX Compra KG Venda', 'CX', 20)
+    await criarEntradaComUn(tenantId, {
+      numero: 'PAR-E-CXKG', data: '2026-06-08',
+      itens: [{ produtoId, un: 'CX', qtd: 10, preco: 45 }],
+    })
+    await criarSaidaComUn(tenantId, {
+      numero: 'PAR-S-CXKG', entrega: '2026-06-10', status: 'Entregue',
+      itens: [{ produtoId, un: 'KG', qtd: 150, preco: 4 }],
+    })
+
+    const linha = await linhaDoProduto(produtoId)
+    expect(linha.compra_na_unidade).toEqual({ qtd: 10, un: 'CX' })
+    expect(linha.venda_na_unidade).toEqual({ qtd: 150, un: 'KG' })
+    // As duas convertem, e e o kg — nunca CX nem uma unidade comum inventada
+    // — que sustenta markup e margem, que cruzam as duas pontas.
+    expect(linha.compra_qtd).toBe(200)
+    expect(linha.venda_qtd).toBe(150)
+  })
+
+  it('ponta sem movimento nenhum sai null, e o contador dela zerado', async () => {
+    const produtoId = await criarProduto(tenantId, 'Par So Venda')
+    await criarSaidaComUn(tenantId, {
+      numero: 'PAR-S-SOVENDA', entrega: '2026-06-10', status: 'Entregue',
+      itens: [{ produtoId, un: 'KG', qtd: 12, preco: 5 }],
+    })
+
+    const linha = await linhaDoProduto(produtoId)
+    // Sem compra: null (nao ha unidade), compra_qtd 0 MEDIDO e contador 0 —
+    // o par de campos que deixa a tela dizer "0" com seguranca.
+    expect(linha.compra_na_unidade).toBeNull()
+    expect(linha.compra_qtd).toBe(0)
+    expect(linha.compra_sem_conversao).toBe(0)
+    expect(linha.venda_na_unidade).toEqual({ qtd: 12, un: 'KG' })
+  })
+
+  it('qtd do par sai como number, e os contadores tambem (numeric/bigint no Postgres)', async () => {
+    const produtoId = await criarProdutoUn(tenantId, 'Par Tipos', 'UN', 0)
+    await criarEntradaComUn(tenantId, {
+      numero: 'PAR-E-TIPOS', data: '2026-06-08',
+      itens: [{ produtoId, un: 'UN', qtd: 7, preco: 1 }],
+    })
+    const linha = await linhaDoProduto(produtoId)
+    const na = linha.compra_na_unidade as { qtd: number; un: string }
+    expect(typeof na.qtd).toBe('number')
+    expect(typeof na.un).toBe('string')
+    expect(typeof linha.compra_sem_conversao).toBe('number')
+    expect(typeof linha.venda_sem_conversao).toBe('number')
+  })
+})

@@ -215,6 +215,7 @@ export function ProdutosLista({ papel, periodo = PERIODO_TODOS, onSessaoExpirada
           <ModalProduto
             produto={modal}
             podeExcluir={podeExcluir}
+            papel={papel}
             onSalvo={aoSalvar}
             onExcluido={aoExcluir}
             onFechar={() => setModal(undefined)}
@@ -421,6 +422,7 @@ export function ProdutosLista({ papel, periodo = PERIODO_TODOS, onSessaoExpirada
         <ModalProduto
           produto={modal}
           podeExcluir={podeExcluir}
+          papel={papel}
           onSalvo={aoSalvar}
           onExcluido={aoExcluir}
           onFechar={() => setModal(undefined)}

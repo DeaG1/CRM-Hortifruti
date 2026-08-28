@@ -1,6 +1,9 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react'
 import { api, ErroApi } from '../api/client'
 import { PRODUTO_NOVO, UNIDADES, type Produto } from '../derive/produtos'
+import { DeclaracaoDeAutoria } from './DeclaracaoDeAutoria'
+import { HistoricoCadastro } from './HistoricoCadastro'
+import { podeVerHistoricoCadastro, precisaDeclararAutoria, type Papel } from '../telas'
 import './ModalProduto.css'
 
 type Rascunho = typeof PRODUTO_NOVO
@@ -21,6 +24,16 @@ interface ModalProdutoProps {
    * em qualquer ponto de uso que esquecesse de decidir.
    */
   podeExcluir: boolean
+  /**
+   * Quem está salvando. Ao contrário de `podeExcluir` acima (uma decisão
+   * sobre um botão, resolvida fora), o papel entra inteiro porque muda três
+   * coisas independentes: se os campos de declaração aparecem, se o histórico
+   * aparece, e a redação do que é dito sobre autoria. O modal continua sem
+   * decidir nada sozinho — quem responde é `precisaDeclararAutoria` /
+   * `podeVerHistoricoCadastro` (web/src/telas.ts). Sem default, pelo mesmo
+   * motivo de `podeExcluir`.
+   */
+  papel: Papel
   onSalvo: (p: Produto) => void
   /** Exclusão confirmada e concluída na API — quem chama decide o que fazer (fechar, recarregar a lista). */
   onExcluido: (id: string) => void
@@ -30,9 +43,17 @@ interface ModalProdutoProps {
 }
 
 export function ModalProduto(
-  { produto, podeExcluir, onSalvo, onExcluido, onFechar, onSessaoExpirada }: ModalProdutoProps,
+  { produto, podeExcluir, papel, onSalvo, onExcluido, onFechar, onSessaoExpirada }: ModalProdutoProps,
 ) {
+  const declara = precisaDeclararAutoria(papel)
+  const veHistorico = podeVerHistoricoCadastro(papel)
   const [rascunho, setRascunho] = useState<Rascunho>({ ...PRODUTO_NOVO, ...(produto ?? {}) })
+  // Começa vazio: escolha ativa, nunca um nome pré-selecionado que todo mundo
+  // aceitaria sem ler.
+  const [autorId, setAutorId] = useState('')
+  const [motivoDeclarado, setMotivoDeclarado] = useState('')
+  const [erroAutor, setErroAutor] = useState('')
+  const [erroMotivo, setErroMotivo] = useState('')
   const [erroNome, setErroNome] = useState('')
   const [erroPesoMedio, setErroPesoMedio] = useState('')
   const [erroGeral, setErroGeral] = useState('')
@@ -57,9 +78,25 @@ export function ModalProduto(
     setErroNome('')
     setErroPesoMedio('')
     setErroGeral('')
+    setErroAutor('')
+    setErroMotivo('')
     if (!rascunho.nome.trim()) {
       setErroNome('Informe o nome.')
       return
+    }
+    // Erro na hora em vez de erro depois. Quem RECUSA e o servidor (400 sem
+    // autor ou motivo, quando a sessao e de colaborador).
+    if (declara) {
+      let faltou = false
+      if (!autorId) {
+        setErroAutor('Escolha quem está fazendo esta alteração.')
+        faltou = true
+      }
+      if (!motivoDeclarado.trim()) {
+        setErroMotivo('Informe o motivo da alteração.')
+        faltou = true
+      }
+      if (faltou) return
     }
     // `min="0"` no input e so UX (form tem noValidate — ver comentario no
     // JSX). Esta e a validacao que decide se o pedido sai; a API valida de
@@ -71,7 +108,10 @@ export function ModalProduto(
     }
     setSalvando(true)
     try {
-      const corpo = { nome: rascunho.nome, un: rascunho.un, peso_medio: pesoNum || 0 }
+      const corpo = {
+        nome: rascunho.nome, un: rascunho.un, peso_medio: pesoNum || 0,
+        ...(declara ? { declarado_por: autorId, motivo: motivoDeclarado.trim() } : {}),
+      }
       const salvo = editando
         ? await api.put<Produto>(`/api/produtos/${produto!.id}`, corpo)
         : await api.post<Produto>('/api/produtos', corpo)
@@ -181,6 +221,28 @@ export function ModalProduto(
                   (entradas e saídas).
                 </div>
               </div>
+
+              {declara && (
+                <DeclaracaoDeAutoria
+                  autorId={autorId}
+                  onAutorId={setAutorId}
+                  motivo={motivoDeclarado}
+                  onMotivo={setMotivoDeclarado}
+                  erroAutor={erroAutor}
+                  erroMotivo={erroMotivo}
+                  onSessaoExpirada={onSessaoExpirada}
+                />
+              )}
+
+              {/* Só ao EDITAR: cadastro que ainda não existe não tem
+                  histórico (nem id para pedir). */}
+              {veHistorico && editando && (
+                <HistoricoCadastro
+                  entidade="produto"
+                  registroId={produto!.id as string}
+                  onSessaoExpirada={onSessaoExpirada}
+                />
+              )}
 
               {erroGeral && <p className="modal-erro modal-erro-geral" role="alert">{erroGeral}</p>}
             </>

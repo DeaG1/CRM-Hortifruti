@@ -38,6 +38,7 @@ let tenantId: string
 let outroTenantId: string
 let tokenAdmin: string
 let tokenColab: string
+let funcionarioId: string
 
 beforeAll(async () => {
   admin = criarPool(ADMIN)
@@ -55,6 +56,12 @@ beforeAll(async () => {
   await admin`delete from fornecedor_produtos where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from fornecedores where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from produtos where tenant_id in (${tenantId}, ${outroTenantId})`
+  // `historico_cadastros` nao tem FK para os cadastros (017), entao a ordem
+  // nao e imposta pelo banco — mas limpar aqui deixa cada execucao partindo
+  // de zero. `funcionarios` sai depois dele so por clareza de leitura: a FK do
+  // autor e `set null`, nao barra nada.
+  await admin`delete from historico_cadastros where tenant_id in (${tenantId}, ${outroTenantId})`
+  await admin`delete from funcionarios where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from usuarios where tenant_id in (${tenantId}, ${outroTenantId})`
 
   const hash = await hashSenha('segredo123')
@@ -67,6 +74,15 @@ beforeAll(async () => {
 
   tokenAdmin = await criarSessao(sql, uAdmin.id, tenantId)
   tokenColab = await criarSessao(sql, uColab.id, tenantId)
+
+  // O COLABORADOR PRECISA DECLARAR QUEM E ao criar/editar cadastro
+  // (historico de alteracoes, migration 017): o autor vem de uma LISTA
+  // FECHADA de funcionarios, nunca de texto livre. Sem uma linha em
+  // `funcionarios` para escolher, nao ha declaracao possivel.
+  const [decl] = await admin`
+    insert into funcionarios (tenant_id, nome, salario)
+    values (${tenantId}, 'Funcionario Declarante Fornecedores', 1500) returning id`
+  funcionarioId = decl.id
 })
 
 afterAll(async () => {
@@ -142,11 +158,17 @@ describe('autorizacao', () => {
   // quem volta com produtor novo e com a lista do que ele entrega.
   // `fornecedores` saiu de ADMIN_ONLY_SCREENS junto — ver
   // src/routes/fornecedores.ts.
+  // `declarado_por` + `motivo`: exigencia do servidor para colaborador desde o
+  // historico de alteracoes (017). O que a rota recusa sem isso esta em
+  // test/historico.http.test.ts.
   it('colaborador CRIA fornecedor', async () => {
     const res = await pedir('/api/fornecedores', {
       ...comoColab(), method: 'POST',
       headers: { ...comoColab().headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ nome: 'Sitio do colaborador', regiao: 'Norte' }),
+      body: JSON.stringify({
+        nome: 'Sitio do colaborador', regiao: 'Norte',
+        declarado_por: funcionarioId, motivo: 'produtor novo da feira',
+      }),
     })
     expect(res.status).toBe(201)
     const corpo = await res.json() as { id: string; nome: string }
@@ -165,7 +187,10 @@ describe('autorizacao', () => {
     const res = await pedir(`/api/fornecedores/${id}`, {
       ...comoColab(), method: 'PUT',
       headers: { ...comoColab().headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ contato: '44 98888-1111', produto_ids: [produtoId] }),
+      body: JSON.stringify({
+        contato: '44 98888-1111', produto_ids: [produtoId],
+        declarado_por: funcionarioId, motivo: 'ele passou a entregar alface',
+      }),
     })
     expect(res.status).toBe(200)
     const corpo = await res.json() as { contato: string; produtos: { id: string }[] }

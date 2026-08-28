@@ -91,3 +91,46 @@ export function podeVerMetricasDeCadastro(papel: Papel): boolean {
 export function podeExcluirCadastro(papel: Papel): boolean {
   return papel === 'admin'
 }
+
+/**
+ * Quem tem que DECLARAR quem é e por quê ao salvar cliente, produto ou
+ * fornecedor.
+ *
+ * O fato que obriga isto a existir: há UM login para a equipe inteira. O
+ * sistema não tem como SABER quem digitou — sabe qual login escreveu, que é
+ * outra coisa. Então o colaborador escolhe o próprio nome de uma lista
+ * fechada de funcionários (`GET /api/funcionarios/opcoes`) e escreve um
+ * motivo curto, e o histórico grava isso como DECLARAÇÃO, nunca como prova.
+ *
+ * O admin não declara nada, e não é cortesia: o login dele é individual, o
+ * sistema já sabe quem é. Pedir que ele preenchesse um campo de autoria seria
+ * transformar um dado que o servidor conhece em um dado digitado — pior, não
+ * melhor.
+ *
+ * QUEM EXIGE DE VERDADE É O SERVIDOR. `POST`/`PUT` das três rotas respondem
+ * 400 sem autor e motivo quando a sessão é de colaborador
+ * (`erroDeDeclaracao`, api/src/historico.ts), e o papel de lá vem do cookie —
+ * nada que o cliente mande sobre isso é consultado. Esta função decide se o
+ * FORMULÁRIO mostra os dois campos; sem a metade do servidor ela seria
+ * teatro, porque bastaria chamar a API direto para editar sem rastro.
+ */
+export function precisaDeclararAutoria(papel: Papel): boolean {
+  return papel !== 'admin'
+}
+
+/**
+ * Quem lê o histórico de alterações de um cadastro. Só o admin — decisão do
+ * dono, e ela se sustenta sozinha: o log responde "quem mexeu nisto e por
+ * quê", uma pergunta de supervisão. Aberto a quem é supervisionado, viraria a
+ * lista de quem declarou o quê — útil para combinar versão, não para
+ * conferir.
+ *
+ * Aqui, ao contrário de `podeVerMetricasDeCadastro`, esconder É a permissão
+ * inteira do lado do front E há barreira real atrás: `GET /api/historico/...`
+ * exige admin, então o colaborador recebe 403 mesmo digitando a URL. Por isso
+ * o painel também não BUSCA nada quando o papel não pode ver — não pedir o
+ * que não vai mostrar.
+ */
+export function podeVerHistoricoCadastro(papel: Papel): boolean {
+  return papel === 'admin'
+}

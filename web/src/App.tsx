@@ -151,6 +151,7 @@ function ClientesModulo(
       {modal !== undefined && (
         <ModalCliente
           cliente={modal}
+          papel={papel}
           onSalvo={aoSalvar}
           onFechar={() => setModal(undefined)}
           onSessaoExpirada={onSessaoExpirada}

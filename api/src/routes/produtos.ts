@@ -1,6 +1,9 @@
 import { Hono } from 'hono'
 import { withTenant, type EnvBanco } from '../db'
 import { exigirSessao, exigirAdmin, type Vars } from '../middleware/sessao'
+import {
+  autorDaAlteracao, diferencas, erroDeDeclaracao, registrarHistorico, vaiGravar,
+} from '../historico'
 
 const CAMPOS = ['nome', 'un', 'peso_medio'] as const
 
@@ -151,17 +154,40 @@ produtos.get('/:id', async (c) => {
   return linha ? c.json(paraJson(linha)) : c.json({ erro: 'nao encontrado' }, 404)
 })
 
+// Historico: mesma mecanica e mesmos motivos de clientes.ts (o insert do
+// cadastro e o do historico na MESMA transacao, e a exigencia de declarar
+// vindo do papel da sessao, nunca do corpo). Comentado la; aqui so o que e
+// especifico de produtos.
 produtos.post('/', async (c) => {
-  const dados = sanear(await c.req.json())
+  const corpo = await c.req.json() as Record<string, unknown>
+  const dados = sanear(corpo)
   if (nomeEmBranco(dados.nome)) return c.json({ erro: 'nome e obrigatorio' }, 400)
   dados.nome = (dados.nome as string).trim()
   const erroCampo = erroDeCampoInvalido(dados)
   if (erroCampo) return c.json({ erro: erroCampo }, 400)
+  const papel = c.get('papel')
+  const erroDecl = erroDeDeclaracao(papel, corpo)
+  if (erroDecl) return c.json({ erro: erroDecl }, 400)
   const tenantId = c.get('tenantId')
+  const usuarioId = c.get('usuarioId')
   try {
-    const [linha] = await withTenant(c.get('sql'), tenantId, tx =>
-      tx`insert into produtos ${tx({ ...dados, tenant_id: tenantId })} returning *`)
-    return c.json(paraJson(linha), 201)
+    const feito = await withTenant(c.get('sql'), tenantId, async (tx) => {
+      const autor = await autorDaAlteracao(tx, papel, usuarioId, corpo)
+      if ('erro' in autor) return { erro: autor.erro } as const
+      const [linha] = await tx`insert into produtos ${tx({ ...dados, tenant_id: tenantId })} returning *`
+      await registrarHistorico(tx, {
+        tenantId,
+        entidade: 'produto',
+        registroId: linha.id as string,
+        registroNome: linha.nome as string,
+        acao: 'criou',
+        autor,
+        alteracoes: [],
+      })
+      return { linha } as const
+    })
+    if ('erro' in feito) return c.json({ erro: feito.erro }, 400)
+    return c.json(paraJson(feito.linha), 201)
   } catch (err) {
     const mapeado = respostaDeErroPg(err)
     if (mapeado) return c.json(mapeado.corpo, mapeado.status)
@@ -172,7 +198,8 @@ produtos.post('/', async (c) => {
 produtos.put('/:id', async (c) => {
   const id = c.req.param('id')
   if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
-  const dados = sanear(await c.req.json())
+  const corpo = await c.req.json() as Record<string, unknown>
+  const dados = sanear(corpo)
   if (Object.keys(dados).length === 0) return c.json({ erro: 'nada a alterar' }, 400)
   // nome so e validado se veio no corpo — ausente continua significando
   // "nao alterar este campo", igual aos demais campos do PUT.
@@ -182,11 +209,36 @@ produtos.put('/:id', async (c) => {
   }
   const erroCampo = erroDeCampoInvalido(dados)
   if (erroCampo) return c.json({ erro: erroCampo }, 400)
+  const papel = c.get('papel')
+  const erroDecl = erroDeDeclaracao(papel, corpo)
+  if (erroDecl) return c.json({ erro: erroDecl }, 400)
+  const tenantId = c.get('tenantId')
+  const usuarioId = c.get('usuarioId')
   try {
-    const [linha] = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
-      tx`update produtos set ${tx({ ...dados, alterado_em: new Date() })}
-         where id = ${id} returning *`)
-    return linha ? c.json(paraJson(linha)) : c.json({ erro: 'nao encontrado' }, 404)
+    const feito = await withTenant(c.get('sql'), tenantId, async (tx) => {
+      const autor = await autorDaAlteracao(tx, papel, usuarioId, corpo)
+      if ('erro' in autor) return { erro: autor.erro } as const
+      const [antes] = await tx`select * from produtos where id = ${id}`
+      if (!antes) return { naoEncontrado: true } as const
+      const [linha] = await tx`update produtos set ${tx({ ...dados, alterado_em: new Date() })}
+         where id = ${id} returning *`
+      const alteracoes = diferencas(antes, linha, CAMPOS)
+      if (vaiGravar('editou', alteracoes)) {
+        await registrarHistorico(tx, {
+          tenantId,
+          entidade: 'produto',
+          registroId: id,
+          registroNome: linha.nome as string,
+          acao: 'editou',
+          autor,
+          alteracoes,
+        })
+      }
+      return { linha } as const
+    })
+    if ('erro' in feito) return c.json({ erro: feito.erro }, 400)
+    if ('naoEncontrado' in feito) return c.json({ erro: 'nao encontrado' }, 404)
+    return c.json(paraJson(feito.linha))
   } catch (err) {
     const mapeado = respostaDeErroPg(err)
     if (mapeado) return c.json(mapeado.corpo, mapeado.status)
@@ -194,13 +246,40 @@ produtos.put('/:id', async (c) => {
   }
 })
 
+// Exclusao entra no historico pelo mesmo motivo de clientes.ts: o rastro
+// sobrevive ao registro que documenta. Aqui ha uma diferenca — produto com
+// movimentacao NAO E EXCLUIDO (as FKs sao RESTRICT e o banco recusa com
+// 23503), e nesse caso a transacao inteira e revertida: nao fica log de uma
+// exclusao que nao aconteceu.
 produtos.delete('/:id', async (c) => {
   const id = c.req.param('id')
   if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
+  const corpo = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const papel = c.get('papel')
+  const erroDecl = erroDeDeclaracao(papel, corpo)
+  if (erroDecl) return c.json({ erro: erroDecl }, 400)
+  const tenantId = c.get('tenantId')
+  const usuarioId = c.get('usuarioId')
   try {
-    const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
-      tx`delete from produtos where id = ${id} returning id`)
-    return linhas.length ? c.json({ ok: true }) : c.json({ erro: 'nao encontrado' }, 404)
+    const feito = await withTenant(c.get('sql'), tenantId, async (tx) => {
+      const autor = await autorDaAlteracao(tx, papel, usuarioId, corpo)
+      if ('erro' in autor) return { erro: autor.erro } as const
+      const [linha] = await tx`delete from produtos where id = ${id} returning id, nome`
+      if (!linha) return { naoEncontrado: true } as const
+      await registrarHistorico(tx, {
+        tenantId,
+        entidade: 'produto',
+        registroId: id,
+        registroNome: linha.nome as string,
+        acao: 'excluiu',
+        autor,
+        alteracoes: [],
+      })
+      return { ok: true } as const
+    })
+    if ('erro' in feito) return c.json({ erro: feito.erro }, 400)
+    if ('naoEncontrado' in feito) return c.json({ erro: 'nao encontrado' }, 404)
+    return c.json({ ok: true })
   } catch (err) {
     // Produto com movimentacao dispara 23503 (as FKs de entrada_itens,
     // saida_itens e perdas sao RESTRICT). Sem este try/catch o erro subia

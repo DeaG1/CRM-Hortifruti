@@ -152,22 +152,70 @@ export const funcionarios = new Hono<{
 }>()
 
 // Tela de admin no design (cadastro de equipe/folha, com salario) —
-// colaborador nao enxerga.
-//
-// REMOVIDA daqui: GET /opcoes, o resumo (id+nome, so ativos) aberto ao
-// colaborador. Ela existia por um motivo unico e nomeado — o seletor "Quem
-// esta pegando o carro?" da tela de Veiculos, que era a unica tela visivel
-// ao colaborador precisando listar funcionarios sem expor `salario`. Aquele
-// seletor deixou de existir junto com o check-in/check-out, e Veiculos
-// passou a ser admin-only (web/src/telas.ts). Sem consumidor, o que sobrava
-// era uma rota aberta a mais na superficie de leitura da tabela mais
-// sensivel do sistema — mantida "por precaucao", com um comentario
-// descrevendo uma tela que nao existe mais. Quem for admin ja le a lista
-// inteira por GET / abaixo.
-//
-// `exigirAdmin` volta a valer em '*' agora que nao ha excecao: era o
-// '/opcoes' que obrigava a declara-lo rota a rota.
-funcionarios.use('*', exigirSessao, exigirAdmin)
+// colaborador nao enxerga. `exigirAdmin` volta a ser declarado ROTA A ROTA
+// (e nao em '*') porque '/opcoes' abaixo e a excecao, de novo.
+funcionarios.use('*', exigirSessao)
+
+/**
+ * GET /opcoes — id e nome dos funcionarios ativos. Nada mais.
+ *
+ * ESTA ROTA JA EXISTIU E FOI REMOVIDA (7b841b1), com um motivo bom: ela
+ * servia ao seletor "Quem esta pegando o carro?", aquela tela acabou, e o
+ * que sobrava era superficie de leitura aberta sobre a tabela mais sensivel
+ * do sistema, mantida "por precaucao". A precaucao acabou; o consumidor
+ * voltou, e agora tem nome e endereco: o campo "Quem esta fazendo esta
+ * alteracao?" do historico de cadastros (web/src/components/
+ * DeclaracaoDeAutoria.tsx). Sem ele o colaborador nao consegue declarar, e
+ * sem declarar ele nao consegue salvar — o POST/PUT das tres rotas de
+ * cadastro responde 400.
+ *
+ * O QUE ELA DEVOLVE, E POR QUE EXATAMENTE ISSO:
+ *
+ *   id    — porque a escolha precisa vir de uma LISTA FECHADA. Texto livre
+ *           produz "joão", "Joao" e "jão" na mesma semana e fragmenta em
+ *           tres o rastro de uma pessoa. O id e o que torna o log
+ *           agrupavel.
+ *   nome  — porque e o que a pessoa reconhece na lista, e e o que o dono le
+ *           no historico depois.
+ *
+ * O QUE ELA NAO DEVOLVE, E POR QUE: `salario`, `tel`, `dia_pag`, `cargo`,
+ * `ativo`, `criado_em`. Nomes de colegas nao sao segredo entre quem trabalha
+ * junto — o colaborador ja convive com essas pessoas o dia inteiro, e a
+ * lista nao lhe conta nada que ele nao saiba. SALARIO E OUTRA COISA: um
+ * colaborador ver quanto os colegas ganham e vazamento real, nao detalhe de
+ * apresentacao, e e o motivo de `GET /` continuar admin-only logo abaixo.
+ * Telefone e dia de pagamento entram na mesma classe por precaucao barata:
+ * o seletor nao precisa deles, entao nao ha por que trafega-los.
+ *
+ * A escolha e um `select` explicito de duas colunas, nao um `select *`
+ * filtrado depois no TypeScript. A diferenca importa: com `select *`, uma
+ * coluna sensivel acrescentada a `funcionarios` no futuro entraria nesta
+ * resposta automaticamente e em silencio.
+ *
+ * `ativo = true`: o seletor oferece quem trabalha aqui hoje. Quem saiu da
+ * empresa nao esta fazendo alteracao nenhuma. (A checagem do lado da escrita
+ * NAO exige `ativo` — ver `autorDaAlteracao` em src/historico.ts: desativar
+ * alguem depois nao pode invalidar uma declaracao ja feita.)
+ *
+ * ACESSIVEL A QUALQUER SESSAO — e ai esta a diferenca honesta em relacao ao
+ * resto do arquivo. Registrada ANTES de GET /:id e sem `exigirAdmin`, porque
+ * '/opcoes' e segmento estatico e '/:id' so deveria capturar id de fato.
+ */
+funcionarios.get('/opcoes', async (c) => {
+  const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
+    tx`select id, nome from funcionarios where ativo = true order by nome`)
+  return c.json(linhas)
+})
+
+// A partir daqui, tudo e admin. Declarado por rota porque '/opcoes' acima e
+// a excecao — um `use('*', exigirAdmin)` depois dela funcionaria por acidente
+// (o handler de /opcoes responde sem chamar next), e "funciona por acidente"
+// nao e como se escreve a linha que separa quem ve salario de quem nao ve.
+funcionarios.get('/', exigirAdmin)
+funcionarios.get('/:id', exigirAdmin)
+funcionarios.post('/', exigirAdmin)
+funcionarios.put('/:id', exigirAdmin)
+funcionarios.delete('/:id', exigirAdmin)
 
 funcionarios.get('/', async (c) => {
   const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>

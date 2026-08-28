@@ -3,6 +3,8 @@ import {
   ADMIN_ONLY_SCREENS,
   podeVerMetricasDeCadastro,
   podeExcluirCadastro,
+  podeVerHistoricoCadastro,
+  precisaDeclararAutoria,
   type Tela,
 } from './telas'
 
@@ -72,7 +74,52 @@ describe('podeExcluirCadastro', () => {
   })
 })
 
-describe('as duas decisoes sao independentes', () => {
+describe('precisaDeclararAutoria', () => {
+  // O fato que obriga isto a existir: ha UM login para a equipe inteira. O
+  // sistema nao tem como SABER quem digitou — sabe qual login escreveu, que e
+  // outra coisa. Entao o colaborador declara.
+  it('colaborador declara quem e e por que', () => {
+    expect(precisaDeclararAutoria('colaborador')).toBe(true)
+  })
+
+  // E nao e cortesia com o dono: o login dele e individual. Pedir que ele
+  // preenchesse um campo de autoria transformaria um dado que o servidor
+  // CONHECE num dado digitado — pior, nao melhor.
+  it('admin nao declara nada', () => {
+    expect(precisaDeclararAutoria('admin')).toBe(false)
+  })
+})
+
+describe('podeVerHistoricoCadastro', () => {
+  it('admin le o historico', () => {
+    expect(podeVerHistoricoCadastro('admin')).toBe(true)
+  })
+
+  // Log de supervisao aberto a quem e supervisionado vira a lista de quem
+  // declarou o que — util para combinar versao, nao para conferir.
+  it('colaborador nao le o historico', () => {
+    expect(podeVerHistoricoCadastro('colaborador')).toBe(false)
+  })
+})
+
+describe('declarar e ler historico sao decisoes OPOSTAS, nao a mesma invertida', () => {
+  // Hoje elas sao complementares para os dois papeis que existem, e por isso
+  // e tentador escrever uma so e usar `!` na outra. Sao perguntas diferentes:
+  // "tem que dizer quem e" e "pode ler o que os outros disseram". Um papel
+  // futuro (um gerente, por exemplo) poderia declarar E ler, e ai um `!`
+  // teria escondido o historico dele sem ninguem pedir.
+  it('cada uma responde por si, sem chamar a outra', () => {
+    expect(precisaDeclararAutoria.length).toBe(1)
+    expect(podeVerHistoricoCadastro.length).toBe(1)
+  })
+
+  it('o par admin/colaborador e o esperado hoje', () => {
+    expect([precisaDeclararAutoria('admin'), podeVerHistoricoCadastro('admin')]).toEqual([false, true])
+    expect([precisaDeclararAutoria('colaborador'), podeVerHistoricoCadastro('colaborador')]).toEqual([true, false])
+  })
+})
+
+describe('as decisoes de papel sao independentes', () => {
   // Elas hoje respondem igual, e por isso e tentador escrever uma so. Sao
   // perguntas diferentes: "pode VER o numero" e "pode APAGAR o registro" —
   // se um dia o dono liberar a exclusao para o colaborador, ou esconder

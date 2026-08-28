@@ -22,6 +22,7 @@ let tenantId: string
 let outroTenantId: string
 let tokenAdmin: string
 let tokenColab: string
+let funcionarioId: string
 
 beforeAll(async () => {
   admin = criarPool(ADMIN)
@@ -37,6 +38,12 @@ beforeAll(async () => {
   outroTenantId = t2.id
 
   await admin`delete from clientes where tenant_id in (${tenantId}, ${outroTenantId})`
+  // `historico_cadastros` nao tem FK para os cadastros (017), entao a ordem
+  // nao e imposta pelo banco — mas limpar aqui deixa cada execucao partindo
+  // de zero. `funcionarios` sai depois dele so por clareza de leitura: a FK do
+  // autor e `set null`, nao barra nada.
+  await admin`delete from historico_cadastros where tenant_id in (${tenantId}, ${outroTenantId})`
+  await admin`delete from funcionarios where tenant_id in (${tenantId}, ${outroTenantId})`
   await admin`delete from usuarios where tenant_id in (${tenantId}, ${outroTenantId})`
 
   const hash = await hashSenha('segredo123')
@@ -49,6 +56,15 @@ beforeAll(async () => {
 
   tokenAdmin = await criarSessao(sql, uAdmin.id, tenantId)
   tokenColab = await criarSessao(sql, uColab.id, tenantId)
+
+  // O COLABORADOR PRECISA DECLARAR QUEM E ao criar/editar cadastro
+  // (historico de alteracoes, migration 017): o autor vem de uma LISTA
+  // FECHADA de funcionarios, nunca de texto livre. Sem uma linha em
+  // `funcionarios` para escolher, nao ha declaracao possivel.
+  const [decl] = await admin`
+    insert into funcionarios (tenant_id, nome, salario)
+    values (${tenantId}, 'Funcionario Declarante Clientes', 1500) returning id`
+  funcionarioId = decl.id
 })
 
 afterAll(async () => {
@@ -114,11 +130,18 @@ describe('autorizacao', () => {
   // quem atende o estabelecimento e quem descobre que o telefone mudou).
   // `clientes` saiu de ADMIN_ONLY_SCREENS junto — ver o comentario da
   // autorizacao em src/routes/clientes.ts.
+  // O colaborador DECLARA quem e e por que a cada escrita (`declarado_por` +
+  // `motivo`) — exigido pelo servidor desde o historico de alteracoes
+  // (migration 017). O que a rota recusa sem isso esta coberto em
+  // test/historico.http.test.ts; aqui os dois casos so provam que a permissao
+  // continua sendo dele.
   it('colaborador CRIA cliente', async () => {
     const res = await pedir('/api/clientes', {
       ...comoColab(), method: 'POST',
       headers: { ...comoColab().headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ nome: 'Mercado do Colaborador' }),
+      body: JSON.stringify({
+        nome: 'Mercado do Colaborador', declarado_por: funcionarioId, motivo: 'cliente novo da rota',
+      }),
     })
     expect(res.status).toBe(201)
     const corpo = await res.json() as { id: string; nome: string }
@@ -133,7 +156,9 @@ describe('autorizacao', () => {
     const res = await pedir(`/api/clientes/${id}`, {
       ...comoColab(), method: 'PUT',
       headers: { ...comoColab().headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ tel: '44 99999-0000' }),
+      body: JSON.stringify({
+        tel: '44 99999-0000', declarado_por: funcionarioId, motivo: 'trocou de telefone',
+      }),
     })
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ tel: '44 99999-0000' })

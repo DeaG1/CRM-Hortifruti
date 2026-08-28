@@ -267,6 +267,7 @@ export function FornecedoresLista(
             fornecedor={modal}
             produtosDisponiveis={produtosDisponiveis}
             podeExcluir={podeExcluir}
+            papel={papel}
             onSalvo={aoSalvar}
             onExcluido={aoExcluir}
             onFechar={() => setModal(undefined)}
@@ -410,6 +411,7 @@ export function FornecedoresLista(
           fornecedor={modal}
           produtosDisponiveis={produtosDisponiveis}
           podeExcluir={podeExcluir}
+          papel={papel}
           onSalvo={aoSalvar}
           onExcluido={aoExcluir}
           onFechar={() => setModal(undefined)}

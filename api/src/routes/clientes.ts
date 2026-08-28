@@ -1,6 +1,9 @@
 import { Hono } from 'hono'
 import { withTenant, type EnvBanco } from '../db'
 import { exigirSessao, exigirAdmin, type Vars } from '../middleware/sessao'
+import {
+  autorDaAlteracao, diferencas, erroDeDeclaracao, registrarHistorico, vaiGravar,
+} from '../historico'
 
 const CAMPOS = [
   'nome','resp','cnpj','tel','email','endereco','rota','freq',
@@ -178,17 +181,53 @@ clientes.get('/:id', async (c) => {
   return linha ? c.json(paraJson(linha)) : c.json({ erro: 'nao encontrado' }, 404)
 })
 
+/**
+ * O HISTORICO E ESCRITO AQUI, e nao numa rota propria, por dois motivos que
+ * se reforcam (vale igual para produtos.ts e fornecedores.ts):
+ *
+ *  1. ATOMICIDADE. O insert do cadastro e o insert do historico rodam na
+ *     MESMA transacao. Nao existe alteracao gravada sem rastro, nem rastro de
+ *     uma alteracao que falhou.
+ *  2. NAO HA COMO CONTORNAR. Se o historico fosse um `POST /api/historico`
+ *     chamado pelo front, editar sem deixar rastro seria simplesmente nao
+ *     chamar a segunda rota.
+ *
+ * A exigencia de declarar (autor + motivo) e do PAPEL DA SESSAO, resolvido do
+ * cookie — nada do que o cliente manda sobre isso e consultado. Ver
+ * `erroDeDeclaracao` em src/historico.ts.
+ */
 clientes.post('/', async (c) => {
-  const dados = sanear(await c.req.json())
+  const corpo = await c.req.json() as Record<string, unknown>
+  const dados = sanear(corpo)
   if (nomeEmBranco(dados.nome)) return c.json({ erro: 'nome e obrigatorio' }, 400)
   dados.nome = (dados.nome as string).trim()
   const erroCampo = erroDeCampoInvalido(dados)
   if (erroCampo) return c.json({ erro: erroCampo }, 400)
+  const papel = c.get('papel')
+  const erroDecl = erroDeDeclaracao(papel, corpo)
+  if (erroDecl) return c.json({ erro: erroDecl }, 400)
   const tenantId = c.get('tenantId')
+  const usuarioId = c.get('usuarioId')
   try {
-    const [linha] = await withTenant(c.get('sql'), tenantId, tx =>
-      tx`insert into clientes ${tx({ ...dados, tenant_id: tenantId })} returning *`)
-    return c.json(paraJson(linha), 201)
+    const feito = await withTenant(c.get('sql'), tenantId, async (tx) => {
+      const autor = await autorDaAlteracao(tx, papel, usuarioId, corpo)
+      if ('erro' in autor) return { erro: autor.erro } as const
+      const [linha] = await tx`insert into clientes ${tx({ ...dados, tenant_id: tenantId })} returning *`
+      await registrarHistorico(tx, {
+        tenantId,
+        entidade: 'cliente',
+        registroId: linha.id as string,
+        registroNome: linha.nome as string,
+        acao: 'criou',
+        autor,
+        // Vazio de proposito: criar nao tem "de", e o que foi criado E o
+        // registro atual. Ver o comentario de `alteracoes` na 017.
+        alteracoes: [],
+      })
+      return { linha } as const
+    })
+    if ('erro' in feito) return c.json({ erro: feito.erro }, 400)
+    return c.json(paraJson(feito.linha), 201)
   } catch (err) {
     // Codigos SQLSTATE, nao substring de mensagem: o texto exato do
     // Postgres pode mudar entre versoes/locale, o codigo nao.
@@ -201,7 +240,8 @@ clientes.post('/', async (c) => {
 clientes.put('/:id', async (c) => {
   const id = c.req.param('id')
   if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
-  const dados = sanear(await c.req.json())
+  const corpo = await c.req.json() as Record<string, unknown>
+  const dados = sanear(corpo)
   if (Object.keys(dados).length === 0) return c.json({ erro: 'nada a alterar' }, 400)
   // nome so e validado se veio no corpo — ausente continua significando
   // "nao alterar este campo", igual aos demais campos do PUT. Antes desta
@@ -213,11 +253,44 @@ clientes.put('/:id', async (c) => {
   }
   const erroCampo = erroDeCampoInvalido(dados)
   if (erroCampo) return c.json({ erro: erroCampo }, 400)
+  const papel = c.get('papel')
+  const erroDecl = erroDeDeclaracao(papel, corpo)
+  if (erroDecl) return c.json({ erro: erroDecl }, 400)
+  const tenantId = c.get('tenantId')
+  const usuarioId = c.get('usuarioId')
   try {
-    const [linha] = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
-      tx`update clientes set ${tx({ ...dados, alterado_em: new Date() })}
-         where id = ${id} returning *`)
-    return linha ? c.json(paraJson(linha)) : c.json({ erro: 'nao encontrado' }, 404)
+    const feito = await withTenant(c.get('sql'), tenantId, async (tx) => {
+      const autor = await autorDaAlteracao(tx, papel, usuarioId, corpo)
+      if ('erro' in autor) return { erro: autor.erro } as const
+      // O `select` do estado ANTERIOR e o que permite gravar de/para em vez
+      // de uma copia do registro. Ele roda na mesma transacao do update, com
+      // a linha ja travada pelo update seguinte — nao ha janela para outra
+      // escrita entrar no meio e o "de" ficar de uma versao que ninguem viu.
+      const [antes] = await tx`select * from clientes where id = ${id}`
+      if (!antes) return { naoEncontrado: true } as const
+      const [linha] = await tx`update clientes set ${tx({ ...dados, alterado_em: new Date() })}
+         where id = ${id} returning *`
+      const alteracoes = diferencas(antes, linha, CAMPOS)
+      // PUT que reenvia os mesmos valores nao gera registro — ver `vaiGravar`
+      // em src/historico.ts. `alterado_em` fica de fora da comparacao (nao
+      // esta em CAMPOS): ela sempre muda, e se contasse como alteracao a
+      // regra nunca poderia valer.
+      if (vaiGravar('editou', alteracoes)) {
+        await registrarHistorico(tx, {
+          tenantId,
+          entidade: 'cliente',
+          registroId: id,
+          registroNome: linha.nome as string,
+          acao: 'editou',
+          autor,
+          alteracoes,
+        })
+      }
+      return { linha } as const
+    })
+    if ('erro' in feito) return c.json({ erro: feito.erro }, 400)
+    if ('naoEncontrado' in feito) return c.json({ erro: 'nao encontrado' }, 404)
+    return c.json(paraJson(feito.linha))
   } catch (err) {
     const mapeado = respostaDeErroPg(err)
     if (mapeado) return c.json(mapeado.corpo, mapeado.status)
@@ -225,10 +298,51 @@ clientes.put('/:id', async (c) => {
   }
 })
 
+/**
+ * A EXCLUSAO TAMBEM ENTRA NO HISTORICO, e e o caso que decidiu a modelagem:
+ * `historico_cadastros` NAO tem chave estrangeira para `clientes` (ver 017),
+ * entao esta linha de log sobrevive ao registro que ela documenta. O dono
+ * consegue perguntar "o que aconteceu com o Mercado Bom Preço?" depois de o
+ * cadastro nao existir mais, e a resposta continua la — inclusive o nome, que
+ * vai gravado como texto em `registro_nome`.
+ *
+ * Sem motivo declarado: DELETE e admin (`clientes.delete('*', exigirAdmin)`),
+ * e admin nao declara nada. O `papel` e lido da sessao assim mesmo, em vez de
+ * fixado em 'admin' aqui: se um dia a exclusao for aberta ao colaborador, a
+ * exigencia de declarar passa a valer sozinha, e ele leva 400 ate declarar —
+ * fail-closed em vez de um DELETE anonimo por esquecimento.
+ */
 clientes.delete('/:id', async (c) => {
   const id = c.req.param('id')
   if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
-  const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
-    tx`delete from clientes where id = ${id} returning id`)
-  return linhas.length ? c.json({ ok: true }) : c.json({ erro: 'nao encontrado' }, 404)
+  // DELETE normalmente vem sem corpo; `.catch` cobre isso sem transformar
+  // "sem corpo" em 500.
+  const corpo = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const papel = c.get('papel')
+  const erroDecl = erroDeDeclaracao(papel, corpo)
+  if (erroDecl) return c.json({ erro: erroDecl }, 400)
+  const tenantId = c.get('tenantId')
+  const usuarioId = c.get('usuarioId')
+  const feito = await withTenant(c.get('sql'), tenantId, async (tx) => {
+    const autor = await autorDaAlteracao(tx, papel, usuarioId, corpo)
+    if ('erro' in autor) return { erro: autor.erro } as const
+    const [linha] = await tx`delete from clientes where id = ${id} returning id, nome`
+    if (!linha) return { naoEncontrado: true } as const
+    await registrarHistorico(tx, {
+      tenantId,
+      entidade: 'cliente',
+      registroId: id,
+      registroNome: linha.nome as string,
+      acao: 'excluiu',
+      autor,
+      // Vazio: excluir nao tem "para", e o que se perde esta identificado por
+      // `registro_nome`. Gravar o registro inteiro aqui seria a copia que a
+      // 017 recusa.
+      alteracoes: [],
+    })
+    return { ok: true } as const
+  })
+  if ('erro' in feito) return c.json({ erro: feito.erro }, 400)
+  if ('naoEncontrado' in feito) return c.json({ erro: 'nao encontrado' }, 404)
+  return c.json({ ok: true })
 })

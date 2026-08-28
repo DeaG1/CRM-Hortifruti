@@ -1,0 +1,57 @@
+/* Os dois campos de declaração ficam num bloco DESTACADO do resto do
+   formulário, com fundo e borda próprios: eles não são mais um par de campos
+   do cadastro, são a pergunta que o sistema faz a quem está salvando. Separar
+   visualmente também evita que virem "mais dois campos para preencher no
+   automático" no meio de quinze.
+
+   As classes `modal-campo` / `modal-rotulo` / `modal-input` / `modal-select` /
+   `modal-erro` usadas aqui dentro vêm do CSS do modal que hospeda o bloco
+   (ModalCliente.css, ModalProduto.css, ModalFornecedor.css, todos com as
+   mesmas definições) — não são redeclaradas aqui para os campos não
+   divergirem dos vizinhos. */
+
+.declaracao {
+  margin-top: 18px;
+  padding: 14px 15px 15px;
+  background: #fdf7e8;
+  border: 1px solid #e8dcbc;
+  border-radius: 11px;
+}
+
+.declaracao-titulo {
+  font-family: 'Archivo', sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  color: #6b5720;
+  margin-bottom: 4px;
+}
+
+.declaracao-nota {
+  margin: 0 0 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #7d6b39;
+}
+
+.declaracao-campos {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 13px;
+}
+
+@media (max-width: 560px) {
+  .declaracao-campos {
+    grid-template-columns: 1fr;
+  }
+}
+
+.declaracao-aviso {
+  margin: 11px 0 0;
+  background: #fff;
+  border: 1px solid #e8dcbc;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #7d6b39;
+}

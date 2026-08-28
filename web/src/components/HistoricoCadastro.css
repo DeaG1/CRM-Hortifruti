@@ -1,0 +1,179 @@
+/* O painel de histórico fica no fim do corpo do modal, separado do
+   formulário por uma linha: é leitura, não edição, e misturá-lo aos campos
+   faria o dono achar que pode escrever ali. */
+
+.historico {
+  margin-top: 20px;
+  border-top: 1px solid #e6e2d4;
+  padding-top: 14px;
+}
+
+.historico-botao {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  font-family: 'Public Sans', sans-serif;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #4a6b2e;
+  cursor: pointer;
+}
+
+.historico-botao:hover {
+  color: #3d5a25;
+  text-decoration: underline;
+}
+
+.historico-botao-seta {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.historico-painel {
+  margin-top: 10px;
+}
+
+.historico-estado {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #8a8775;
+}
+
+.historico-estado--erro {
+  background: #f6e4dc;
+  border: 1px solid #e7cbbf;
+  border-radius: 9px;
+  padding: 9px 12px;
+  color: #9a4a2e;
+  font-weight: 600;
+}
+
+.historico-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* O log de um cadastro antigo pode ser longo; a rolagem fica DENTRO da
+     seção para o rodapé do modal (Salvar/Cancelar) não sumir de vista. */
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.historico-item {
+  border: 1px solid #e6e2d4;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.historico-item-topo {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.historico-acao {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #21331f;
+}
+
+.historico-data {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  color: #8a8775;
+  white-space: nowrap;
+}
+
+.historico-autor {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #6a685c;
+}
+
+/* Declaração e login não podem parecer a mesma coisa: a marca amarela é a
+   diferença entre "alguém disse que foi ele" e "o login individual do dono
+   estava aberto". */
+.historico-autor--declarado {
+  color: #7d6b39;
+}
+
+.historico-autor--declarado::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d3a53a;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.historico-motivo {
+  margin-top: 5px;
+  font-size: 12.5px;
+  color: #4a4838;
+  font-style: italic;
+}
+
+.historico-campos {
+  list-style: none;
+  margin: 9px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px dashed #e6e2d4;
+}
+
+.historico-campo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 14px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 7px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+@media (max-width: 520px) {
+  .historico-campo {
+    grid-template-columns: 1fr;
+    gap: 2px;
+    padding: 6px 0;
+  }
+}
+
+.historico-campo-nome {
+  color: #6a685c;
+  font-weight: 600;
+}
+
+.historico-campo-de {
+  color: #9a4a2e;
+  text-decoration: line-through;
+  overflow-wrap: anywhere;
+}
+
+.historico-campo-seta {
+  color: #9a9784;
+  text-align: center;
+}
+
+.historico-campo-para {
+  color: #3f8f5b;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.historico-nota {
+  margin: 10px 0 0;
+  background: #fdf7e8;
+  border: 1px solid #e8dcbc;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #7d6b39;
+}

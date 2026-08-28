@@ -2,6 +2,9 @@ import { Hono } from 'hono'
 import type postgres from 'postgres'
 import { withTenant, type EnvBanco } from '../db'
 import { exigirSessao, exigirAdmin, type Vars } from '../middleware/sessao'
+import {
+  autorDaAlteracao, diferencas, erroDeDeclaracao, registrarHistorico, vaiGravar,
+} from '../historico'
 
 const CAMPOS = ['nome', 'regiao', 'contato'] as const
 
@@ -199,15 +202,55 @@ fornecedores.get('/:id', async (c) => {
   return c.json({ ...paraJson(resultado.linha), produtos: resultado.vinculados.map(paraJsonProduto) })
 })
 
+/**
+ * Nome dos produtos vinculados, em uma linha, para o de/para do historico.
+ *
+ * A relacao `fornecedor_produtos` E cadastro editavel pelo colaborador (o
+ * `produto_ids` do PUT), entao deixa-la fora do rastro abriria um buraco do
+ * tamanho da feature: daria para trocar tudo que um produtor entrega sem
+ * nenhum registro. Vai como NOME, nao como lista de uuid, porque o log e
+ * lido por gente — "Batata, Cebola" -> "Batata, Tomate" responde a pergunta;
+ * dois blocos de uuid nao respondem.
+ *
+ * A consulta ja devolve ordenado por nome (produtosDoFornecedor), entao
+ * reordenar os mesmos produtos nao aparece como alteracao — o que mudou e o
+ * CONJUNTO, nao a ordem em que o formulario os enviou.
+ */
+function nomesDosProdutos(linhas: readonly Record<string, unknown>[]): string {
+  return linhas.map(p => String(p.nome ?? '')).join(', ')
+}
+
+// Historico: mesma mecanica e mesmos motivos de clientes.ts. O que e proprio
+// daqui e o campo sintetico `produtos` no de/para do PUT — ver
+// `nomesDosProdutos` acima.
 fornecedores.post('/', async (c) => {
-  const dados = sanear(await c.req.json())
+  const corpo = await c.req.json() as Record<string, unknown>
+  const dados = sanear(corpo)
   if (nomeEmBranco(dados.nome)) return c.json({ erro: 'nome e obrigatorio' }, 400)
   dados.nome = (dados.nome as string).trim()
+  const papel = c.get('papel')
+  const erroDecl = erroDeDeclaracao(papel, corpo)
+  if (erroDecl) return c.json({ erro: erroDecl }, 400)
   const tenantId = c.get('tenantId')
+  const usuarioId = c.get('usuarioId')
   try {
-    const [linha] = await withTenant(c.get('sql'), tenantId, tx =>
-      tx`insert into fornecedores ${tx({ ...dados, tenant_id: tenantId })} returning *`)
-    return c.json(paraJson(linha), 201)
+    const feito = await withTenant(c.get('sql'), tenantId, async (tx) => {
+      const autor = await autorDaAlteracao(tx, papel, usuarioId, corpo)
+      if ('erro' in autor) return { erro: autor.erro } as const
+      const [linha] = await tx`insert into fornecedores ${tx({ ...dados, tenant_id: tenantId })} returning *`
+      await registrarHistorico(tx, {
+        tenantId,
+        entidade: 'fornecedor',
+        registroId: linha.id as string,
+        registroNome: linha.nome as string,
+        acao: 'criou',
+        autor,
+        alteracoes: [],
+      })
+      return { linha } as const
+    })
+    if ('erro' in feito) return c.json({ erro: feito.erro }, 400)
+    return c.json(paraJson(feito.linha), 201)
   } catch (err) {
     const mapeado = respostaDeErroPg(err)
     if (mapeado) return c.json(mapeado.corpo, mapeado.status)
@@ -221,9 +264,9 @@ fornecedores.post('/', async (c) => {
 fornecedores.put('/:id', async (c) => {
   const id = c.req.param('id')
   if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
-  const corpo = await c.req.json()
+  const corpo = await c.req.json() as Record<string, unknown>
   const dados = sanear(corpo)
-  const produtoIds = (corpo as Record<string, unknown>).produto_ids
+  const produtoIds = corpo.produto_ids
 
   if (produtoIds !== undefined && !listaDeIdsValida(produtoIds)) {
     return c.json({ erro: 'produto_ids deve ser uma lista de ids validos' }, 400)
@@ -237,19 +280,34 @@ fornecedores.put('/:id', async (c) => {
     if (nomeEmBranco(dados.nome)) return c.json({ erro: 'nome e obrigatorio' }, 400)
     dados.nome = (dados.nome as string).trim()
   }
+  const papel = c.get('papel')
+  const erroDecl = erroDeDeclaracao(papel, corpo)
+  if (erroDecl) return c.json({ erro: erroDecl }, 400)
 
   const tenantId = c.get('tenantId')
+  const usuarioId = c.get('usuarioId')
   try {
     const resultado = await withTenant(c.get('sql'), tenantId, async (tx) => {
-      let linha: Record<string, unknown> | undefined
-      if (Object.keys(dados).length > 0) {
-        ;[linha] = await tx`update fornecedores set ${tx({ ...dados, alterado_em: new Date() })}
-           where id = ${id} returning *`
-      } else {
-        ;[linha] = await tx`select * from fornecedores where id = ${id}`
-      }
-      if (!linha) return 'nao_encontrado' as const
+      const autor = await autorDaAlteracao(tx, papel, usuarioId, corpo)
+      if ('erro' in autor) return { erroDeclaracao: autor.erro } as const
 
+      const [antes] = await tx`select * from fornecedores where id = ${id}`
+      if (!antes) return 'nao_encontrado' as const
+      const vinculadosAntes = await produtosDoFornecedor(tx, id)
+
+      // A SINCRONIZACAO VEM ANTES DO UPDATE, e a ordem foi trocada de
+      // proposito. Antes o update dos campos rodava primeiro e um
+      // `produto_ids` invalido devolvia 400 DEPOIS de a transacao ja ter
+      // gravado o nome/regiao/contato novos — e commitava assim mesmo. Isso
+      // era escrita parcial silenciosa antes de existir historico; com
+      // historico passaria a ser pior: a alteracao entrava e o registro dela
+      // nao, porque o `return` acontece antes do `registrarHistorico`. Ou
+      // seja, um caminho para editar sem deixar rastro, aberto por qualquer
+      // um que mandasse um uuid inexistente em `produto_ids` junto.
+      //
+      // `sincronizarProdutos` valida a lista inteira antes de escrever
+      // qualquer coisa, entao aqui o `produto_invalido` sai com zero linhas
+      // tocadas.
       if (produtoIds !== undefined) {
         // Validado logo no inicio do handler (listaDeIdsValida) — aqui ja
         // sabemos que e string[], so o TS nao carrega essa narrowing por
@@ -258,12 +316,36 @@ fornecedores.put('/:id', async (c) => {
         if (sincronizado === 'produto_invalido') return 'produto_invalido' as const
       }
 
+      let linha: Record<string, unknown> = antes
+      if (Object.keys(dados).length > 0) {
+        ;[linha] = await tx`update fornecedores set ${tx({ ...dados, alterado_em: new Date() })}
+           where id = ${id} returning *`
+      }
+
       const vinculados = await produtosDoFornecedor(tx, id)
+      const alteracoes = diferencas(antes, linha, CAMPOS)
+      const produtosDe = nomesDosProdutos(vinculadosAntes)
+      const produtosPara = nomesDosProdutos(vinculados)
+      if (produtosDe !== produtosPara) {
+        alteracoes.push({ campo: 'produtos', de: produtosDe, para: produtosPara })
+      }
+      if (vaiGravar('editou', alteracoes)) {
+        await registrarHistorico(tx, {
+          tenantId,
+          entidade: 'fornecedor',
+          registroId: id,
+          registroNome: linha.nome as string,
+          acao: 'editou',
+          autor,
+          alteracoes,
+        })
+      }
       return { linha, vinculados }
     })
 
     if (resultado === 'nao_encontrado') return c.json({ erro: 'nao encontrado' }, 404)
     if (resultado === 'produto_invalido') return c.json({ erro: 'produto nao encontrado' }, 400)
+    if ('erroDeclaracao' in resultado) return c.json({ erro: resultado.erroDeclaracao }, 400)
     return c.json({ ...paraJson(resultado.linha), produtos: resultado.vinculados.map(paraJsonProduto) })
   } catch (err) {
     const mapeado = respostaDeErroPg(err)
@@ -272,10 +354,34 @@ fornecedores.put('/:id', async (c) => {
   }
 })
 
+// Exclusao entra no historico pelo mesmo motivo de clientes.ts: o rastro
+// sobrevive ao registro que documenta.
 fornecedores.delete('/:id', async (c) => {
   const id = c.req.param('id')
   if (!idValido(id)) return c.json({ erro: 'id invalido' }, 400)
-  const linhas = await withTenant(c.get('sql'), c.get('tenantId'), tx =>
-    tx`delete from fornecedores where id = ${id} returning id`)
-  return linhas.length ? c.json({ ok: true }) : c.json({ erro: 'nao encontrado' }, 404)
+  const corpo = await c.req.json().catch(() => ({})) as Record<string, unknown>
+  const papel = c.get('papel')
+  const erroDecl = erroDeDeclaracao(papel, corpo)
+  if (erroDecl) return c.json({ erro: erroDecl }, 400)
+  const tenantId = c.get('tenantId')
+  const usuarioId = c.get('usuarioId')
+  const feito = await withTenant(c.get('sql'), tenantId, async (tx) => {
+    const autor = await autorDaAlteracao(tx, papel, usuarioId, corpo)
+    if ('erro' in autor) return { erro: autor.erro } as const
+    const [linha] = await tx`delete from fornecedores where id = ${id} returning id, nome`
+    if (!linha) return { naoEncontrado: true } as const
+    await registrarHistorico(tx, {
+      tenantId,
+      entidade: 'fornecedor',
+      registroId: id,
+      registroNome: linha.nome as string,
+      acao: 'excluiu',
+      autor,
+      alteracoes: [],
+    })
+    return { ok: true } as const
+  })
+  if ('erro' in feito) return c.json({ erro: feito.erro }, 400)
+  if ('naoEncontrado' in feito) return c.json({ erro: 'nao encontrado' }, 404)
+  return c.json({ ok: true })
 })

@@ -112,13 +112,24 @@ describe('on delete set null das FKs compostas (010, corrigidas em 014)', () => 
     expect(depois.numero).toBe('FKEN-1')
   })
 
-  it('as quatro FKs `set null` do banco declaram a lista de colunas (nenhuma ficou para tras)', async () => {
+  it('todas as FKs `set null` do banco declaram a lista de colunas (nenhuma ficou para tras)', async () => {
     const linhas = await admin<{ conname: string; def: string }[]>`
       select conname, pg_get_constraintdef(oid) as def
       from pg_constraint
       where contype = 'f' and confdeltype = 'n'
       order by conname`
-    expect(linhas.length).toBe(4)
+    // A lista, por NOME, e nao so a contagem: uma FK renomeada ou trocada por
+    // outra manteria o numero e passaria despercebida. `historico_autor_
+    // funcionario_fk` e a quinta e entrou com a 017 — e a que faz o rastro
+    // sobreviver a exclusao do funcionario declarado (o ponteiro zera, o nome
+    // gravado em texto fica).
+    expect(linhas.map(l => l.conname)).toEqual([
+      'entradas_fornecedor_fk',
+      'historico_autor_funcionario_fk',
+      'lancamentos_funcionario_fk',
+      'lancamentos_veiculo_fk',
+      'saidas_cliente_fk',
+    ])
     for (const linha of linhas) {
       expect(linha.def, `${linha.conname} sem lista de colunas no SET NULL`)
         .toMatch(/ON DELETE SET NULL \(\w+\)/)

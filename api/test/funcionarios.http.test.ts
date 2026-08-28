@@ -132,6 +132,117 @@ describe('autorizacao', () => {
   })
 })
 
+/**
+ * GET /opcoes — A EXCECAO, e o teste existe para provar que ela e so isso.
+ *
+ * Ela voltou (foi removida em 7b841b1) porque o historico de alteracoes
+ * precisa que o colaborador escolha QUEM ESTA ALTERANDO de uma lista fechada
+ * de funcionarios — texto livre viraria "joão", "Joao" e "jão" e fragmentaria
+ * o rastro de uma pessoa em tres. Ver src/routes/funcionarios.ts.
+ *
+ * O risco de uma excecao numa rota admin-only e ela crescer sem ninguem
+ * notar: mais uma coluna aqui, mais um metodo ali. Por isso os testes abaixo
+ * fixam a FORMA da resposta (exatamente id e nome, nada mais), e nao so o
+ * status.
+ */
+describe('GET /opcoes — aberta ao colaborador, e so id e nome', () => {
+  let ativoId: string
+
+  beforeAll(async () => {
+    const [a] = await admin`
+      insert into funcionarios (tenant_id, nome, cargo, tel, salario, dia_pag, ativo)
+      values (${tenantId}, 'Ativo das Opcoes', 'Balconista', '44 90000-0000', 3210.50, 10, true)
+      returning id`
+    ativoId = a.id
+    await admin`
+      insert into funcionarios (tenant_id, nome, salario, ativo)
+      values (${tenantId}, 'Inativo das Opcoes', 4321.00, false)`
+    await admin`
+      insert into funcionarios (tenant_id, nome, salario)
+      values (${outroTenantId}, 'Da Outra Empresa', 1000)`
+  })
+
+  it('colaborador -> 200 (e esta e a unica rota deste arquivo em que isso vale)', async () => {
+    const res = await pedir('/api/funcionarios/opcoes', comoColab())
+    expect(res.status).toBe(200)
+  })
+
+  it('sem cookie -> 401: aberta a qualquer SESSAO, nao ao mundo', async () => {
+    const res = await pedir('/api/funcionarios/opcoes')
+    expect(res.status).toBe(401)
+  })
+
+  it('admin tambem le', async () => {
+    const res = await pedir('/api/funcionarios/opcoes', comoAdmin())
+    expect(res.status).toBe(200)
+  })
+
+  it('cada item tem EXATAMENTE id e nome — nunca salario, telefone ou dia de pagamento', async () => {
+    const res = await pedir('/api/funcionarios/opcoes', comoColab())
+    const linhas = await res.json() as Record<string, unknown>[]
+    expect(linhas.length).toBeGreaterThan(0)
+    for (const linha of linhas) {
+      // Nomes de colegas nao sao segredo entre quem trabalha junto; salario e.
+      // Esta e a asserção que impede um `select *` de entrar aqui um dia.
+      expect(Object.keys(linha).sort()).toEqual(['id', 'nome'])
+    }
+    const bruto = JSON.stringify(linhas)
+    expect(bruto).not.toContain('3210.5')
+    expect(bruto).not.toContain('44 90000-0000')
+    expect(bruto).not.toContain('Balconista')
+  })
+
+  it('so os ativos: quem saiu da empresa nao esta alterando cadastro nenhum', async () => {
+    const res = await pedir('/api/funcionarios/opcoes', comoColab())
+    const linhas = await res.json() as { id: string; nome: string }[]
+    const nomes = linhas.map(l => l.nome)
+    expect(nomes).toContain('Ativo das Opcoes')
+    expect(nomes).not.toContain('Inativo das Opcoes')
+  })
+
+  it('nao vaza funcionario de outra empresa (RLS)', async () => {
+    const res = await pedir('/api/funcionarios/opcoes', comoColab())
+    const linhas = await res.json() as { nome: string }[]
+    expect(linhas.map(l => l.nome)).not.toContain('Da Outra Empresa')
+  })
+
+  it('ordenado por nome — o seletor nao reordena nada no navegador', async () => {
+    const res = await pedir('/api/funcionarios/opcoes', comoColab())
+    const linhas = await res.json() as { nome: string }[]
+    const nomes = linhas.map(l => l.nome)
+    expect(nomes).toEqual([...nomes].sort((a, b) => a.localeCompare(b, 'pt-BR')))
+  })
+
+  it('a excecao NAO se estende: GET /:id continua 403 para o colaborador', async () => {
+    // O buraco obvio seria '/opcoes' abrir a porta e '/:id' passar junto.
+    const res = await pedir(`/api/funcionarios/${ativoId}`, comoColab())
+    expect(res.status).toBe(403)
+  })
+
+  it('a excecao NAO se estende: POST/PUT/DELETE continuam 403 para o colaborador', async () => {
+    const post = await pedir('/api/funcionarios', comoColab(json({ nome: 'Contratado pelo colab' })))
+    expect(post.status).toBe(403)
+    const put = await pedir(`/api/funcionarios/${ativoId}`, comoColab({
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ salario: 99999 }),
+    }))
+    expect(put.status).toBe(403)
+    const del = await pedir(`/api/funcionarios/${ativoId}`, comoColab({ method: 'DELETE' }))
+    expect(del.status).toBe(403)
+    const [ainda] = await admin`select salario from funcionarios where id = ${ativoId}`
+    expect(Number(ainda.salario)).toBe(3210.5)
+  })
+
+  it("'/opcoes' nao e capturado por '/:id': a rota estatica vem antes", async () => {
+    // Se a ordem de registro invertesse, '/opcoes' cairia em GET /:id, levaria
+    // 403 para o colaborador e 400 'id invalido' para o admin.
+    const res = await pedir('/api/funcionarios/opcoes', comoAdmin())
+    expect(res.status).toBe(200)
+    expect(Array.isArray(await res.json())).toBe(true)
+  })
+})
+
 describe('mass assignment', () => {
   it('POST ignora tenant_id e id enviados no corpo', async () => {
     const res = await pedir('/api/funcionarios', comoAdmin({

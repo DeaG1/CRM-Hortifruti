@@ -42,6 +42,7 @@ let admin: ReturnType<typeof criarPool>
 let tenantId: string
 let tokenAdmin: string
 let tokenColab: string
+let funcionarioId: string
 
 beforeAll(async () => {
   admin = criarPool(ADMIN)
@@ -64,6 +65,12 @@ beforeAll(async () => {
   await admin`delete from fornecedores where tenant_id = ${tenantId}`
   await admin`delete from produtos    where tenant_id = ${tenantId}`
   await admin`delete from clientes    where tenant_id = ${tenantId}`
+  // `historico_cadastros` nao tem FK para os cadastros (017), entao a ordem
+  // nao e imposta pelo banco — mas limpar aqui deixa cada execucao partindo
+  // de zero. `funcionarios` sai depois dele so por clareza de leitura: a FK do
+  // autor e `set null`, nao barra nada.
+  await admin`delete from historico_cadastros where tenant_id = ${tenantId}`
+  await admin`delete from funcionarios where tenant_id = ${tenantId}`
   await admin`delete from usuarios    where tenant_id = ${tenantId}`
 
   const hash = await hashSenha('segredo123')
@@ -76,6 +83,15 @@ beforeAll(async () => {
 
   tokenAdmin = await criarSessao(sql, uAdmin.id, tenantId)
   tokenColab = await criarSessao(sql, uColab.id, tenantId)
+
+  // O COLABORADOR PRECISA DECLARAR QUEM E ao criar/editar cadastro
+  // (historico de alteracoes, migration 017): o autor vem de uma LISTA
+  // FECHADA de funcionarios, nunca de texto livre. Sem uma linha em
+  // `funcionarios` para escolher, nao ha declaracao possivel.
+  const [decl] = await admin`
+    insert into funcionarios (tenant_id, nome, salario)
+    values (${tenantId}, 'Funcionario Declarante Permissoes', 1500) returning id`
+  funcionarioId = decl.id
 })
 
 afterAll(async () => {
@@ -145,7 +161,23 @@ const ACESSIVEL_AO_COLABORADOR = [
   '/api/clientes',
   '/api/produtos',
   '/api/fornecedores',
+  // A UNICA EXCECAO dentro de uma rota admin-only, e ela e deliberada: o
+  // colaborador precisa escolher QUEM ESTA ALTERANDO de uma lista fechada
+  // para poder salvar cadastro (historico, migration 017). `/opcoes` devolve
+  // id e nome dos ativos, e nada mais — nunca salario, telefone ou dia de
+  // pagamento. `GET /api/funcionarios` continua no bloco admin-only acima, e
+  // e o teste que prova que a excecao nao virou porta.
+  '/api/funcionarios/opcoes',
 ]
+
+/**
+ * O HISTORICO DE ALTERACOES: so o admin le, e nao ha rota de escrita.
+ *
+ * Fica num bloco proprio (e nao em METRICAS_ADMIN_ONLY) porque nao e metrica:
+ * e supervisao. Aberto a quem e supervisionado, viraria a lista de quem
+ * declarou o que — util para combinar versao, nao para conferir.
+ */
+const HISTORICO_DE_UM_CLIENTE = '/api/historico/cliente/00000000-0000-4000-8000-000000000000'
 
 describe('metricas agregadas continuam admin-only', () => {
   it.each(METRICAS_ADMIN_ONLY)('colaborador -> 403 em GET %s', async (rota) => {
@@ -170,6 +202,41 @@ describe('o que o colaborador le', () => {
     const res = await pedir(rota, comoColab())
     expect(res.status).toBe(200)
   })
+
+  it('GET /api/funcionarios/opcoes devolve SO id e nome — nunca salario', async () => {
+    const res = await pedir('/api/funcionarios/opcoes', comoColab())
+    expect(res.status).toBe(200)
+    const linhas = await res.json() as Record<string, unknown>[]
+    expect(linhas.length).toBeGreaterThan(0)
+    for (const linha of linhas) {
+      expect(Object.keys(linha).sort()).toEqual(['id', 'nome'])
+    }
+  })
+})
+
+describe('historico de alteracoes: so o admin le, e ninguem escreve por rota', () => {
+  it('colaborador -> 403', async () => {
+    const res = await pedir(HISTORICO_DE_UM_CLIENTE, comoColab())
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ erro: 'sem permissao' })
+  })
+
+  it('sem cookie -> 401', async () => {
+    const res = await pedir(HISTORICO_DE_UM_CLIENTE)
+    expect(res.status).toBe(401)
+  })
+
+  it('admin -> 200', async () => {
+    const res = await pedir(HISTORICO_DE_UM_CLIENTE, comoAdmin())
+    expect(res.status).toBe(200)
+  })
+
+  // Nem o admin edita ou apaga: historico corrigivel depois nao serve de
+  // prova. Se alguem acrescentar um PUT/DELETE aqui um dia, isto quebra.
+  it.each(['PUT', 'PATCH', 'DELETE', 'POST'])('%s -> 404 (nao existe rota)', async (metodo) => {
+    const res = await pedir(HISTORICO_DE_UM_CLIENTE, comoAdmin({ method: metodo }))
+    expect(res.status).toBe(404)
+  })
 })
 
 describe('cadastro: colaborador cria e edita, so o admin exclui', () => {
@@ -182,7 +249,10 @@ describe('cadastro: colaborador cria e edita, so o admin exclui', () => {
     const criado = await pedir('/api/clientes', comoColab({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ nome: 'Mercado Mapa', tel: '44 90000-0000' }),
+      body: JSON.stringify({
+        nome: 'Mercado Mapa', tel: '44 90000-0000',
+        declarado_por: funcionarioId, motivo: 'cliente novo da rota',
+      }),
     }))
     expect(criado.status).toBe(201)
     const { id } = await criado.json() as { id: string }
@@ -190,7 +260,9 @@ describe('cadastro: colaborador cria e edita, so o admin exclui', () => {
     const editado = await pedir(`/api/clientes/${id}`, comoColab({
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ resp: 'Dona Maria' }),
+      body: JSON.stringify({
+        resp: 'Dona Maria', declarado_por: funcionarioId, motivo: 'trocou o comprador',
+      }),
     }))
     expect(editado.status).toBe(200)
     expect(await editado.json()).toMatchObject({ resp: 'Dona Maria' })
@@ -208,7 +280,10 @@ describe('cadastro: colaborador cria e edita, so o admin exclui', () => {
     const criado = await pedir('/api/produtos', comoColab({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ nome: 'Beterraba Mapa', un: 'CX', peso_medio: 20 }),
+      body: JSON.stringify({
+        nome: 'Beterraba Mapa', un: 'CX', peso_medio: 20,
+        declarado_por: funcionarioId, motivo: 'faltava no cadastro',
+      }),
     }))
     expect(criado.status).toBe(201)
     const { id } = await criado.json() as { id: string }
@@ -216,7 +291,9 @@ describe('cadastro: colaborador cria e edita, so o admin exclui', () => {
     const editado = await pedir(`/api/produtos/${id}`, comoColab({
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ peso_medio: 22 }),
+      body: JSON.stringify({
+        peso_medio: 22, declarado_por: funcionarioId, motivo: 'pesamos de novo',
+      }),
     }))
     expect(editado.status).toBe(200)
     expect(await editado.json()).toMatchObject({ peso_medio: 22 })
@@ -234,7 +311,10 @@ describe('cadastro: colaborador cria e edita, so o admin exclui', () => {
     const criado = await pedir('/api/fornecedores', comoColab({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ nome: 'Sitio Mapa', regiao: 'Norte' }),
+      body: JSON.stringify({
+        nome: 'Sitio Mapa', regiao: 'Norte',
+        declarado_por: funcionarioId, motivo: 'produtor novo da feira',
+      }),
     }))
     expect(criado.status).toBe(201)
     const { id } = await criado.json() as { id: string }
@@ -242,7 +322,9 @@ describe('cadastro: colaborador cria e edita, so o admin exclui', () => {
     const editado = await pedir(`/api/fornecedores/${id}`, comoColab({
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ contato: '44 97777-0000' }),
+      body: JSON.stringify({
+        contato: '44 97777-0000', declarado_por: funcionarioId, motivo: 'mandou o whatsapp novo',
+      }),
     }))
     expect(editado.status).toBe(200)
     expect(await editado.json()).toMatchObject({ contato: '44 97777-0000' })

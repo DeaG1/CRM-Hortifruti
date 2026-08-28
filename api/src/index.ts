@@ -15,6 +15,7 @@ import { perdas } from './routes/perdas'
 import { estoque } from './routes/estoque'
 import { relatorios } from './routes/relatorios'
 import { veiculos } from './routes/veiculos'
+import { historico } from './routes/historico'
 
 type Env = EnvBanco
 
@@ -173,6 +174,12 @@ app.route('/api/relatorios', relatorios)
 // 'veiculos' esta em ADMIN_ONLY_SCREENS) — ver permissoes em
 // src/routes/veiculos.ts.
 app.route('/api/veiculos', veiculos)
+// Historico de alteracoes de cliente, produto e fornecedor. SO LEITURA, e so
+// admin. A escrita nao passa por aqui: acontece dentro das proprias rotas de
+// cadastro, na mesma transacao da alteracao que o registro descreve. Nao ha
+// POST, PUT nem DELETE — historico corrigivel depois nao serve de prova.
+// Ver src/routes/historico.ts e db/migrations/017_historico_cadastros.sql.
+app.route('/api/historico', historico)
 
 /**
  * Sem isto, qualquer excecao nao tratada (ex.: um erro do Postgres que

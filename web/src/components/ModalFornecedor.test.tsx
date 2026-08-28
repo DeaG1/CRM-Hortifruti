@@ -9,12 +9,19 @@ import type { Produto } from '../derive/produtos'
 // faz `err instanceof ErroApi`, precisa ser o mesmo construtor dos dois lados).
 vi.mock('../api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client')>()
-  return { ...actual, api: { ...actual.api, post: vi.fn(), put: vi.fn(), del: vi.fn() } }
+  return { ...actual, api: { ...actual.api, get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn() } }
 })
 
 const mockPost = api.post as unknown as ReturnType<typeof vi.fn>
 const mockPut = api.put as unknown as ReturnType<typeof vi.fn>
 const mockDel = api.del as unknown as ReturnType<typeof vi.fn>
+const mockGet = api.get as unknown as ReturnType<typeof vi.fn>
+
+/** O que `GET /api/funcionarios/opcoes` devolve — id e nome, nada mais. */
+const OPCOES = [
+  { id: 'f-1', nome: 'Ana Souza' },
+  { id: 'f-2', nome: 'João da Silva' },
+]
 
 const produtos: Produto[] = [
   { id: 'pr-1', nome: 'Batata', un: 'KG', peso_medio: 0 },
@@ -29,16 +36,25 @@ const fornecedorExistente: Fornecedor = {
   produtos: [produtos[0]],
 }
 
+// `papel="admin"` em todos os casos abaixo: eles descrevem o formulario
+// SEM os campos de declaracao de autoria — que e exatamente o formulario do
+// admin (o login dele e individual, o sistema ja sabe quem e). O que o
+// colaborador ve, e o que ele nao consegue salvar sem preencher, esta no
+// bloco proprio no fim deste arquivo.
+
 beforeEach(() => {
   mockPost.mockReset()
   mockPut.mockReset()
   mockDel.mockReset()
+  mockGet.mockReset()
+  // Todo teste ganha a lista carregada; quem precisar de falha sobrescreve.
+  mockGet.mockResolvedValue(OPCOES)
 })
 
 describe('ModalFornecedor — criação (valores padrão)', () => {
   it('mostra os campos vazios ao criar', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -53,7 +69,7 @@ describe('ModalFornecedor — criação (valores padrão)', () => {
 
   it('nenhum produto vem selecionado ao criar', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -67,7 +83,7 @@ describe('ModalFornecedor — criação (valores padrão)', () => {
 
   it('foca o campo nome ao abrir', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -80,7 +96,7 @@ describe('ModalFornecedor — criação (valores padrão)', () => {
 
   it('titulo do dialogo indica criacao', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -93,7 +109,7 @@ describe('ModalFornecedor — criação (valores padrão)', () => {
 
   it('nao mostra o botao Excluir ao criar', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -106,7 +122,7 @@ describe('ModalFornecedor — criação (valores padrão)', () => {
 
   it('avisa quando nao ha produtos cadastrados para vincular', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={[]}
         onSalvo={() => {}}
@@ -121,7 +137,7 @@ describe('ModalFornecedor — criação (valores padrão)', () => {
 describe('ModalFornecedor — validação de nome', () => {
   it('nome vazio: mostra erro e nao chama a API', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -136,7 +152,7 @@ describe('ModalFornecedor — validação de nome', () => {
 
   it('form tem noValidate e o campo nome mantem required', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -153,7 +169,7 @@ describe('ModalFornecedor — validação de nome', () => {
 describe('ModalFornecedor — seleção de produtos', () => {
   it('clicar num produto marca como selecionado e atualiza a contagem', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -168,7 +184,7 @@ describe('ModalFornecedor — seleção de produtos', () => {
 
   it('clicar de novo desmarca', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={fornecedorExistente}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -188,7 +204,7 @@ describe('ModalFornecedor — envio ao criar', () => {
     mockPost.mockResolvedValue({ ...fornecedorExistente, id: 'novo-1', nome: 'Sitio Verde', produtos: [] })
     const onSalvo = vi.fn()
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={onSalvo}
@@ -209,7 +225,7 @@ describe('ModalFornecedor — envio ao criar', () => {
     mockPut.mockResolvedValue({ ...criado, produtos: [produtos[0]] })
     const onSalvo = vi.fn()
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={onSalvo}
@@ -230,7 +246,7 @@ describe('ModalFornecedor — 409 (nome duplicado)', () => {
   it('mostra o erro no campo nome, nao como erro generico', async () => {
     mockPost.mockRejectedValue(new ErroApi(409, { erro: 'ja existe um fornecedor com esse nome' }))
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -251,7 +267,7 @@ describe('ModalFornecedor — outros erros', () => {
   it('erro != 409/401 mostra mensagem generica', async () => {
     mockPost.mockRejectedValue(new Error('falha de rede'))
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -269,7 +285,7 @@ describe('ModalFornecedor — outros erros', () => {
     mockPost.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -288,7 +304,7 @@ describe('ModalFornecedor — outros erros', () => {
 describe('ModalFornecedor — edição', () => {
   it('preenche os campos e pre-seleciona os produtos vinculados', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={fornecedorExistente}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -305,7 +321,7 @@ describe('ModalFornecedor — edição', () => {
 
   it('titulo do dialogo indica edicao', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={fornecedorExistente}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -319,7 +335,7 @@ describe('ModalFornecedor — edição', () => {
   it('usa PUT com o id do fornecedor e o produto_ids atualizado ao salvar', async () => {
     mockPut.mockResolvedValue(fornecedorExistente)
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={fornecedorExistente}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -345,7 +361,7 @@ describe('ModalFornecedor — fechar', () => {
   it('clicar no fundo (overlay) fecha o modal', () => {
     const onFechar = vi.fn()
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -360,7 +376,7 @@ describe('ModalFornecedor — fechar', () => {
   it('clicar dentro do formulario nao fecha o modal', () => {
     const onFechar = vi.fn()
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -375,7 +391,7 @@ describe('ModalFornecedor — fechar', () => {
   it('clicar em Cancelar fecha o modal', () => {
     const onFechar = vi.fn()
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={null}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -391,7 +407,7 @@ describe('ModalFornecedor — fechar', () => {
 describe('ModalFornecedor — exclusão pede confirmação', () => {
   it('clicar em Excluir nao chama a API imediatamente — mostra confirmacao', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={fornecedorExistente}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -406,7 +422,7 @@ describe('ModalFornecedor — exclusão pede confirmação', () => {
 
   it('cancelar a confirmacao nao chama a API e some com o aviso', () => {
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={fornecedorExistente}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -424,7 +440,7 @@ describe('ModalFornecedor — exclusão pede confirmação', () => {
     mockDel.mockResolvedValue({ ok: true })
     const onExcluido = vi.fn()
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={fornecedorExistente}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -442,7 +458,7 @@ describe('ModalFornecedor — exclusão pede confirmação', () => {
     mockDel.mockRejectedValue(new Error('falha'))
     const onExcluido = vi.fn()
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={fornecedorExistente}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -460,7 +476,7 @@ describe('ModalFornecedor — exclusão pede confirmação', () => {
     mockDel.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()
     render(
-      <ModalFornecedor podeExcluir
+      <ModalFornecedor papel="admin" podeExcluir
         fornecedor={fornecedorExistente}
         produtosDisponiveis={produtos}
         onSalvo={() => {}}
@@ -485,7 +501,7 @@ describe('ModalFornecedor — botao Excluir por permissao', () => {
 
   it('sem permissao, editando: nao ha botao Excluir', () => {
     render(
-      <ModalFornecedor
+      <ModalFornecedor papel="admin"
         podeExcluir={false}
         fornecedor={existente}
         produtosDisponiveis={[]}
@@ -500,7 +516,7 @@ describe('ModalFornecedor — botao Excluir por permissao', () => {
 
   it('com permissao, editando: o botao Excluir aparece', () => {
     render(
-      <ModalFornecedor
+      <ModalFornecedor papel="admin"
         podeExcluir
         fornecedor={existente}
         produtosDisponiveis={[]}
@@ -514,7 +530,7 @@ describe('ModalFornecedor — botao Excluir por permissao', () => {
 
   it('criando, nem com permissao ha Excluir (nao ha o que apagar ainda)', () => {
     render(
-      <ModalFornecedor
+      <ModalFornecedor papel="admin"
         podeExcluir
         fornecedor={null}
         produtosDisponiveis={[]}
@@ -524,5 +540,129 @@ describe('ModalFornecedor — botao Excluir por permissao', () => {
       />,
     )
     expect(screen.queryByRole('button', { name: 'Excluir' })).not.toBeInTheDocument()
+  })
+})
+
+// Declaração de autoria — raciocínio em ModalCliente.test.tsx. O caso próprio
+// daqui é o SEGUNDO PUT (o que vincula os produtos depois do POST): para o
+// servidor ele é um PUT como qualquer outro e também exige declaração.
+
+describe('ModalFornecedor — declaração de autoria (colaborador)', () => {
+  it('mostra os dois campos, e o de quem é abre vazio', async () => {
+    render(
+      <ModalFornecedor papel="colaborador" podeExcluir={false}
+        fornecedor={null}
+        produtosDisponiveis={produtos}
+        onSalvo={() => {}}
+        onExcluido={() => {}}
+        onFechar={() => {}}
+      />,
+    )
+    expect(await screen.findByLabelText(/quem está fazendo esta alteração/i)).toHaveValue('')
+    expect(screen.getByLabelText(/motivo da alteração/i)).toHaveValue('')
+  })
+
+  it('salvar sem escolher quem é: bloqueado', async () => {
+    render(
+      <ModalFornecedor papel="colaborador" podeExcluir={false}
+        fornecedor={null}
+        produtosDisponiveis={produtos}
+        onSalvo={() => {}}
+        onExcluido={() => {}}
+        onFechar={() => {}}
+      />,
+    )
+    await screen.findByRole('option', { name: 'Ana Souza' })
+    fireEvent.change(screen.getByLabelText(/nome do produtor/i), { target: { value: 'Sitio X' } })
+    fireEvent.change(screen.getByLabelText(/motivo da alteração/i), { target: { value: 'produtor novo' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Escolha quem está fazendo esta alteração.')
+    expect(mockPost).not.toHaveBeenCalled()
+  })
+
+  it('salvar sem motivo: bloqueado', async () => {
+    render(
+      <ModalFornecedor papel="colaborador" podeExcluir={false}
+        fornecedor={null}
+        produtosDisponiveis={produtos}
+        onSalvo={() => {}}
+        onExcluido={() => {}}
+        onFechar={() => {}}
+      />,
+    )
+    await screen.findByRole('option', { name: 'Ana Souza' })
+    fireEvent.change(screen.getByLabelText(/nome do produtor/i), { target: { value: 'Sitio X' } })
+    fireEvent.change(screen.getByLabelText(/quem está fazendo esta alteração/i), { target: { value: 'f-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Informe o motivo da alteração.')
+    expect(mockPost).not.toHaveBeenCalled()
+  })
+
+  it('a declaração vai TAMBÉM no PUT que vincula os produtos depois do POST', async () => {
+    // Sem isso o fornecedor seria criado e o vínculo dos produtos morreria num
+    // 400 do servidor — o colaborador voltaria da feira com o produtor
+    // cadastrado e sem nada do que ele entrega.
+    mockPost.mockResolvedValue({ id: 'forn-9', nome: 'Sitio X' })
+    mockPut.mockResolvedValue({ id: 'forn-9', nome: 'Sitio X', produtos: [] })
+    render(
+      <ModalFornecedor papel="colaborador" podeExcluir={false}
+        fornecedor={null}
+        produtosDisponiveis={produtos}
+        onSalvo={() => {}}
+        onExcluido={() => {}}
+        onFechar={() => {}}
+      />,
+    )
+    await screen.findByRole('option', { name: 'Ana Souza' })
+    fireEvent.change(screen.getByLabelText(/nome do produtor/i), { target: { value: 'Sitio X' } })
+    fireEvent.change(screen.getByLabelText(/quem está fazendo esta alteração/i), { target: { value: 'f-1' } })
+    fireEvent.change(screen.getByLabelText(/motivo da alteração/i), { target: { value: 'produtor novo da feira' } })
+    fireEvent.click(screen.getByRole('button', { name: /batata/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    await waitFor(() => expect(mockPut).toHaveBeenCalled())
+    expect(mockPost.mock.calls[0][1]).toMatchObject({ declarado_por: 'f-1', motivo: 'produtor novo da feira' })
+    expect(mockPut.mock.calls[0][1]).toMatchObject({ declarado_por: 'f-1', motivo: 'produtor novo da feira' })
+  })
+})
+
+describe('ModalFornecedor — admin e histórico', () => {
+  it('admin não vê os dois campos', () => {
+    render(
+      <ModalFornecedor papel="admin" podeExcluir
+        fornecedor={null}
+        produtosDisponiveis={produtos}
+        onSalvo={() => {}}
+        onExcluido={() => {}}
+        onFechar={() => {}}
+      />,
+    )
+    expect(screen.queryByLabelText(/quem está fazendo esta alteração/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/motivo da alteração/i)).not.toBeInTheDocument()
+  })
+
+  it('histórico aparece para admin ao editar, e não para o colaborador', () => {
+    const { unmount } = render(
+      <ModalFornecedor papel="admin" podeExcluir
+        fornecedor={fornecedorExistente}
+        produtosDisponiveis={produtos}
+        onSalvo={() => {}}
+        onExcluido={() => {}}
+        onFechar={() => {}}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /histórico de alterações/i })).toBeInTheDocument()
+    unmount()
+
+    render(
+      <ModalFornecedor papel="colaborador" podeExcluir={false}
+        fornecedor={fornecedorExistente}
+        produtosDisponiveis={produtos}
+        onSalvo={() => {}}
+        onExcluido={() => {}}
+        onFechar={() => {}}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /histórico de alterações/i })).not.toBeInTheDocument()
   })
 })

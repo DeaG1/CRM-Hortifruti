@@ -1,20 +1,52 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react'
 import { api, ErroApi } from '../api/client'
 import { CLIENTE_NOVO, type Cliente } from '../derive/clientes'
+import { DeclaracaoDeAutoria } from './DeclaracaoDeAutoria'
+import { HistoricoCadastro } from './HistoricoCadastro'
+import { podeVerHistoricoCadastro, precisaDeclararAutoria, type Papel } from '../telas'
 import './ModalCliente.css'
 
 type Rascunho = typeof CLIENTE_NOVO
 
 interface ModalClienteProps {
   cliente: Partial<Cliente> | null // null = criando
+  /**
+   * Quem está salvando. O modal NÃO decide nada a partir disto por conta
+   * própria: chama `precisaDeclararAutoria` e `podeVerHistoricoCadastro`
+   * (web/src/telas.ts), que são as funções puras onde a regra de papel mora e
+   * são testadas à parte. Nenhum `papel === 'admin'` no JSX.
+   *
+   * Por que o papel inteiro e não dois booleanos, como o `podeExcluir` de
+   * ModalProduto: ali é UMA decisão sobre UM botão, e o modal realmente não
+   * precisa saber mais. Aqui o papel muda três coisas independentes — se os
+   * campos de declaração aparecem, se o histórico aparece, e a REDAÇÃO do que
+   * é dito sobre autoria. Enfiar isso em três props booleanas espalharia a
+   * mesma decisão por todos os pontos de uso em vez de concentrá-la em
+   * telas.ts.
+   *
+   * Sem valor padrão de propósito: um default esconderia os campos de
+   * declaração para quem esquecesse de informar o papel, e um formulário que
+   * não pede a declaração é um formulário que só descobre o problema no 400
+   * do servidor.
+   */
+  papel: Papel
   onSalvo: (c: Cliente) => void
   onFechar: () => void
   /** Sessão expirou (401 da API) — volta ao login em vez de mostrar erro de salvar. */
   onSessaoExpirada?: () => void
 }
 
-export function ModalCliente({ cliente, onSalvo, onFechar, onSessaoExpirada }: ModalClienteProps) {
+export function ModalCliente({ cliente, papel, onSalvo, onFechar, onSessaoExpirada }: ModalClienteProps) {
+  const declara = precisaDeclararAutoria(papel)
+  const veHistorico = podeVerHistoricoCadastro(papel)
   const [rascunho, setRascunho] = useState<Rascunho>({ ...CLIENTE_NOVO, ...(cliente ?? {}) })
+  // COMEÇA VAZIO, e é o ponto inteiro do campo: abrir com um nome já
+  // escolhido faria todo mundo aceitar o que está lá e o registro viraria
+  // ficção. Precisa ser escolha ativa.
+  const [autorId, setAutorId] = useState('')
+  const [motivoDeclarado, setMotivoDeclarado] = useState('')
+  const [erroAutor, setErroAutor] = useState('')
+  const [erroMotivo, setErroMotivo] = useState('')
   const [erroNome, setErroNome] = useState('')
   const [erroLimite, setErroLimite] = useState('')
   const [erroPrazo, setErroPrazo] = useState('')
@@ -38,9 +70,26 @@ export function ModalCliente({ cliente, onSalvo, onFechar, onSessaoExpirada }: M
     setErroLimite('')
     setErroPrazo('')
     setErroGeral('')
+    setErroAutor('')
+    setErroMotivo('')
     if (!rascunho.nome.trim()) {
       setErroNome('Informe o nome.')
       return
+    }
+    // A declaração é cobrada aqui para o erro aparecer NA HORA. Quem recusa
+    // de verdade é o servidor (400 sem autor ou motivo, quando a sessão é de
+    // colaborador) — sem aquela metade, isto seria teatro.
+    if (declara) {
+      let faltou = false
+      if (!autorId) {
+        setErroAutor('Escolha quem está fazendo esta alteração.')
+        faltou = true
+      }
+      if (!motivoDeclarado.trim()) {
+        setErroMotivo('Informe o motivo da alteração.')
+        faltou = true
+      }
+      if (faltou) return
     }
     // `min="0"` no input e so UX (o navegador nao bloqueia mais o submit —
     // ver `noValidate` no form). Esta e a validacao que decide se o pedido
@@ -63,6 +112,11 @@ export function ModalCliente({ cliente, onSalvo, onFechar, onSessaoExpirada }: M
         ...rascunho,
         limite: limiteNum || 0,
         prazo: prazoNum || 0,
+        // Só quando o papel declara. O admin não manda nada, e se mandasse o
+        // servidor ignoraria: o login dele é individual e atribuir a
+        // alteração a um funcionário seria justamente o registro que este
+        // histórico existe para não produzir.
+        ...(declara ? { declarado_por: autorId, motivo: motivoDeclarado.trim() } : {}),
       }
       const salvo = editando
         ? await api.put<Cliente>(`/api/clientes/${cliente!.id}`, corpo)
@@ -213,6 +267,28 @@ export function ModalCliente({ cliente, onSalvo, onFechar, onSessaoExpirada }: M
               automaticamente a partir dos pedidos do cliente.
             </div>
           </div>
+
+          {declara && (
+            <DeclaracaoDeAutoria
+              autorId={autorId}
+              onAutorId={setAutorId}
+              motivo={motivoDeclarado}
+              onMotivo={setMotivoDeclarado}
+              erroAutor={erroAutor}
+              erroMotivo={erroMotivo}
+              onSessaoExpirada={onSessaoExpirada}
+            />
+          )}
+
+          {/* Só ao EDITAR: um cadastro que ainda não existe não tem histórico
+              (e não tem id para pedir). */}
+          {veHistorico && editando && (
+            <HistoricoCadastro
+              entidade="cliente"
+              registroId={cliente!.id as string}
+              onSessaoExpirada={onSessaoExpirada}
+            />
+          )}
 
           {erroGeral && <p className="modal-erro modal-erro-geral" role="alert">{erroGeral}</p>}
         </div>

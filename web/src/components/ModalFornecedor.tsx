@@ -2,6 +2,9 @@ import { useState, type ChangeEvent, type FormEvent } from 'react'
 import { api, ErroApi } from '../api/client'
 import { FORNECEDOR_NOVO, type Fornecedor } from '../derive/fornecedores'
 import type { Produto } from '../derive/produtos'
+import { DeclaracaoDeAutoria } from './DeclaracaoDeAutoria'
+import { HistoricoCadastro } from './HistoricoCadastro'
+import { podeVerHistoricoCadastro, precisaDeclararAutoria, type Papel } from '../telas'
 import './ModalFornecedor.css'
 
 type Rascunho = typeof FORNECEDOR_NOVO
@@ -18,6 +21,13 @@ interface ModalFornecedorProps {
    * ponto de uso conseguir esquecer de decidir.
    */
   podeExcluir: boolean
+  /**
+   * Quem está salvando — mesma justificativa de ModalProduto: o papel entra
+   * inteiro porque muda três coisas independentes, e quem decide continua
+   * sendo `precisaDeclararAutoria` / `podeVerHistoricoCadastro`
+   * (web/src/telas.ts). Sem default.
+   */
+  papel: Papel
   onSalvo: (f: Fornecedor) => void
   /** Exclusão confirmada e concluída na API — quem chama decide o que fazer (fechar, recarregar a lista). */
   onExcluido: (id: string) => void
@@ -28,11 +38,18 @@ interface ModalFornecedorProps {
 
 export function ModalFornecedor(
   {
-    fornecedor, produtosDisponiveis, podeExcluir,
+    fornecedor, produtosDisponiveis, podeExcluir, papel,
     onSalvo, onExcluido, onFechar, onSessaoExpirada,
   }: ModalFornecedorProps,
 ) {
+  const declara = precisaDeclararAutoria(papel)
+  const veHistorico = podeVerHistoricoCadastro(papel)
   const [rascunho, setRascunho] = useState<Rascunho>({ ...FORNECEDOR_NOVO, ...(fornecedor ?? {}) })
+  // Começa vazio: escolha ativa, nunca um nome pré-selecionado.
+  const [autorId, setAutorId] = useState('')
+  const [motivoDeclarado, setMotivoDeclarado] = useState('')
+  const [erroAutor, setErroAutor] = useState('')
+  const [erroMotivo, setErroMotivo] = useState('')
   const [produtoIds, setProdutoIds] = useState<string[]>((fornecedor?.produtos ?? []).map(p => p.id))
   const [erroNome, setErroNome] = useState('')
   const [erroGeral, setErroGeral] = useState('')
@@ -60,13 +77,35 @@ export function ModalFornecedor(
     e.preventDefault()
     setErroNome('')
     setErroGeral('')
+    setErroAutor('')
+    setErroMotivo('')
     if (!rascunho.nome.trim()) {
       setErroNome('Informe o nome.')
       return
     }
+    // Erro na hora em vez de erro depois. Quem RECUSA e o servidor (400 sem
+    // autor ou motivo, quando a sessao e de colaborador).
+    if (declara) {
+      let faltou = false
+      if (!autorId) {
+        setErroAutor('Escolha quem está fazendo esta alteração.')
+        faltou = true
+      }
+      if (!motivoDeclarado.trim()) {
+        setErroMotivo('Informe o motivo da alteração.')
+        faltou = true
+      }
+      if (faltou) return
+    }
     setSalvando(true)
     try {
-      const corpo = { nome: rascunho.nome, regiao: rascunho.regiao, contato: rascunho.contato }
+      const declaracao = declara
+        ? { declarado_por: autorId, motivo: motivoDeclarado.trim() }
+        : {}
+      const corpo = {
+        nome: rascunho.nome, regiao: rascunho.regiao, contato: rascunho.contato,
+        ...declaracao,
+      }
       if (editando) {
         const salvo = await api.put<Fornecedor>(`/api/fornecedores/${fornecedor!.id}`, { ...corpo, produto_ids: produtoIds })
         onSalvo(salvo)
@@ -81,7 +120,12 @@ export function ModalFornecedor(
         return
       }
       try {
-        const comProdutos = await api.put<Fornecedor>(`/api/fornecedores/${criado.id}`, { produto_ids: produtoIds })
+        // A declaração vai TAMBÉM nesta segunda chamada: para o servidor ela
+        // é um PUT como qualquer outro, e sem autor e motivo ele recusa com
+        // 400 — o fornecedor ficaria criado e sem os produtos vinculados.
+        const comProdutos = await api.put<Fornecedor>(
+          `/api/fornecedores/${criado.id}`, { produto_ids: produtoIds, ...declaracao },
+        )
         onSalvo(comProdutos)
       } catch (errVinculo) {
         if (errVinculo instanceof ErroApi && errVinculo.status === 401) {
@@ -207,6 +251,28 @@ export function ModalFornecedor(
                   são calculados automaticamente a partir das entradas (compras) deste fornecedor.
                 </div>
               </div>
+
+              {declara && (
+                <DeclaracaoDeAutoria
+                  autorId={autorId}
+                  onAutorId={setAutorId}
+                  motivo={motivoDeclarado}
+                  onMotivo={setMotivoDeclarado}
+                  erroAutor={erroAutor}
+                  erroMotivo={erroMotivo}
+                  onSessaoExpirada={onSessaoExpirada}
+                />
+              )}
+
+              {/* Só ao EDITAR: cadastro que ainda não existe não tem
+                  histórico (nem id para pedir). */}
+              {veHistorico && editando && (
+                <HistoricoCadastro
+                  entidade="fornecedor"
+                  registroId={fornecedor!.id as string}
+                  onSessaoExpirada={onSessaoExpirada}
+                />
+              )}
 
               {erroGeral && <p className="modal-erro modal-erro-geral" role="alert">{erroGeral}</p>}
             </>

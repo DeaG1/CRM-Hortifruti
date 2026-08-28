@@ -8,6 +8,7 @@ import { type Produto } from '../derive/produtos'
 import { type EntradaResumo } from '../derive/relatorios'
 import { ModalFornecedor } from '../components/ModalFornecedor'
 import { intervaloDoPeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
+import { podeVerMetricasDeCadastro, podeExcluirCadastro, type Papel } from '../telas'
 import './FornecedoresLista.css'
 
 const GREEN = '#3f8f5b'
@@ -120,6 +121,15 @@ const METRICAS_SEM_ENTRADAS: MetricasFornecedor = {
 
 interface FornecedoresListaProps {
   /**
+   * Quem está olhando. O colaborador vê e edita o CADASTRO (nome, região,
+   * contato, produtos que entrega) e não vê as quatro métricas — preço médio
+   * de compra, variação, aproveitamento e última coleta —, nem o botão de
+   * excluir. Quem decide é `podeVerMetricasDeCadastro`/`podeExcluirCadastro`
+   * (telas.ts); esta tela só exibe. Sem default: um valor padrão seria
+   * fail-open.
+   */
+  papel: Papel
+  /**
    * Período global do cabeçalho (App.tsx, achado S-3). O CADASTRO não some
    * com ele — um fornecedor não deixa de existir porque não houve coleta em
    * julho. O que respeita o recorte são as quatro métricas derivadas (última
@@ -138,7 +148,11 @@ interface FornecedoresListaProps {
  * detalhe de cada fornecedor em paralelo para poder mostrar "produtos que
  * entrega" na tabela sem uma segunda tela.
  */
-export function FornecedoresLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: FornecedoresListaProps) {
+export function FornecedoresLista(
+  { papel, periodo = PERIODO_TODOS, onSessaoExpirada }: FornecedoresListaProps,
+) {
+  const verMetricas = podeVerMetricasDeCadastro(papel)
+  const podeExcluir = podeExcluirCadastro(papel)
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([])
   const [produtosDisponiveis, setProdutosDisponiveis] = useState<Produto[]>([])
   const [carregando, setCarregando] = useState(true)
@@ -153,10 +167,15 @@ export function FornecedoresLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
   // travessão e o aviso `role="status"` abaixo. Mesmo padrão de ClientesLista
   // sobre /api/saidas e de ProdutosLista sobre /api/relatorios/produtos.
   //
-  // Permissão: GET /api/entradas exige só sessão (entradas é tela de
-  // colaborador, ver ADMIN_ONLY_SCREENS em web/src/telas.ts e o comentário em
-  // api/src/routes/entradas.ts), enquanto Fornecedores é tela admin-only —
-  // quem enxerga esta tela já pode ler as entradas, nada foi afrouxado.
+  // Permissão — e aqui está a parte honesta desta tela. `GET /api/entradas`
+  // exige só sessão (Entradas é tela do colaborador, ver o comentário em
+  // api/src/routes/entradas.ts), então as quatro métricas daqui NÃO são
+  // protegíveis por permissão: quem lança coleta pode somar essas coletas por
+  // fora. O dono sabe e aceitou. O que não pode acontecer é esta tela
+  // ENTREGAR o agregado pronto — por isso, com `verMetricas` falso, o efeito
+  // abaixo nem busca (`return` antes do `api.get`) e os quatro campos não são
+  // renderizados. Chamar isto de segurança seria teatro; é apresentação, e
+  // está escrito assim em `podeVerMetricasDeCadastro` (telas.ts).
   //
   // A busca traz a base inteira e o recorte é aplicado em memória por
   // `derivarFornecedores` (que já recebia de/ate por parâmetro): trocar o
@@ -193,6 +212,7 @@ export function FornecedoresLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
   }, [onSessaoExpirada, versao])
 
   useEffect(() => {
+    if (!verMetricas) return
     let cancelado = false
     api.get<EntradaResumo[]>('/api/entradas')
       .then(es => { if (!cancelado) setEntradas(es) })
@@ -208,7 +228,7 @@ export function FornecedoresLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
         )
       })
     return () => { cancelado = true }
-  }, [onSessaoExpirada, versao])
+  }, [onSessaoExpirada, versao, verMetricas])
 
   function aoSalvar() {
     setModal(undefined)
@@ -246,6 +266,7 @@ export function FornecedoresLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
           <ModalFornecedor
             fornecedor={modal}
             produtosDisponiveis={produtosDisponiveis}
+            podeExcluir={podeExcluir}
             onSalvo={aoSalvar}
             onExcluido={aoExcluir}
             onFechar={() => setModal(undefined)}
@@ -270,9 +291,18 @@ export function FornecedoresLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
     <div className="fornecedores-lista">
       <div className="fornecedores-topo">
         <div className="fornecedores-dica">
-          Clique num fornecedor para editar · preço, variação e aproveitamento vêm das{' '}
-          <strong>coletas lançadas em Entradas</strong> em{' '}
-          <strong>{rotuloPeriodo(periodo)}</strong> · o cadastro aparece inteiro, independente do período
+          {/* Sem as métricas na tela, a explicação de onde elas vêm falaria de
+              números que não estão ali. Sobra a parte que continua verdadeira. */}
+          {verMetricas
+            ? (
+              <>
+                Clique num fornecedor para editar · preço, variação e aproveitamento vêm das{' '}
+                <strong>coletas lançadas em Entradas</strong> em{' '}
+                <strong>{rotuloPeriodo(periodo)}</strong> · o cadastro aparece inteiro, independente do
+                período
+              </>
+            )
+            : 'Clique num fornecedor para editar'}
         </div>
         <button type="button" className="fornecedores-botao-novo" onClick={() => setModal(null)}>
           ＋ Novo fornecedor
@@ -305,6 +335,7 @@ export function FornecedoresLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
                   : <span className="fornecedores-produto-vazio">Nenhum produto vinculado</span>}
               </div>
 
+              {verMetricas && (
               <div className="fornecedores-metricas">
                 <div>
                   <div className="fornecedores-metrica-label">Preço médio</div>
@@ -355,12 +386,13 @@ export function FornecedoresLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
                   </div>
                 </div>
               </div>
+              )}
             </div>
           )
         })}
       </div>
 
-      {resumo.itensSemConversao > 0 && (
+      {verMetricas && resumo.itensSemConversao > 0 && (
         // Redação própria (não o `title` da célula, que fala "deste
         // fornecedor"): a nota fala do total da tela.
         <div className="fornecedores-nota fornecedores-nota--incompleto" role="note">
@@ -377,6 +409,7 @@ export function FornecedoresLista({ periodo = PERIODO_TODOS, onSessaoExpirada }:
         <ModalFornecedor
           fornecedor={modal}
           produtosDisponiveis={produtosDisponiveis}
+          podeExcluir={podeExcluir}
           onSalvo={aoSalvar}
           onExcluido={aoExcluir}
           onFechar={() => setModal(undefined)}

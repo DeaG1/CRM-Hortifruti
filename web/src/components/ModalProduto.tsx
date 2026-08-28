@@ -7,6 +7,20 @@ type Rascunho = typeof PRODUTO_NOVO
 
 interface ModalProdutoProps {
   produto: Partial<Produto> | null // null = criando
+  /**
+   * Mostra ou não o botão "Excluir". Vem de `podeExcluirCadastro`
+   * (web/src/telas.ts) através de ProdutosLista — o modal não conhece papel,
+   * só a resposta: criar e editar são de todo mundo, excluir é do admin.
+   *
+   * Esconder o botão é cortesia, não segurança: `DELETE /api/produtos/:id`
+   * exige admin (api/src/routes/produtos.ts) e responde 403 a colaborador
+   * venha o pedido de onde vier. O que o botão escondido evita é oferecer uma
+   * ação que vai falhar.
+   *
+   * Sem valor padrão de propósito — um default `true` faria o botão aparecer
+   * em qualquer ponto de uso que esquecesse de decidir.
+   */
+  podeExcluir: boolean
   onSalvo: (p: Produto) => void
   /** Exclusão confirmada e concluída na API — quem chama decide o que fazer (fechar, recarregar a lista). */
   onExcluido: (id: string) => void
@@ -15,7 +29,9 @@ interface ModalProdutoProps {
   onSessaoExpirada?: () => void
 }
 
-export function ModalProduto({ produto, onSalvo, onExcluido, onFechar, onSessaoExpirada }: ModalProdutoProps) {
+export function ModalProduto(
+  { produto, podeExcluir, onSalvo, onExcluido, onFechar, onSessaoExpirada }: ModalProdutoProps,
+) {
   const [rascunho, setRascunho] = useState<Rascunho>({ ...PRODUTO_NOVO, ...(produto ?? {}) })
   const [erroNome, setErroNome] = useState('')
   const [erroPesoMedio, setErroPesoMedio] = useState('')
@@ -172,7 +188,7 @@ export function ModalProduto({ produto, onSalvo, onExcluido, onFechar, onSessaoE
         </div>
 
         <div className="modal-rodape">
-          {editando && !confirmandoExclusao && (
+          {editando && podeExcluir && !confirmandoExclusao && (
             <button type="button" className="modal-botao-excluir" onClick={() => setConfirmandoExclusao(true)}>
               Excluir
             </button>

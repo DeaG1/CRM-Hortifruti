@@ -21,6 +21,7 @@ import {
 } from '../derive/dashboard'
 import { rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import { situacaoExibidaSaida } from '../derive/pagamento'
+import { podeVerMetricasDeCadastro, podeExcluirCadastro, type Papel } from '../telas'
 import './ClienteFicha.css'
 
 const STATUS_LABEL: Record<StatusCliente, string> = {
@@ -205,6 +206,20 @@ function Metrica({ label, valor, sub, cor }: {
 interface ClienteFichaProps {
   id: string
   /**
+   * Quem está olhando — a ficha é a mesma história da lista: CADASTRO sim,
+   * MÉTRICA não. Para colaborador saem de cena o bloco "Métricas comerciais"
+   * (qtd, faturado, ticket, participação, última compra, inadimplência), o
+   * selo de HEALTH SCORE do cabeçalho, o bloco "Crédito & inadimplência"
+   * (limite de crédito, prazo, status de cobrança, taxa, histórico de
+   * atrasos) e "Pedidos recentes" — que é a matéria-prima dos números, pedido
+   * a pedido, com valor. Ficam o cabeçalho de identificação, "Cadastro &
+   * rota" e as observações do vendedor, que é o que ele precisa para atender.
+   *
+   * O botão "Excluir" também sai (`podeExcluirCadastro`); "Editar cliente"
+   * fica, porque editar passou a ser dos dois papéis.
+   */
+  papel: Papel
+  /**
    * Período global do cabeçalho (App.tsx, achado S-3) — o MESMO que
    * ClientesLista recebe, para o faturado, o ticket, a participação e a
    * inadimplência da ficha baterem com a linha da lista de onde o usuário
@@ -226,8 +241,10 @@ interface ClienteFichaProps {
 }
 
 export function ClienteFicha(
-  { id, periodo = PERIODO_TODOS, onVoltar, onEditar, onSessaoExpirada }: ClienteFichaProps,
+  { id, papel, periodo = PERIODO_TODOS, onVoltar, onEditar, onSessaoExpirada }: ClienteFichaProps,
 ) {
+  const verMetricas = podeVerMetricasDeCadastro(papel)
+  const podeExcluir = podeExcluirCadastro(papel)
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
@@ -271,7 +288,14 @@ export function ClienteFicha(
   // A lista vem inteira e o recorte de periodo e aplicado em memoria (mesma
   // decisao, e mesma nota de escala, de ClientesLista.tsx): trocar o mes no
   // cabecalho nao dispara uma ida ao servidor.
+  //
+  // COLABORADOR NAO BUSCA, pelo mesmo motivo (e com a mesma ressalva honesta)
+  // de ClientesLista: `GET /api/saidas` responde para ele, entao esconder
+  // faturado e inadimplencia aqui e apresentacao, nao permissao. Nada nesta
+  // tela usaria a resposta — os tres blocos que dependem dela nao sao
+  // renderizados —, entao pedi-la seria trafego a toa.
   useEffect(() => {
+    if (!verMetricas) return
     let cancelado = false
     api.get<SaidaBruta[]>('/api/saidas')
       .then(ss => { if (!cancelado) setSaidasBrutas(ss) })
@@ -284,7 +308,7 @@ export function ClienteFicha(
         setErroVendas('Não foi possível carregar as vendas — as métricas comerciais ficam indisponíveis.')
       })
     return () => { cancelado = true }
-  }, [id, onSessaoExpirada])
+  }, [id, onSessaoExpirada, verMetricas])
 
   async function excluir() {
     setErroExclusao('')
@@ -351,9 +375,14 @@ export function ClienteFicha(
         <button type="button" className="ficha-voltar" onClick={onVoltar}>← Voltar para lista</button>
         <div className="ficha-topo-spacer" />
         <button type="button" className="ficha-editar" onClick={() => onEditar(cliente)}>Editar cliente</button>
-        <button type="button" className="ficha-excluir" onClick={() => setConfirmandoExclusao(true)}>
-          Excluir
-        </button>
+        {/* Editar é dos dois papéis; excluir continua do admin, e a API
+            recusa o DELETE com 403 de qualquer jeito — o botão some para não
+            oferecer uma ação que vai falhar. */}
+        {podeExcluir && (
+          <button type="button" className="ficha-excluir" onClick={() => setConfirmandoExclusao(true)}>
+            Excluir
+          </button>
+        )}
       </div>
 
       {confirmandoExclusao && (
@@ -391,16 +420,27 @@ export function ClienteFicha(
           <div className="ficha-sub">{cliente.endereco || '—'}</div>
         </div>
         <div className="ficha-health">
-          <div className="ficha-health-rotulo">HEALTH SCORE</div>
-          <div className="ficha-health-badge" style={{ color: health.cor, background: health.bg }}>
-            <span className="ficha-health-dot" style={{ background: health.cor }} />
-            {derivado.tend} {health.label}
-          </div>
+          {verMetricas && (
+            <>
+              <div className="ficha-health-rotulo">HEALTH SCORE</div>
+              <div className="ficha-health-badge" style={{ color: health.cor, background: health.bg }}>
+                <span className="ficha-health-dot" style={{ background: health.cor }} />
+                {derivado.tend} {health.label}
+              </div>
+            </>
+          )}
+          {/* O status do cadastro (Ativo, Em negociação…) FICA para os dois:
+              é campo do formulário, não um score derivado — e é o que diz ao
+              colaborador se ainda se atende aquele estabelecimento. */}
           <div className="ficha-health-status">{statusLabel}</div>
         </div>
       </div>
 
-      <div className="ficha-grid">
+      {/* Para colaborador a coluna da esquerda inteira (métricas + pedidos
+          recentes) não é renderizada; `--cadastro` faz a grade virar uma
+          coluna só, em vez de deixar metade da tela vazia. */}
+      <div className={verMetricas ? 'ficha-grid' : 'ficha-grid ficha-grid--cadastro'}>
+        {verMetricas && (
         <div className="ficha-col">
           <div className="ficha-bloco">
             <h3 className="ficha-bloco-titulo">Métricas comerciais</h3>
@@ -517,6 +557,7 @@ export function ClienteFicha(
             )}
           </div>
         </div>
+        )}
 
         <div className="ficha-col">
           <div className="ficha-bloco">
@@ -543,6 +584,14 @@ export function ClienteFicha(
             </div>
           </div>
 
+          {/* Bloco inteiro fora para colaborador. `limite` e `prazo` são
+              colunas de `clientes` e chegam no GET que ele já lê (e o
+              formulário de cadastro continua editando os dois) — esconder o
+              limite de crédito AQUI é apresentação, não barreira, e está dito
+              assim em `podeVerMetricasDeCadastro` (telas.ts). Taxa, status de
+              cobrança e histórico de atrasos, esses são derivados das vendas
+              e nem chegam a ser calculados: `saidasBrutas` fica vazio. */}
+          {verMetricas && (
           <div className="ficha-bloco">
             <h3 className="ficha-bloco-titulo">Crédito &amp; inadimplência</h3>
             <div className="ficha-linha">
@@ -591,6 +640,7 @@ export function ClienteFicha(
               </span>
             </div>
           </div>
+          )}
 
           <div className="ficha-obs">
             <h3 className="ficha-obs-titulo">Observações do vendedor</h3>

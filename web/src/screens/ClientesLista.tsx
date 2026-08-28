@@ -3,6 +3,7 @@ import { api, ErroApi } from '../api/client'
 import { derivarClientes, type Cliente, type Pedido, type ClienteDerivado, type StatusCliente, type Health } from '../derive/clientes'
 import { PERIODO_TODOS, rotuloPeriodo, type Periodo } from '../derive/periodo'
 import { statusTicketEntrega, statusInadimplencia } from '../derive/dashboard'
+import { podeVerMetricasDeCadastro, type Papel } from '../telas'
 import './ClientesLista.css'
 
 const STATUS_LABEL: Record<StatusCliente, string> = {
@@ -114,6 +115,16 @@ function paraPedidos(saidasBrutas: SaidaBruta[], clientes: Cliente[]): Pedido[] 
 }
 
 interface ClientesListaProps {
+  /**
+   * Quem está olhando. O colaborador vê e edita o CADASTRO (estabelecimento,
+   * responsável, rota, frequência, status) e não vê as métricas da carteira —
+   * faturado, ticket por entrega, participação, inadimplência e health score.
+   * Decisão em `podeVerMetricasDeCadastro` (telas.ts); esta tela só exibe.
+   *
+   * Sem default de propósito: um valor padrão faria a tela mostrar o
+   * faturamento por cliente a quem esquecesse de informar o papel.
+   */
+  papel: Papel
   onAbrir: (id: string) => void
   /** Período global do cabeçalho (App.tsx). O CADASTRO nunca some com ele —
    * um cliente não desaparece da carteira porque não comprou em julho; o
@@ -124,7 +135,10 @@ interface ClientesListaProps {
   onSessaoExpirada?: () => void
 }
 
-export function ClientesLista({ onAbrir, periodo = PERIODO_TODOS, onSessaoExpirada }: ClientesListaProps) {
+export function ClientesLista(
+  { papel, onAbrir, periodo = PERIODO_TODOS, onSessaoExpirada }: ClientesListaProps,
+) {
+  const verMetricas = podeVerMetricasDeCadastro(papel)
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [saidasBrutas, setSaidasBrutas] = useState<SaidaBruta[]>([])
   const [filtro, setFiltro] = useState<Filtro>('Todos')
@@ -159,7 +173,15 @@ export function ClientesLista({ onAbrir, periodo = PERIODO_TODOS, onSessaoExpira
   // se o volume de saidas crescer a ponto de isso pesar (aproximando de
   // dezenas de milhares de linhas), a resposta e um endpoint agregado por
   // periodo, igual ao que ja existe para /api/relatorios/produtos.
+  //
+  // COLABORADOR NAO BUSCA. `GET /api/saidas` responde para ele — Saidas e
+  // tela dele —, entao faturado, ticket e inadimplencia nao sao protegiveis
+  // por permissao: quem lanca as vendas pode soma-las por fora, e o dono
+  // aceitou isso. O que esta tela nao faz e ENTREGAR o agregado pronto. Nao
+  // pedir o que nao vai mostrar e a consequencia disso, nao a protecao: sem
+  // as cinco colunas na tela, a requisicao seria trafego a toa.
   useEffect(() => {
+    if (!verMetricas) return
     let cancelado = false
     api.get<SaidaBruta[]>('/api/saidas')
       .then(ss => { if (!cancelado) setSaidasBrutas(ss) })
@@ -172,7 +194,7 @@ export function ClientesLista({ onAbrir, periodo = PERIODO_TODOS, onSessaoExpira
         setErroVendas('Não foi possível carregar as vendas do período — os números da carteira ficam indisponíveis.')
       })
     return () => { cancelado = true }
-  }, [onSessaoExpirada])
+  }, [onSessaoExpirada, verMetricas])
 
   const pedidos = paraPedidos(saidasBrutas, clientes)
   const derivados: ClienteDerivado[] = derivarClientes(clientes, pedidos, periodo, hojeIsoLocal())
@@ -203,10 +225,14 @@ export function ClientesLista({ onAbrir, periodo = PERIODO_TODOS, onSessaoExpira
       )}
 
       {/* Sem esta linha, um cliente inteiro em travessão pareceria cliente
-          sem venda nenhuma, quando é só o recorte escolhido no cabeçalho. */}
-      <p className="clientes-periodo-nota">
-        Cadastro completo · números da carteira: <strong>{rotuloPeriodo(periodo)}</strong>
-      </p>
+          sem venda nenhuma, quando é só o recorte escolhido no cabeçalho.
+          Para colaborador não há números da carteira na tela, então a nota
+          falaria de colunas que não existem ali. */}
+      {verMetricas && (
+        <p className="clientes-periodo-nota">
+          Cadastro completo · números da carteira: <strong>{rotuloPeriodo(periodo)}</strong>
+        </p>
+      )}
 
       <div className="clientes-filtros">
         {FILTROS.map(f => (
@@ -232,15 +258,22 @@ export function ClientesLista({ onAbrir, periodo = PERIODO_TODOS, onSessaoExpira
         <div className="clientes-dica">Clique numa linha para abrir a ficha</div>
       </div>
 
-      <div className="clientes-tabela">
+      {/* `--cadastro` reduz a grade de sete colunas para duas (ver
+          ClientesLista.css): sem as cinco de métrica, manter as faixas vazias
+          espremeria nome e rota no canto de uma tabela que parece quebrada. */}
+      <div className={verMetricas ? 'clientes-tabela' : 'clientes-tabela clientes-tabela--cadastro'}>
         <div className="clientes-linha clientes-linha--cabecalho">
           <div>ESTABELECIMENTO</div>
           <div>ROTA</div>
-          <div className="clientes-col-num">TICKET/MÊS</div>
-          <div className="clientes-col-num">/ENTREGA</div>
-          <div className="clientes-col-num">% FAT</div>
-          <div className="clientes-col-num">INADIMP.</div>
-          <div className="clientes-col-num">SAÚDE</div>
+          {verMetricas && (
+            <>
+              <div className="clientes-col-num">TICKET/MÊS</div>
+              <div className="clientes-col-num">/ENTREGA</div>
+              <div className="clientes-col-num">% FAT</div>
+              <div className="clientes-col-num">INADIMP.</div>
+              <div className="clientes-col-num">SAÚDE</div>
+            </>
+          )}
         </div>
 
         {visiveis.map(c => {
@@ -252,7 +285,13 @@ export function ClientesLista({ onAbrir, periodo = PERIODO_TODOS, onSessaoExpira
               onClick={() => onAbrir(c.id)}
             >
               <div className="clientes-celula-nome">
-                <span className="clientes-health-dot" style={{ background: health.cor }} />
+                {/* O ponto colorido É o health score em miniatura (mesma cor
+                    do selo da última coluna) — sai junto com ele, senão o
+                    colaborador leria "cliente em risco" sem a coluna que
+                    explica de onde vem. */}
+                {verMetricas && (
+                  <span className="clientes-health-dot" style={{ background: health.cor }} />
+                )}
                 <div className="clientes-nome-bloco">
                   <div className="clientes-nome">{c.nome}</div>
                   <div className="clientes-nome-sub">{c.resp} · {rotuloStatus(c.status)}</div>
@@ -262,28 +301,35 @@ export function ClientesLista({ onAbrir, periodo = PERIODO_TODOS, onSessaoExpira
                 {c.rota}
                 <div className="clientes-freq">{c.freq}</div>
               </div>
-              <div className="clientes-col-num clientes-mono">{c.faturado ? money(c.faturado) : '—'}</div>
-              <div className="clientes-col-num clientes-mono" style={{ color: corTicketEntrega(c.ticketEntrega) }}>
-                {c.ticketEntrega ? money(c.ticketEntrega) : '—'}
-              </div>
-              {/* Sem faturado no periodo (cliente sem venda, OU vendas
-                  indisponiveis por falha de /api/saidas), participacao e
-                  inadimplencia ficam em travessao — nao "0%"/"0,0%", que
-                  fingiria ser um dado real (0% de atraso de quem nao
-                  vendeu nada e diferente de 0% de atraso de quem vendeu e
-                  pagou tudo em dia). */}
-              <div className="clientes-col-num clientes-mono">{c.faturado ? `${c.participacao}%` : '—'}</div>
-              <div
-                className="clientes-col-num clientes-mono"
-                style={{ color: c.faturado ? corInadimplencia(c.inadimplencia) : NEUTRO }}
-              >
-                {c.faturado ? c.inadimplencia.toFixed(1).replace('.', ',') + '%' : '—'}
-              </div>
-              <div className="clientes-col-num">
-                <span className="clientes-health-badge" style={{ color: health.cor, background: health.bg }}>
-                  {c.tend} {health.label}
-                </span>
-              </div>
+              {verMetricas && (
+                <>
+                  <div className="clientes-col-num clientes-mono">{c.faturado ? money(c.faturado) : '—'}</div>
+                  <div
+                    className="clientes-col-num clientes-mono"
+                    style={{ color: corTicketEntrega(c.ticketEntrega) }}
+                  >
+                    {c.ticketEntrega ? money(c.ticketEntrega) : '—'}
+                  </div>
+                  {/* Sem faturado no periodo (cliente sem venda, OU vendas
+                      indisponiveis por falha de /api/saidas), participacao e
+                      inadimplencia ficam em travessao — nao "0%"/"0,0%", que
+                      fingiria ser um dado real (0% de atraso de quem nao
+                      vendeu nada e diferente de 0% de atraso de quem vendeu e
+                      pagou tudo em dia). */}
+                  <div className="clientes-col-num clientes-mono">{c.faturado ? `${c.participacao}%` : '—'}</div>
+                  <div
+                    className="clientes-col-num clientes-mono"
+                    style={{ color: c.faturado ? corInadimplencia(c.inadimplencia) : NEUTRO }}
+                  >
+                    {c.faturado ? c.inadimplencia.toFixed(1).replace('.', ',') + '%' : '—'}
+                  </div>
+                  <div className="clientes-col-num">
+                    <span className="clientes-health-badge" style={{ color: health.cor, background: health.bg }}>
+                      {c.tend} {health.label}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
           )
         })}

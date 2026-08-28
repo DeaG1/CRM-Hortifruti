@@ -104,21 +104,71 @@ describe('autorizacao', () => {
   // `clientes` em ADMIN_ONLY_SCREENS. Mas isso quebrava o colaborador: ele
   // lanca vendas, e nao existe venda sem escolher para quem — o modal de saida
   // abria sem conseguir preencher o seletor de cliente, e a tela a que ele tem
-  // direito ficava inutil. A restricao do design e sobre a TELA de carteira
-  // (ficha, limite de credito, inadimplencia), nao sobre consultar a lista.
+  // direito ficava inutil.
   it('colaborador LE clientes (precisa disso para lancar venda)', async () => {
     const res = await pedir('/api/clientes', comoColab())
     expect(res.status).toBe(200)
   })
 
-  it('colaborador NAO cria cliente', async () => {
+  // O colaborador PASSOU a poder criar e editar cliente (decisao do dono:
+  // quem atende o estabelecimento e quem descobre que o telefone mudou).
+  // `clientes` saiu de ADMIN_ONLY_SCREENS junto — ver o comentario da
+  // autorizacao em src/routes/clientes.ts.
+  it('colaborador CRIA cliente', async () => {
     const res = await pedir('/api/clientes', {
       ...comoColab(), method: 'POST',
       headers: { ...comoColab().headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ nome: 'Tentativa do colaborador' }),
+      body: JSON.stringify({ nome: 'Mercado do Colaborador' }),
     })
+    expect(res.status).toBe(201)
+    const corpo = await res.json() as { id: string; nome: string }
+    expect(corpo.nome).toBe('Mercado do Colaborador')
+    await admin`delete from clientes where id = ${corpo.id}`
+  })
+
+  it('colaborador EDITA cliente', async () => {
+    const criado = await pedir('/api/clientes', comoAdmin(json({ nome: 'Para o colaborador editar' })))
+    const { id } = await criado.json() as { id: string }
+
+    const res = await pedir(`/api/clientes/${id}`, {
+      ...comoColab(), method: 'PUT',
+      headers: { ...comoColab().headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ tel: '44 99999-0000' }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ tel: '44 99999-0000' })
+    await admin`delete from clientes where id = ${id}`
+  })
+
+  /**
+   * A assimetria que sobrou, e a que importa: cadastro errado se corrige
+   * editando, cadastro apagado leva junto o vinculo do historico sem erro
+   * nenhum (`saidas.cliente_id` e ON DELETE SET NULL). Esconder o botao na
+   * tela nao seria protecao — quem quisesse bastava chamar o endpoint. Este
+   * teste e o que prova que a recusa e do SERVIDOR.
+   */
+  it('colaborador NAO exclui cliente -> 403', async () => {
+    const criado = await pedir('/api/clientes', comoAdmin(json({ nome: 'Nao deve sumir' })))
+    const { id } = await criado.json() as { id: string }
+
+    const res = await pedir(`/api/clientes/${id}`, { ...comoColab(), method: 'DELETE' })
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ erro: 'sem permissao' })
+
+    // O 403 nao pode ser so a resposta: o registro tem que continuar la.
+    const [ainda] = await admin`select id from clientes where id = ${id}`
+    expect(ainda).toBeDefined()
+    await admin`delete from clientes where id = ${id}`
+  })
+
+  it('admin exclui cliente -> 200', async () => {
+    const criado = await pedir('/api/clientes', comoAdmin(json({ nome: 'Admin pode apagar' })))
+    const { id } = await criado.json() as { id: string }
+
+    const res = await pedir(`/api/clientes/${id}`, { ...comoAdmin(), method: 'DELETE' })
+    expect(res.status).toBe(200)
+    const [sumiu] = await admin`select id from clientes where id = ${id}`
+    expect(sumiu).toBeUndefined()
   })
 
   it('admin -> 200', async () => {

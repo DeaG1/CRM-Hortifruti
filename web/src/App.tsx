@@ -23,10 +23,12 @@ import { FinanceiroTela } from './screens/FinanceiroTela'
 import { RelatoriosTela } from './screens/RelatoriosTela'
 import type { Cliente } from './derive/clientes'
 import { PERIODO_TODOS, type Periodo } from './derive/periodo'
-// `Papel` deixou de ser importado aqui junto com a prop `papel` de
-// `Conteudo`: nenhuma tela recebe mais o papel (ver o comentario de
-// `Conteudo`). Quem decide por papel e o Shell, que importa o tipo por conta.
-import { ADMIN_ONLY_SCREENS, type Tela } from './telas'
+// `Papel` VOLTOU a ser importado aqui, junto com a prop `papel` de
+// `Conteudo`. Ele saiu quando VeiculosLista virou admin-only e nenhuma tela
+// precisava mais saber quem estava olhando; voltou porque Clientes, Produtos
+// e Fornecedores passaram a ser telas dos DOIS papeis, com conteudo
+// diferente em cada um (ver o comentario de `Conteudo`).
+import { ADMIN_ONLY_SCREENS, type Papel, type Tela } from './telas'
 
 /** Espelha o corpo de GET /api/eu (api/src/index.ts). */
 interface Eu {
@@ -83,7 +85,10 @@ type VisaoClientes = 'lista' | 'ficha'
  * fora de ClientesLista/ClienteFicha — os dois ficam sem estado de
  * navegacao entre si, so preocupados com a propria tela.
  */
-function ClientesModulo({ periodo, onSessaoExpirada }: { periodo: Periodo; onSessaoExpirada: () => void }) {
+function ClientesModulo(
+  { papel, periodo, onSessaoExpirada }:
+  { papel: Papel; periodo: Periodo; onSessaoExpirada: () => void },
+) {
   const [visao, setVisao] = useState<VisaoClientes>('lista')
   const [clienteId, setClienteId] = useState<string | null>(null)
   // undefined = modal fechado; null = criando; Cliente = editando (prefill)
@@ -119,6 +124,7 @@ function ClientesModulo({ periodo, onSessaoExpirada }: { periodo: Periodo; onSes
           <ClienteFicha
             key={`${clienteId}:${versao}`}
             id={clienteId}
+            papel={papel}
             periodo={periodo}
             onVoltar={voltarParaLista}
             onEditar={c => setModal(c)}
@@ -132,7 +138,13 @@ function ClientesModulo({ periodo, onSessaoExpirada }: { periodo: Periodo; onSes
                 <span style={{ fontSize: 16, lineHeight: 1 }}>＋</span> Novo cliente
               </button>
             </div>
-            <ClientesLista key={versao} periodo={periodo} onAbrir={abrirFicha} onSessaoExpirada={onSessaoExpirada} />
+            <ClientesLista
+              key={versao}
+              papel={papel}
+              periodo={periodo}
+              onAbrir={abrirFicha}
+              onSessaoExpirada={onSessaoExpirada}
+            />
           </div>
         )}
 
@@ -362,9 +374,12 @@ function App() {
   if (estado === 'deslogado') return <Login onEntrar={aoEntrar} />
   if (!eu) return null // inalcancavel: estado só vira 'logado' junto com setEu
 
-  // Primeira tela ao entrar: para o admin, Clientes (a unica tela real desta
-  // fase); para o colaborador, Entradas (Clientes é admin-only). Guarda
-  // tambem contra `tela` sobrevivendo de uma sessao anterior com outro papel.
+  // Primeira tela ao entrar: para o admin, Clientes; para o colaborador,
+  // Entradas. Clientes deixou de ser admin-only, entao o colaborador PODE
+  // abrir a tela — so nao e onde o dia dele comeca: o trabalho dele e lancar
+  // coleta e venda, e Clientes e onde ele vai quando precisa cadastrar ou
+  // corrigir alguem. Guarda tambem contra `tela` sobrevivendo de uma sessao
+  // anterior com outro papel (Financeiro, por exemplo, continua admin-only).
   const telaPadrao: Tela = eu.papel === 'admin' ? 'clientes' : 'entradas'
   const telaEfetiva: Tela =
     tela && !(ADMIN_ONLY_SCREENS.includes(tela) && eu.papel !== 'admin') ? tela : telaPadrao
@@ -389,6 +404,7 @@ function App() {
       >
         <Conteudo
           tela={telaEfetiva}
+          papel={eu.papel}
           periodo={periodo}
           onNavegar={setTela}
           onSessaoExpirada={aoExpirar}
@@ -409,18 +425,26 @@ function App() {
  * comentario; Estoque agrega entradas, perdas e saidas em SQL num endpoint
  * proprio (GET /api/estoque, ver src/screens/EstoqueLista.tsx).
  *
- * `papel` NAO e mais repassado a nenhuma tela. VeiculosLista era a unica que
- * o recebia — era a unica em que admin e colaborador viam a MESMA tela com
- * acoes diferentes (cadastrar era admin, pegar/devolver era qualquer sessao).
- * Com o check-in/check-out fora e a tela mostrando dinheiro, ela virou
- * admin-only como as outras (ADMIN_ONLY_SCREENS em telas.ts) e nao precisa
- * mais saber quem esta olhando: quem nao pode ver nem chega aqui, porque o
- * item some do menu. O `papel` continua sendo usado onde sempre foi decidido
- * — no Shell, que monta o menu.
+ * `papel` DESCE PARA TRES TELAS: Clientes, Produtos e Fornecedores. Elas sao
+ * hoje as unicas em que admin e colaborador veem a MESMA tela com conteudo
+ * diferente — o cadastro e dos dois, as metricas derivadas e o botao de
+ * excluir sao so do admin (ver `podeVerMetricasDeCadastro` e
+ * `podeExcluirCadastro` em telas.ts, que sao quem decide; aqui so passa o
+ * papel adiante). As outras oito continuam sem receber: ou sao inteiras de um
+ * papel so (Financeiro, Relatorios, Funcionarios, Veiculos, painel — quem nao
+ * pode nem chega aqui, o item some do menu), ou sao iguais para os dois
+ * (Entradas, Saidas, Estoque). VeiculosLista ja recebeu `papel` e deixou de
+ * receber quando virou admin-only; e o mesmo criterio, aplicado ao contrario.
  */
 function Conteudo(
-  { tela, periodo, onNavegar, onSessaoExpirada }:
-  { tela: Tela; periodo: Periodo; onNavegar: (tela: Tela) => void; onSessaoExpirada: () => void },
+  { tela, papel, periodo, onNavegar, onSessaoExpirada }:
+  {
+    tela: Tela
+    papel: Papel
+    periodo: Periodo
+    onNavegar: (tela: Tela) => void
+    onSessaoExpirada: () => void
+  },
 ) {
   switch (tela) {
     // `onNavegar` e o MESMO `setTela` do menu lateral: o botao do guia de
@@ -429,9 +453,9 @@ function Conteudo(
     // mesmo estado, periodo global preservado.
     case 'dashboard':     return <DashboardTela periodo={periodo} onNavegar={onNavegar} onSessaoExpirada={onSessaoExpirada} />
     case 'relatorios':    return <RelatoriosTela periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
-    case 'clientes':      return <ClientesModulo periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
-    case 'produtos':      return <ProdutosLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
-    case 'fornecedores':  return <FornecedoresLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
+    case 'clientes':      return <ClientesModulo papel={papel} periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
+    case 'produtos':      return <ProdutosLista papel={papel} periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
+    case 'fornecedores':  return <FornecedoresLista papel={papel} periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
     case 'funcionarios':  return <FuncionariosLista periodo={periodo} onSessaoExpirada={onSessaoExpirada} />
     // Veiculos PASSOU A RECEBER periodo. Ela ficou de fora do filtro global
     // em eae52e0 porque era cadastro da frota mais estado atual, sem metrica

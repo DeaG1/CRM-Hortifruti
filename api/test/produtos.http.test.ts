@@ -129,22 +129,67 @@ describe('autorizacao', () => {
 
   // Este teste ja exigiu 403 tambem na leitura. Mas o colaborador tem acesso a
   // Entradas, Saidas e Estoque, e os tres precisam do seletor de produto — sem
-  // ler a lista, ele abria "Nova entrada" e nao conseguia lancar nada. A tela
-  // de Produtos continua restrita ao admin; o que mudou e que consultar a lista
-  // deixou de ser a mesma coisa que gerenciar o cadastro.
+  // ler a lista, ele abria "Nova entrada" e nao conseguia lancar nada.
   it('colaborador LE produtos (precisa disso para lancar movimentacao)', async () => {
     const res = await pedir('/api/produtos', comoColab())
     expect(res.status).toBe(200)
   })
 
-  it('colaborador NAO cria produto', async () => {
+  // O colaborador PASSOU a poder criar e editar produto: quem recebe a
+  // mercadoria e quem encontra o produto que ainda nao existe no cadastro, e
+  // sem poder cria-lo o lancamento parava ali. `produtos` saiu de
+  // ADMIN_ONLY_SCREENS junto — ver src/routes/produtos.ts.
+  it('colaborador CRIA produto', async () => {
     const res = await pedir('/api/produtos', {
       ...comoColab(), method: 'POST',
       headers: { ...comoColab().headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ nome: 'Tentativa do colaborador' }),
+      body: JSON.stringify({ nome: 'Chuchu do colaborador', un: 'KG' }),
     })
+    expect(res.status).toBe(201)
+    const corpo = await res.json() as { id: string; nome: string }
+    expect(corpo.nome).toBe('Chuchu do colaborador')
+    await admin`delete from produtos where id = ${corpo.id}`
+  })
+
+  it('colaborador EDITA produto', async () => {
+    const criado = await pedir('/api/produtos', comoAdmin(json({ nome: 'Para o colaborador editar' })))
+    const { id } = await criado.json() as { id: string }
+
+    const res = await pedir(`/api/produtos/${id}`, {
+      ...comoColab(), method: 'PUT',
+      headers: { ...comoColab().headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ peso_medio: 18.5 }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ peso_medio: 18.5 })
+    await admin`delete from produtos where id = ${id}`
+  })
+
+  /**
+   * Excluir continua so do admin. Aqui a barreira e do SERVIDOR: esconder o
+   * botao no modal nao impediria ninguem de chamar o endpoint.
+   */
+  it('colaborador NAO exclui produto -> 403', async () => {
+    const criado = await pedir('/api/produtos', comoAdmin(json({ nome: 'Nao deve sumir' })))
+    const { id } = await criado.json() as { id: string }
+
+    const res = await pedir(`/api/produtos/${id}`, { ...comoColab(), method: 'DELETE' })
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ erro: 'sem permissao' })
+
+    const [ainda] = await admin`select id from produtos where id = ${id}`
+    expect(ainda).toBeDefined()
+    await admin`delete from produtos where id = ${id}`
+  })
+
+  it('admin exclui produto -> 200', async () => {
+    const criado = await pedir('/api/produtos', comoAdmin(json({ nome: 'Admin pode apagar' })))
+    const { id } = await criado.json() as { id: string }
+
+    const res = await pedir(`/api/produtos/${id}`, { ...comoAdmin(), method: 'DELETE' })
+    expect(res.status).toBe(200)
+    const [sumiu] = await admin`select id from produtos where id = ${id}`
+    expect(sumiu).toBeUndefined()
   })
 
   it('admin -> 200', async () => {

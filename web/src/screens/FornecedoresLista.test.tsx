@@ -77,20 +77,20 @@ beforeEach(() => {
 describe('FornecedoresLista — os quatro estados', () => {
   it('carregando: mostra indicador enquanto a chamada esta pendente', () => {
     mockGet.mockReturnValue(new Promise(() => {})) // nunca resolve nesta suite
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     expect(screen.getByText('Carregando…')).toBeInTheDocument()
   })
 
   it('erro: mostra alerta quando a API falha por motivo != sessao expirada', async () => {
     mockGet.mockRejectedValue(new Error('falha de rede'))
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     const alerta = await screen.findByRole('alert')
     expect(alerta).toHaveTextContent('Não foi possível carregar os fornecedores.')
   })
 
   it('vazio: mostra "nenhum fornecedor cadastrado" quando a API devolve lista vazia', async () => {
     configurarGet({ lista: [] })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     expect(await screen.findByText(/nenhum fornecedor cadastrado/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /cadastrar primeiro fornecedor/i })).toBeInTheDocument()
   })
@@ -104,7 +104,7 @@ describe('FornecedoresLista — os quatro estados', () => {
         'f-2': fornecedorBase({ id: 'f-2', nome: 'Fazenda B', produtos: [] }),
       },
     })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     expect(await screen.findByText('Fazenda A')).toBeInTheDocument()
     expect(screen.getByText('Fazenda B')).toBeInTheDocument()
   })
@@ -117,7 +117,7 @@ describe('FornecedoresLista — sessao expirada (401)', () => {
     // ...Once), mesmo padrao de ClientesLista.test.tsx.
     mockGet.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()
-    render(<FornecedoresLista onSessaoExpirada={onSessaoExpirada} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={onSessaoExpirada} />)
     await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalled())
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
@@ -130,7 +130,7 @@ describe('FornecedoresLista — produtos que entrega e metricas', () => {
       produtos: [produtoBatata, produtoAlface],
       detalhes: { 'f-1': fornecedorBase({ produtos: [produtoBatata, produtoAlface] }) },
     })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     expect(screen.getByText('Batata')).toBeInTheDocument()
     expect(screen.getByText('Alface')).toBeInTheDocument()
@@ -141,7 +141,7 @@ describe('FornecedoresLista — produtos que entrega e metricas', () => {
       lista: [fornecedorBase()],
       detalhes: { 'f-1': fornecedorBase({ produtos: [] }) },
     })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     expect(screen.getByText('Nenhum produto vinculado')).toBeInTheDocument()
   })
@@ -162,7 +162,7 @@ describe('FornecedoresLista — as quatro metricas por fornecedor', () => {
       // 1000kg a R$ 2,20, sem perda -> media 2,10 / aproveitamento 95% / variacao +10%
       entradaBase({ numero: 'C-2', data: '2026-06-10', valor_total: 2200, peso_total: 1000 }),
     ])
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
 
     expect(screen.getByText('R$ 2,10')).toBeInTheDocument()
@@ -175,7 +175,7 @@ describe('FornecedoresLista — as quatro metricas por fornecedor', () => {
 
   it('aproveitamento aparece — e a metrica que o cartao nem renderizava', async () => {
     soUmFornecedor([entradaBase({ valor_total: 2000, peso_total: 1000, perda_kg: 200 })])
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     expect(screen.getByText('Aproveit.')).toBeInTheDocument()
     expect(screen.getByText('80%')).toBeInTheDocument()
@@ -183,7 +183,7 @@ describe('FornecedoresLista — as quatro metricas por fornecedor', () => {
 
   it('fornecedor SEM coleta: travessao nas quatro, nunca R$ 0,00 nem 0%', async () => {
     soUmFornecedor([])
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     // so as 4 metricas do cartao do fornecedor
     expect(screen.getAllByText('—')).toHaveLength(4)
@@ -193,14 +193,14 @@ describe('FornecedoresLista — as quatro metricas por fornecedor', () => {
 
   it('quem comprou e nao perdeu nada tem 100% de aproveitamento medido', async () => {
     soUmFornecedor([entradaBase({ perda_kg: 0, perda_itens_qtd: 0 })])
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     expect(screen.getByText('100%')).toBeInTheDocument()
   })
 
   it('uma unica coleta: variacao fica em travessao e o title explica que faltam duas', async () => {
     soUmFornecedor([entradaBase()])
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
 
     // as outras tres saem normalmente
@@ -219,7 +219,7 @@ describe('FornecedoresLista — as quatro metricas por fornecedor', () => {
       entradaBase({ numero: 'C-1', data: '2026-06-01', valor_total: 2000, peso_total: 1000 }),
       entradaBase({ numero: 'C-2', data: '2026-06-10', valor_total: 2000, peso_total: 1000 }),
     ])
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     // so a celula, como no caso de +10,0% acima
     expect(screen.getAllByText('0,0%')).toHaveLength(1)
@@ -234,7 +234,7 @@ describe('FornecedoresLista — as quatro metricas por fornecedor', () => {
       },
       entradas: [entradaBase({ fornecedor_id: 'f-1' })],
     })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Sitio Vale Verde')
     // f-1 tem preco/coleta/aproveitamento (so a variacao dele fica em
     // travessao: uma coleta so); f-2 fica com as 4 em travessao
@@ -269,7 +269,7 @@ describe('FornecedoresLista — cartao de resumo NAO e renderizado', () => {
 
   it('nao ha cartao "Variacao de preco de compra" nem o sub do prototipo', async () => {
     comDuasColetas()
-    const { container } = render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    const { container } = render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     expect(screen.queryByText('Variação de preço de compra')).not.toBeInTheDocument()
     expect(container.querySelector('.fornecedores-resumo')).toBeNull()
@@ -280,7 +280,7 @@ describe('FornecedoresLista — cartao de resumo NAO e renderizado', () => {
 
   it('a referencia CEASA nao sobrevive em lugar nenhum da tela', async () => {
     comDuasColetas()
-    const { container } = render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    const { container } = render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     expect(container.textContent).not.toMatch(/CEASA/i)
     expect(container.textContent).not.toMatch(/±7%/)
@@ -288,7 +288,7 @@ describe('FornecedoresLista — cartao de resumo NAO e renderizado', () => {
 
   it('a variacao POR FORNECEDOR continua — so o agregado saiu', async () => {
     comDuasColetas()
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     expect(screen.getByText('Variação')).toBeInTheDocument()
     // Uma unica ocorrencia: a celula. Com o cartao vivo seriam duas.
@@ -303,7 +303,7 @@ describe('FornecedoresLista — isolacao de falha das coletas', () => {
       detalhes: { 'f-1': fornecedorBase({ produtos: [] }) },
       entradas: 'falha',
     })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
 
     // o cadastro continua na tela — e o que a tela existe pra mostrar
     expect(await screen.findByText('Fazenda Boa Terra')).toBeInTheDocument()
@@ -324,7 +324,7 @@ describe('FornecedoresLista — itens sem conversao (unidade != KG sem peso medi
       detalhes: { 'f-1': fornecedorBase({ produtos: [] }) },
       entradas: [entradaBase({ valor_total: 2000, peso_total: 1000, itens_sem_conversao: 2 })],
     })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
 
     expect(screen.getByText('R$ 2,00*')).toBeInTheDocument()
@@ -339,7 +339,7 @@ describe('FornecedoresLista — itens sem conversao (unidade != KG sem peso medi
       detalhes: { 'f-1': fornecedorBase({ produtos: [] }) },
       entradas: [entradaBase()],
     })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     expect(screen.getByText('R$ 2,00')).toBeInTheDocument()
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
@@ -349,7 +349,7 @@ describe('FornecedoresLista — itens sem conversao (unidade != KG sem peso medi
 describe('FornecedoresLista — abrir modal', () => {
   it('clicar em "Novo fornecedor" abre o modal de criacao', async () => {
     configurarGet({ lista: [fornecedorBase()], detalhes: { 'f-1': fornecedorBase({ produtos: [] }) } })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     fireEvent.click(screen.getByRole('button', { name: /^＋ Novo fornecedor/i }))
     expect(screen.getByRole('dialog', { name: 'Novo fornecedor' })).toBeInTheDocument()
@@ -361,7 +361,7 @@ describe('FornecedoresLista — abrir modal', () => {
       produtos: [produtoBatata],
       detalhes: { 'f-1': fornecedorBase({ produtos: [produtoBatata] }) },
     })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     fireEvent.click(await screen.findByText('Fazenda Boa Terra'))
     expect(screen.getByRole('dialog', { name: 'Editar fornecedor' })).toBeInTheDocument()
     expect(screen.getByLabelText(/nome do produtor/i)).toHaveValue('Fazenda Boa Terra')
@@ -370,7 +370,7 @@ describe('FornecedoresLista — abrir modal', () => {
 
   it('vazio: clicar em "Cadastrar primeiro fornecedor" abre o modal de criacao', async () => {
     configurarGet({ lista: [] })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     fireEvent.click(await screen.findByRole('button', { name: /cadastrar primeiro fornecedor/i }))
     expect(screen.getByRole('dialog', { name: 'Novo fornecedor' })).toBeInTheDocument()
   })
@@ -380,7 +380,7 @@ describe('FornecedoresLista — recarrega apos salvar/excluir no modal', () => {
   it('salvar no modal fecha o modal e recarrega a lista', async () => {
     configurarGet({ lista: [fornecedorBase()], detalhes: { 'f-1': fornecedorBase({ produtos: [] }) } })
     mockPost.mockResolvedValue(fornecedorBase({ id: 'f-2', nome: 'Fazenda Nova', produtos: [] }))
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
 
     // apos salvar, a segunda leva da lista (e do detalhe) inclui os dois fornecedores
@@ -403,7 +403,7 @@ describe('FornecedoresLista — recarrega apos salvar/excluir no modal', () => {
   it('excluir no modal fecha o modal e recarrega a lista', async () => {
     configurarGet({ lista: [fornecedorBase()], detalhes: { 'f-1': fornecedorBase({ produtos: [] }) } })
     mockDel.mockResolvedValue({ ok: true })
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     fireEvent.click(await screen.findByText('Fazenda Boa Terra'))
 
     configurarGet({ lista: [] })
@@ -430,7 +430,7 @@ describe('FornecedoresLista — periodo global', () => {
       entradaBase({ numero: 'C-1', data: '2026-06-10', valor_total: 2000, peso_total: 1000 }),
       entradaBase({ numero: 'C-2', data: '2026-05-10', valor_total: 9000, peso_total: 1000 }),
     ])
-    render(<FornecedoresLista periodo="2026-06" onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" periodo="2026-06" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     expect(screen.getByText('R$ 2,00')).toBeInTheDocument()
     expect(screen.queryByText('R$ 9,00')).not.toBeInTheDocument()
@@ -442,7 +442,7 @@ describe('FornecedoresLista — periodo global', () => {
       entradaBase({ numero: 'C-1', data: '2026-06-10', valor_total: 2000, peso_total: 1000 }),
       entradaBase({ numero: 'C-2', data: '2026-05-10', valor_total: 4000, peso_total: 1000 }),
     ])
-    render(<FornecedoresLista onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     expect(screen.getByText('R$ 3,00')).toBeInTheDocument()
   })
@@ -456,7 +456,7 @@ describe('FornecedoresLista — periodo global', () => {
       },
       entradas: [entradaBase({ data: '2026-06-10' })],
     })
-    render(<FornecedoresLista periodo="2026-01" onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" periodo="2026-01" onSessaoExpirada={() => {}} />)
     // Um fornecedor não deixa de existir porque não houve coleta em janeiro.
     expect(await screen.findByText('Fazenda Boa Terra')).toBeInTheDocument()
     expect(screen.getByText('Sitio das Flores')).toBeInTheDocument()
@@ -470,10 +470,96 @@ describe('FornecedoresLista — periodo global', () => {
 
   it('a dica diz qual recorte vale, e que o cadastro nao segue', async () => {
     umFornecedor([entradaBase({ data: '2026-06-10' })])
-    render(<FornecedoresLista periodo="2026-06" onSessaoExpirada={() => {}} />)
+    render(<FornecedoresLista papel="admin" periodo="2026-06" onSessaoExpirada={() => {}} />)
     await screen.findByText('Fazenda Boa Terra')
     const dica = screen.getByText(/Clique num fornecedor para editar/i)
     expect(dica).toHaveTextContent('Junho/2026')
     expect(dica).toHaveTextContent(/cadastro aparece inteiro/i)
+  })
+})
+
+/**
+ * O colaborador passou a ver, criar e editar o CADASTRO de fornecedores, e a
+ * NAO ver as quatro metricas (preco medio, variacao, ultima coleta,
+ * aproveitamento) — ver `podeVerMetricasDeCadastro` em telas.ts.
+ *
+ * Mesma ressalva honesta de ClientesLista: essas quatro saem de
+ * `GET /api/entradas`, que responde para o colaborador (Entradas e tela
+ * dele). Esconde-las e apresentacao, nao permissao. O que muda e que a tela
+ * nao entrega o agregado pronto — e nem o busca.
+ */
+describe('FornecedoresLista — colaborador ve o cadastro, nao as metricas', () => {
+  const ROTULOS_DE_METRICA = ['Preço médio', 'Variação', 'Última coleta', 'Aproveit.']
+
+  it('nao dispara GET /api/entradas — a tela nao pede o que nao vai mostrar', async () => {
+    configurarGet({
+      lista: [fornecedorBase()],
+      detalhes: { 'f-1': fornecedorBase({ produtos: [produtoBatata] }) },
+      entradas: [entradaBase()],
+    })
+    render(<FornecedoresLista papel="colaborador" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Fazenda Boa Terra')
+
+    const rotas = mockGet.mock.calls.map(c => c[0] as string)
+    expect(rotas).toContain('/api/fornecedores')
+    expect(rotas).not.toContain('/api/entradas')
+  })
+
+  it('nao mostra nenhum dos quatro rotulos de metrica', async () => {
+    configurarGet({
+      lista: [fornecedorBase()],
+      detalhes: { 'f-1': fornecedorBase({ produtos: [produtoBatata] }) },
+      entradas: [entradaBase()],
+    })
+    render(<FornecedoresLista papel="colaborador" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Fazenda Boa Terra')
+
+    for (const rotulo of ROTULOS_DE_METRICA) {
+      expect(screen.queryByText(rotulo)).not.toBeInTheDocument()
+    }
+  })
+
+  it('mostra o cadastro: nome, regiao, contato e produtos vinculados', async () => {
+    configurarGet({
+      lista: [fornecedorBase()],
+      detalhes: { 'f-1': fornecedorBase({ produtos: [produtoBatata, produtoAlface] }) },
+    })
+    render(<FornecedoresLista papel="colaborador" onSessaoExpirada={() => {}} />)
+
+    expect(await screen.findByText('Fazenda Boa Terra')).toBeInTheDocument()
+    expect(screen.getByText(/Sul A/)).toBeInTheDocument()
+    expect(screen.getByText('Batata')).toBeInTheDocument()
+    expect(screen.getByText('Alface')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Novo fornecedor/ })).toBeInTheDocument()
+  })
+
+  it('abre o modal de edicao SEM o botao Excluir', async () => {
+    configurarGet({
+      lista: [fornecedorBase()],
+      detalhes: { 'f-1': fornecedorBase({ produtos: [] }) },
+    })
+    render(<FornecedoresLista papel="colaborador" onSessaoExpirada={() => {}} />)
+    fireEvent.click(await screen.findByText('Fazenda Boa Terra'))
+
+    expect(screen.getByRole('button', { name: 'Salvar' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Excluir' })).not.toBeInTheDocument()
+  })
+
+  it('admin continua vendo as quatro metricas, buscando as coletas e podendo excluir', async () => {
+    configurarGet({
+      lista: [fornecedorBase()],
+      detalhes: { 'f-1': fornecedorBase({ produtos: [] }) },
+      entradas: [entradaBase()],
+    })
+    render(<FornecedoresLista papel="admin" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Fazenda Boa Terra')
+
+    for (const rotulo of ROTULOS_DE_METRICA) {
+      expect(screen.getByText(rotulo)).toBeInTheDocument()
+    }
+    expect(mockGet.mock.calls.map(c => c[0] as string)).toContain('/api/entradas')
+
+    fireEvent.click(screen.getByText('Fazenda Boa Terra'))
+    expect(screen.getByRole('button', { name: 'Excluir' })).toBeInTheDocument()
   })
 })

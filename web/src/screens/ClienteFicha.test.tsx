@@ -65,19 +65,19 @@ beforeEach(() => {
 describe('ClienteFicha — carregamento', () => {
   it('mostra indicador enquanto a chamada esta pendente', () => {
     mockRotas(new Promise(() => {}))
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     expect(screen.getByText('Carregando…')).toBeInTheDocument()
   })
 
   it('erro != 401/404 mostra alerta generico', async () => {
     mockRotas(new Error('falha de rede'))
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível carregar o cliente.')
   })
 
   it('404 mostra "cliente nao encontrado"', async () => {
     mockRotas(new ErroApi(404, { erro: 'nao encontrado' }))
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('Cliente não encontrado.')
   })
 
@@ -87,7 +87,7 @@ describe('ClienteFicha — carregamento', () => {
     // toHaveBeenCalled (nao ...Once), mesmo padrao de ClientesLista.test.tsx.
     mockRotas(new ErroApi(401, { erro: 'sessao invalida' }), new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} onSessaoExpirada={onSessaoExpirada} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} onSessaoExpirada={onSessaoExpirada} />)
     await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalled())
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
@@ -96,7 +96,7 @@ describe('ClienteFicha — carregamento', () => {
 describe('ClienteFicha — vendas reais (GET /api/saidas)', () => {
   it('sem vendas no periodo, as metricas comerciais ficam em travessao (nao zeradas)', async () => {
     mockRotas(cliente, [])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
 
     // As SEIS metricas do bloco "Metricas comerciais" (qtd, faturado,
@@ -116,7 +116,7 @@ describe('ClienteFicha — vendas reais (GET /api/saidas)', () => {
 
   it('uma venda entregue e paga produz ticket, participacao e aparece nos pedidos recentes', async () => {
     mockRotas(cliente, [venda({ entrega: '2026-06-10', valor: 900, peso: 120 })])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
 
     const metricas = document.querySelector('.ficha-metricas') as HTMLElement
@@ -141,7 +141,7 @@ describe('ClienteFicha — vendas reais (GET /api/saidas)', () => {
 
   it('falha em /api/saidas mantem a ficha visivel, com metricas comerciais indisponiveis', async () => {
     mockRotas(cliente, new Error('falha de rede'))
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
 
     // a ficha aparece normalmente...
     expect(await screen.findByText('Mercado Bom Preço')).toBeInTheDocument()
@@ -170,7 +170,7 @@ describe('ClienteFicha — status de cobranca e derivado das vendas (CF-1)', () 
     // do ModalCliente altera essa coluna). Se a tela voltar a ler o campo
     // cru, este teste quebra.
     mockRotas(cliente, [venda({ pag: 'Pendente', venc: VENCIDO })])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(within(linhaCobranca()).getByText('Atrasado')).toBeInTheDocument()
     expect(within(linhaCobranca()).queryByText('Em dia')).not.toBeInTheDocument()
@@ -178,14 +178,14 @@ describe('ClienteFicha — status de cobranca e derivado das vendas (CF-1)', () 
 
   it('venda gravada como Atrasado (dado legado) tambem mostra Atrasado', async () => {
     mockRotas(cliente, [venda({ pag: 'Atrasado' })])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(within(linhaCobranca()).getByText('Atrasado')).toBeInTheDocument()
   })
 
   it('tudo pago mostra Em dia — mesmo com o cadastro dizendo "Atrasado"', async () => {
     mockRotas({ ...cliente, cobranca: 'Atrasado' }, [venda({ pag: 'Pago' })])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(within(linhaCobranca()).getByText('Em dia')).toBeInTheDocument()
     expect(within(linhaCobranca()).queryByText('Atrasado')).not.toBeInTheDocument()
@@ -193,14 +193,14 @@ describe('ClienteFicha — status de cobranca e derivado das vendas (CF-1)', () 
 
   it('venda pendente ainda NAO vencida mostra Em dia — pendente nao e atraso', async () => {
     mockRotas(cliente, [venda({ pag: 'Pendente', venc: A_VENCER })])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(within(linhaCobranca()).getByText('Em dia')).toBeInTheDocument()
   })
 
   it('cliente sem venda nenhuma mostra travessao, nunca "Em dia"', async () => {
     mockRotas(cliente, [])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(within(linhaCobranca()).getByText('—')).toBeInTheDocument()
     expect(within(linhaCobranca()).queryByText('Em dia')).not.toBeInTheDocument()
@@ -208,14 +208,14 @@ describe('ClienteFicha — status de cobranca e derivado das vendas (CF-1)', () 
 
   it('vendas so de outro cliente nao viram "Em dia" nesta ficha', async () => {
     mockRotas(cliente, [venda({ id: 'sv9', cliente_id: 'c-99', pag: 'Pago' })])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(within(linhaCobranca()).getByText('—')).toBeInTheDocument()
   })
 
   it('falha em /api/saidas deixa o status em travessao, com o aviso — nao "Em dia" por omissao', async () => {
     mockRotas(cliente, new Error('falha de rede'))
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(await screen.findByRole('status')).toHaveTextContent(/não foi possível carregar as vendas/i)
     expect(within(linhaCobranca()).getByText('—')).toBeInTheDocument()
@@ -227,7 +227,7 @@ describe('ClienteFicha — navegacao', () => {
   it('clicar em Voltar chama onVoltar', async () => {
     mockRotas(cliente)
     const onVoltar = vi.fn()
-    render(<ClienteFicha id="c-1" onVoltar={onVoltar} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={onVoltar} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     fireEvent.click(screen.getByRole('button', { name: /voltar/i }))
     expect(onVoltar).toHaveBeenCalledOnce()
@@ -236,7 +236,7 @@ describe('ClienteFicha — navegacao', () => {
   it('clicar em Editar cliente chama onEditar com os dados carregados', async () => {
     mockRotas(cliente)
     const onEditar = vi.fn()
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={onEditar} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={onEditar} />)
     await screen.findByText('Mercado Bom Preço')
     fireEvent.click(screen.getByRole('button', { name: 'Editar cliente' }))
     expect(onEditar).toHaveBeenCalledWith(cliente)
@@ -246,7 +246,7 @@ describe('ClienteFicha — navegacao', () => {
 describe('ClienteFicha — exclusao pede confirmacao', () => {
   it('clicar em Excluir nao chama a API imediatamente — mostra confirmacao', async () => {
     mockRotas(cliente)
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
     expect(mockDel).not.toHaveBeenCalled()
@@ -255,7 +255,7 @@ describe('ClienteFicha — exclusao pede confirmacao', () => {
 
   it('cancelar a confirmacao nao chama a API e some com o aviso', async () => {
     mockRotas(cliente)
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
     fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
@@ -267,7 +267,7 @@ describe('ClienteFicha — exclusao pede confirmacao', () => {
     mockRotas(cliente)
     mockDel.mockResolvedValue({ ok: true })
     const onVoltar = vi.fn()
-    render(<ClienteFicha id="c-1" onVoltar={onVoltar} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={onVoltar} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
@@ -279,7 +279,7 @@ describe('ClienteFicha — exclusao pede confirmacao', () => {
     mockRotas(cliente)
     mockDel.mockRejectedValue(new Error('falha'))
     const onVoltar = vi.fn()
-    render(<ClienteFicha id="c-1" onVoltar={onVoltar} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={onVoltar} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
@@ -291,7 +291,7 @@ describe('ClienteFicha — exclusao pede confirmacao', () => {
     mockRotas(cliente)
     mockDel.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} onSessaoExpirada={onSessaoExpirada} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} onSessaoExpirada={onSessaoExpirada} />)
     await screen.findByText('Mercado Bom Preço')
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
@@ -323,7 +323,7 @@ describe('ClienteFicha — "Ultima compra" (CF-2)', () => {
       venda({ id: 'b', numero: 'PD-002', entrega: '2026-06-20' }),
       venda({ id: 'c', numero: 'PD-003', entrega: '2026-03-11' }),
     ])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(valorDaMetrica('Última compra')).toBe('20/06/2026')
   })
@@ -333,7 +333,7 @@ describe('ClienteFicha — "Ultima compra" (CF-2)', () => {
       venda({ id: 'a', numero: 'PD-001', entrega: '2026-05-02', status: 'Entregue' }),
       venda({ id: 'b', numero: 'PD-002', entrega: '2026-08-30', status: 'Em rota', pag: 'Pendente' }),
     ])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(valorDaMetrica('Última compra')).toBe('02/05/2026')
   })
@@ -342,7 +342,7 @@ describe('ClienteFicha — "Ultima compra" (CF-2)', () => {
     // O periodo selecionado (agosto) nao tem venda nenhuma; o faturado cai em
     // travessao, mas "ultima compra" continua respondendo junho.
     mockRotas(cliente, [venda({ entrega: '2026-06-10' })])
-    render(<ClienteFicha id="c-1" periodo="2026-08" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" periodo="2026-08" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(valorDaMetrica('Faturado / mês')).toBe('—')
     expect(valorDaMetrica('Última compra')).toBe('10/06/2026')
@@ -350,7 +350,7 @@ describe('ClienteFicha — "Ultima compra" (CF-2)', () => {
 
   it('cliente sem pedido entregue: travessao e o sub diz por que', async () => {
     mockRotas(cliente, [])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(valorDaMetrica('Última compra')).toBe('—')
     expect(metrica('Última compra')).toHaveTextContent('nenhum pedido entregue ainda')
@@ -358,7 +358,7 @@ describe('ClienteFicha — "Ultima compra" (CF-2)', () => {
 
   it('falha em /api/saidas deixa a ultima compra em travessao, nunca uma data inventada', async () => {
     mockRotas(cliente, new Error('falha de rede'))
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(await screen.findByRole('status')).toHaveTextContent(/não foi possível carregar as vendas/i)
     expect(valorDaMetrica('Última compra')).toBe('—')
@@ -371,7 +371,7 @@ describe('ClienteFicha — "Qtd no periodo" (CF-3)', () => {
       venda({ id: 'a', numero: 'PD-001', entrega: '2026-06-02', peso: 120 }),
       venda({ id: 'b', numero: 'PD-002', entrega: '2026-06-20', peso: 80 }),
     ])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(valorDaMetrica('Qtd no período')).toBe('200 kg')
     expect(metrica('Qtd no período')).toHaveTextContent('2 entregas')
@@ -382,7 +382,7 @@ describe('ClienteFicha — "Qtd no periodo" (CF-3)', () => {
       venda({ id: 'a', numero: 'PD-001', peso: 120 }),
       venda({ id: 'b', numero: 'PD-002', cliente_id: 'c-99', peso: 500 }),
     ])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(valorDaMetrica('Qtd no período')).toBe('120 kg')
     expect(metrica('Qtd no período')).toHaveTextContent('1 entrega')
@@ -393,14 +393,14 @@ describe('ClienteFicha — "Qtd no periodo" (CF-3)', () => {
       venda({ id: 'a', numero: 'PD-001', entrega: '2026-06-02', peso: 120 }),
       venda({ id: 'b', numero: 'PD-002', entrega: '2026-07-20', peso: 400 }),
     ])
-    render(<ClienteFicha id="c-1" periodo="2026-06" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" periodo="2026-06" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(valorDaMetrica('Qtd no período')).toBe('120 kg')
   })
 
   it('sem entrega no periodo: travessao, nunca "0 kg"', async () => {
     mockRotas(cliente, [venda({ entrega: '2026-06-10', peso: 120 })])
-    render(<ClienteFicha id="c-1" periodo="2026-08" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" periodo="2026-08" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(valorDaMetrica('Qtd no período')).toBe('—')
     expect(metrica('Qtd no período')).toHaveTextContent('sem entrega no período')
@@ -408,7 +408,7 @@ describe('ClienteFicha — "Qtd no periodo" (CF-3)', () => {
 
   it('item sem peso medio marca a quantidade com * e explica no title', async () => {
     mockRotas(cliente, [venda({ peso: 120, itens_sem_conversao: 2 })])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     const marca = within(metrica('Qtd no período')).getByText('120 kg*')
     expect(marca.getAttribute('title')).toContain('2 itens')
@@ -417,7 +417,7 @@ describe('ClienteFicha — "Qtd no periodo" (CF-3)', () => {
 
   it('falha em /api/saidas deixa a quantidade em travessao', async () => {
     mockRotas(cliente, new Error('falha de rede'))
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(await screen.findByRole('status')).toHaveTextContent(/não foi possível carregar as vendas/i)
     expect(valorDaMetrica('Qtd no período')).toBe('—')
@@ -437,7 +437,7 @@ describe('ClienteFicha — metas e semaforo nas metricas (CF-4)', () => {
 
   it('cada metrica traz o sub-rotulo com a meta', async () => {
     mockRotas(cliente, [venda()])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(metrica('Faturado / mês')).toHaveTextContent('meta R$ 3.500–3.800')
     expect(metrica('Ticket / entrega')).toHaveTextContent('meta ≥ R$ 430')
@@ -448,7 +448,7 @@ describe('ClienteFicha — metas e semaforo nas metricas (CF-4)', () => {
   it('faturado acima da meta fica verde; abaixo dela, ambar; bem abaixo, vermelho', async () => {
     async function corDoFaturado(valor: number): Promise<string> {
       mockRotas(cliente, [venda({ valor })])
-      const { unmount } = render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+      const { unmount } = render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
       await screen.findByText('Mercado Bom Preço')
       const cor = corDaMetrica('Faturado / mês')
       unmount()
@@ -461,7 +461,7 @@ describe('ClienteFicha — metas e semaforo nas metricas (CF-4)', () => {
 
   it('ticket por entrega usa a mesma escala do painel (>=430 verde, >=150 ambar)', async () => {
     mockRotas(cliente, [venda({ valor: 200 })])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(corDaMetrica('Ticket / entrega')).toBe(AMBAR)
   })
@@ -471,7 +471,7 @@ describe('ClienteFicha — metas e semaforo nas metricas (CF-4)', () => {
       venda({ id: 'a', numero: 'PD-001', pag: 'Pendente', venc: '2020-01-01' }),
       venda({ id: 'b', numero: 'PD-002', pag: 'Pago' }),
     ])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(metrica('Inadimplência')).toHaveTextContent('meta ≤ 1% · 1 atraso')
   })
@@ -480,7 +480,7 @@ describe('ClienteFicha — metas e semaforo nas metricas (CF-4)', () => {
     // Vermelho num travessao diria "esta pessimo" sobre um numero que
     // ninguem apurou — e o oposto da convencao da tela.
     mockRotas(cliente, [])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(corDaMetrica('Faturado / mês')).toBe(NEUTRO)
     expect(corDaMetrica('Ticket / entrega')).toBe(NEUTRO)
@@ -489,7 +489,7 @@ describe('ClienteFicha — metas e semaforo nas metricas (CF-4)', () => {
 
   it('falha em /api/saidas tambem nao pinta nada de vermelho', async () => {
     mockRotas(cliente, new Error('falha de rede'))
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(await screen.findByRole('status')).toHaveTextContent(/não foi possível carregar as vendas/i)
     expect(corDaMetrica('Faturado / mês')).toBe(NEUTRO)
@@ -505,7 +505,7 @@ describe('ClienteFicha — "Historico de atrasos" no bloco Credito (CF-5)', () =
       venda({ id: 'b', numero: 'PD-002', valor: 200, pag: 'Pendente', venc: VENCIDO }),
       venda({ id: 'c', numero: 'PD-003', valor: 900, pag: 'Pago' }),
     ])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     const linha = linhaCredito('Histórico de atrasos')
     expect(within(linha).getByText('2 pedidos · R$ 500')).toBeInTheDocument()
@@ -514,7 +514,7 @@ describe('ClienteFicha — "Historico de atrasos" no bloco Credito (CF-5)', () =
 
   it('cliente com vendas e nenhum atraso: "0 atrasos" MEDIDO, nunca travessao', async () => {
     mockRotas(cliente, [venda({ pag: 'Pago' })])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     const linha = linhaCredito('Histórico de atrasos')
     expect(within(linha).getByText('0 atrasos')).toBeInTheDocument()
@@ -523,7 +523,7 @@ describe('ClienteFicha — "Historico de atrasos" no bloco Credito (CF-5)', () =
 
   it('cliente sem venda cobravel: travessao, nunca "0 atrasos"', async () => {
     mockRotas(cliente, [])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     const linha = linhaCredito('Histórico de atrasos')
     expect(within(linha).getByText('—')).toBeInTheDocument()
@@ -532,7 +532,7 @@ describe('ClienteFicha — "Historico de atrasos" no bloco Credito (CF-5)', () =
 
   it('falha em /api/saidas deixa o historico em travessao — nao "0 atrasos" por omissao', async () => {
     mockRotas(cliente, new Error('falha de rede'))
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(await screen.findByRole('status')).toHaveTextContent(/não foi possível carregar as vendas/i)
     const linha = linhaCredito('Histórico de atrasos')
@@ -542,7 +542,7 @@ describe('ClienteFicha — "Historico de atrasos" no bloco Credito (CF-5)', () =
 
   it('NAO segue o filtro de periodo: divida vencida em maio continua divida em agosto', async () => {
     mockRotas(cliente, [venda({ entrega: '2026-05-10', valor: 300, pag: 'Pendente', venc: VENCIDO })])
-    render(<ClienteFicha id="c-1" periodo="2026-08" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" periodo="2026-08" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(within(linhaCredito('Histórico de atrasos')).getByText('1 pedido · R$ 300')).toBeInTheDocument()
   })
@@ -559,7 +559,7 @@ describe('ClienteFicha — "Pedidos recentes" (CF-6)', () => {
       venda({ id: 'b', numero: 'PD-002', entrega: '2026-06-20', status: 'Em rota', pag: 'Pendente' }),
       venda({ id: 'c', numero: 'PD-003', entrega: '2026-06-25', status: 'Pendente', pag: 'Pendente' }),
     ])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(pedidos()).toHaveLength(3)
     // Selo de STATUS (nao a situacao de pagamento, que tambem diz "Pendente"
@@ -572,7 +572,7 @@ describe('ClienteFicha — "Pedidos recentes" (CF-6)', () => {
     mockRotas(cliente, ['01', '02', '03', '04', '05'].map((n, i) => venda({
       id: `s${n}`, numero: `PD-0${n}`, entrega: `2026-06-${10 + i}`,
     })))
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     const numeros = pedidos().map(p => (p.querySelector('.ficha-pedido-numero') as HTMLElement).textContent)
     expect(numeros).toEqual(['PD-005', 'PD-004', 'PD-003', 'PD-002'])
@@ -583,7 +583,7 @@ describe('ClienteFicha — "Pedidos recentes" (CF-6)', () => {
       venda({ id: 'a', numero: 'PD-001', entrega: '2026-06-10' }),
       venda({ id: 'b', numero: 'PD-002', entrega: '2026-06-10' }),
     ])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     const numeros = pedidos().map(p => (p.querySelector('.ficha-pedido-numero') as HTMLElement).textContent)
     expect(numeros).toEqual(['PD-002', 'PD-001'])
@@ -591,7 +591,7 @@ describe('ClienteFicha — "Pedidos recentes" (CF-6)', () => {
 
   it('nao lista pedido de outro cliente', async () => {
     mockRotas(cliente, [venda({ id: 'b', numero: 'PD-999', cliente_id: 'c-99' })])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(pedidos()).toHaveLength(0)
     expect(screen.getByText('Nenhum pedido registrado.')).toBeInTheDocument()
@@ -599,14 +599,14 @@ describe('ClienteFicha — "Pedidos recentes" (CF-6)', () => {
 
   it('a situacao de pagamento e a DERIVADA: vencida e nao paga aparece como Atrasado', async () => {
     mockRotas(cliente, [venda({ pag: 'Pendente', venc: '2020-01-01' })])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(within(pedidos()[0]).getByText('Atrasado')).toBeInTheDocument()
   })
 
   it('quantidade nao convertivel do pedido ganha * com a explicacao', async () => {
     mockRotas(cliente, [venda({ peso: 40, itens_sem_conversao: 1 })])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     const marca = within(pedidos()[0]).getByText('40 kg*')
     expect(marca.getAttribute('title')).toContain('1 item')
@@ -614,7 +614,7 @@ describe('ClienteFicha — "Pedidos recentes" (CF-6)', () => {
 
   it('falha em /api/saidas: bloco vazio, sem pedido inventado', async () => {
     mockRotas(cliente, new Error('falha de rede'))
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(await screen.findByRole('status')).toHaveTextContent(/não foi possível carregar as vendas/i)
     expect(pedidos()).toHaveLength(0)
@@ -628,7 +628,7 @@ describe('ClienteFicha — periodo global', () => {
       venda({ id: 'a', numero: 'PD-001', entrega: '2026-06-10', valor: 900 }),
       venda({ id: 'b', numero: 'PD-002', entrega: '2026-07-10', valor: 4000 }),
     ])
-    render(<ClienteFicha id="c-1" periodo="2026-06" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" periodo="2026-06" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(valorDaMetrica('Faturado / mês')).toBe('R$ 900')
   })
@@ -638,17 +638,108 @@ describe('ClienteFicha — periodo global', () => {
       venda({ id: 'a', numero: 'PD-001', entrega: '2026-06-10', valor: 900 }),
       venda({ id: 'b', numero: 'PD-002', entrega: '2026-07-10', valor: 100 }),
     ])
-    render(<ClienteFicha id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     expect(valorDaMetrica('Faturado / mês')).toBe('R$ 1.000')
   })
 
   it('a legenda diz qual recorte vale e o que fica fora dele', async () => {
     mockRotas(cliente, [venda()])
-    render(<ClienteFicha id="c-1" periodo="2026-06" onVoltar={() => {}} onEditar={() => {}} />)
+    render(<ClienteFicha papel="admin" id="c-1" periodo="2026-06" onVoltar={() => {}} onEditar={() => {}} />)
     await screen.findByText('Mercado Bom Preço')
     const legenda = document.querySelector('.ficha-bloco-legenda') as HTMLElement
     expect(legenda).toHaveTextContent('Junho/2026')
     expect(legenda).toHaveTextContent(/histórico inteiro/i)
+  })
+})
+
+/**
+ * A ficha e a mesma historia da lista: CADASTRO sim, METRICA nao. O
+ * colaborador abre a ficha para consultar e editar o cadastro do
+ * estabelecimento; faturado, ticket, inadimplencia, health score e limite de
+ * credito ficam fora — ver `podeVerMetricasDeCadastro` (telas.ts) e o
+ * comentario da prop `papel` no componente.
+ *
+ * `limite` merece nota: e coluna de `clientes` e chega no GET que ele ja le,
+ * entao escondе-lo aqui e apresentacao, nao barreira. Esta escrito assim na
+ * funcao pura, e o relatorio da tarefa registra o mesmo.
+ */
+describe('ClienteFicha — colaborador ve o cadastro, nao as metricas', () => {
+  it('nao dispara GET /api/saidas', async () => {
+    mockRotas(cliente, [venda()])
+    render(<ClienteFicha papel="colaborador" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+
+    const rotas = mockGet.mock.calls.map(c => c[0] as string)
+    expect(rotas).toContain('/api/clientes/c-1')
+    expect(rotas).not.toContain('/api/saidas')
+  })
+
+  it('nao mostra o bloco de metricas comerciais nem os pedidos recentes', async () => {
+    mockRotas(cliente, [venda({ valor: 4200 })])
+    render(<ClienteFicha papel="colaborador" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+
+    expect(screen.queryByText('Métricas comerciais')).not.toBeInTheDocument()
+    expect(screen.queryByText('Pedidos recentes')).not.toBeInTheDocument()
+    expect(screen.queryByText('Faturado / mês')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ticket / entrega')).not.toBeInTheDocument()
+    expect(screen.queryByText('% do faturamento')).not.toBeInTheDocument()
+    expect(screen.queryByText('Inadimplência')).not.toBeInTheDocument()
+  })
+
+  it('nao mostra o health score nem o bloco de credito e inadimplencia', async () => {
+    mockRotas(cliente, [venda()])
+    render(<ClienteFicha papel="colaborador" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+
+    expect(screen.queryByText('HEALTH SCORE')).not.toBeInTheDocument()
+    expect(screen.queryByText('Crédito & inadimplência')).not.toBeInTheDocument()
+    expect(screen.queryByText('Limite de crédito')).not.toBeInTheDocument()
+    expect(screen.queryByText('Status de cobrança')).not.toBeInTheDocument()
+    expect(screen.queryByText('Histórico de atrasos')).not.toBeInTheDocument()
+  })
+
+  it('mostra o cadastro, a rota e as observacoes — e o botao de editar', async () => {
+    const onEditar = vi.fn()
+    mockRotas({ ...cliente, obs: 'Prefere entrega cedo' })
+    render(<ClienteFicha papel="colaborador" id="c-1" onVoltar={() => {}} onEditar={onEditar} />)
+    await screen.findByText('Mercado Bom Preço')
+
+    expect(screen.getByText('Cadastro & rota')).toBeInTheDocument()
+    expect(screen.getByText('Sul A')).toBeInTheDocument()
+    expect(screen.getByText('2×/sem · Seg e Qui')).toBeInTheDocument()
+    expect(screen.getByText('"Prefere entrega cedo"')).toBeInTheDocument()
+    // O status do CADASTRO fica: e campo do formulario, nao score derivado.
+    // Aparece duas vezes (no cabecalho e na linha "Status" do bloco de
+    // cadastro), como acontece tambem para o admin.
+    expect(screen.getAllByText('Ativo').length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Editar cliente' }))
+    expect(onEditar).toHaveBeenCalled()
+  })
+
+  it('nao mostra o botao Excluir', async () => {
+    mockRotas(cliente)
+    render(<ClienteFicha papel="colaborador" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+
+    expect(screen.queryByRole('button', { name: 'Excluir' })).not.toBeInTheDocument()
+    // E nao ha caminho escondido para chegar na confirmacao.
+    expect(screen.queryByText(/Confirmar exclusão/)).not.toBeInTheDocument()
+  })
+
+  it('admin continua vendo metricas, credito, health score e o botao Excluir', async () => {
+    mockRotas(cliente, [venda()])
+    render(<ClienteFicha papel="admin" id="c-1" onVoltar={() => {}} onEditar={() => {}} />)
+    await screen.findByText('Mercado Bom Preço')
+
+    expect(screen.getByText('Métricas comerciais')).toBeInTheDocument()
+    expect(screen.getByText('Pedidos recentes')).toBeInTheDocument()
+    expect(screen.getByText('HEALTH SCORE')).toBeInTheDocument()
+    expect(screen.getByText('Crédito & inadimplência')).toBeInTheDocument()
+    expect(screen.getByText('Limite de crédito')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Excluir' })).toBeInTheDocument()
+    expect(mockGet.mock.calls.map(c => c[0] as string)).toContain('/api/saidas')
   })
 })

@@ -30,7 +30,7 @@ beforeEach(() => {
 
 describe('ModalProduto — criação (valores padrão)', () => {
   it('mostra os valores padrao do formulario ao criar', () => {
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     expect(screen.getByLabelText(/nome do produto/i)).toHaveValue('')
     expect(screen.getByLabelText(/unidade padr[aã]o/i)).toHaveValue('KG')
     // peso_medio comeca vazio (nao 0) — e exatamente o campo do print que
@@ -41,31 +41,31 @@ describe('ModalProduto — criação (valores padrão)', () => {
   })
 
   it('foca o campo nome ao abrir', () => {
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     expect(screen.getByLabelText(/nome do produto/i)).toHaveFocus()
   })
 
   it('titulo do dialogo indica criacao', () => {
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     expect(screen.getByRole('dialog', { name: 'Novo produto' })).toBeInTheDocument()
   })
 
   it('nao mostra o botao Excluir ao criar', () => {
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     expect(screen.queryByRole('button', { name: 'Excluir' })).not.toBeInTheDocument()
   })
 })
 
 describe('ModalProduto — validação de nome', () => {
   it('nome vazio: mostra erro e nao chama a API', () => {
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Informe o nome.')
     expect(mockPost).not.toHaveBeenCalled()
   })
 
   it('nome so com espacos: mesma validacao', () => {
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: '   ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Informe o nome.')
@@ -73,20 +73,20 @@ describe('ModalProduto — validação de nome', () => {
   })
 
   it('form tem noValidate — quem bloqueia o submit e a validacao em JS, nao o navegador', () => {
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     const form = screen.getByRole('dialog').querySelector('form')
     expect(form).toHaveAttribute('novalidate')
   })
 
   it('campo nome mantem required (semantica de acessibilidade, aria-required)', () => {
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     expect(screen.getByLabelText(/nome do produto/i)).toBeRequired()
   })
 })
 
 describe('ModalProduto — validação de peso médio não-negativo', () => {
   it('peso medio negativo: mostra erro inline no campo, nao chama a API', () => {
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: 'Batata' } })
     fireEvent.change(screen.getByLabelText(/peso m[eé]dio/i), { target: { value: '-1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
@@ -96,7 +96,7 @@ describe('ModalProduto — validação de peso médio não-negativo', () => {
 
   it('valores validos (inclusive zero) nao disparam erro nenhum', async () => {
     mockPost.mockResolvedValue({ ...produtoExistente, id: 'ok-1', nome: 'Cenoura', peso_medio: 0 })
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: 'Cenoura' } })
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     await waitFor(() => expect(mockPost).toHaveBeenCalled())
@@ -107,7 +107,7 @@ describe('ModalProduto — validação de peso médio não-negativo', () => {
 describe('ModalProduto — envio', () => {
   it('envia peso_medio como numero, nao string, e a unidade escolhida', async () => {
     mockPost.mockResolvedValue({ ...produtoExistente, id: 'novo-1', nome: 'Alface' })
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: 'Alface' } })
     fireEvent.change(screen.getByLabelText(/unidade padr[aã]o/i), { target: { value: 'CX' } })
     fireEvent.change(screen.getByLabelText(/peso m[eé]dio/i), { target: { value: '2.5' } })
@@ -124,7 +124,7 @@ describe('ModalProduto — envio', () => {
     const criado = { ...produtoExistente, id: 'novo-2', nome: 'Alface' }
     mockPost.mockResolvedValue(criado)
     const onSalvo = vi.fn()
-    render(<ModalProduto produto={null} onSalvo={onSalvo} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={onSalvo} onExcluido={() => {}} onFechar={() => {}} />)
     fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: 'Alface' } })
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     await waitFor(() => expect(onSalvo).toHaveBeenCalledWith(criado))
@@ -132,7 +132,7 @@ describe('ModalProduto — envio', () => {
 
   it('campo peso_medio vazio vira 0 ao enviar', async () => {
     mockPost.mockResolvedValue({ ...produtoExistente, id: 'novo-vazio', nome: 'Rúcula', peso_medio: 0 })
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: 'Rúcula' } })
     // nao toca no campo peso_medio — ele comeca vazio
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
@@ -146,7 +146,7 @@ describe('ModalProduto — envio', () => {
 describe('ModalProduto — 409 (nome duplicado)', () => {
   it('mostra o erro no campo nome, nao como erro generico', async () => {
     mockPost.mockRejectedValue(new ErroApi(409, { erro: 'ja existe um produto com esse nome' }))
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: 'Batata' } })
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
 
@@ -159,7 +159,7 @@ describe('ModalProduto — 409 (nome duplicado)', () => {
 describe('ModalProduto — outros erros', () => {
   it('erro != 409/401 mostra mensagem generica', async () => {
     mockPost.mockRejectedValue(new Error('falha de rede'))
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     fireEvent.change(screen.getByLabelText(/nome do produto/i), { target: { value: 'Batata' } })
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     const alerta = await screen.findByRole('alert')
@@ -170,7 +170,7 @@ describe('ModalProduto — outros erros', () => {
     mockPost.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()
     render(
-      <ModalProduto
+      <ModalProduto podeExcluir
         produto={null}
         onSalvo={() => {}}
         onExcluido={() => {}}
@@ -187,7 +187,7 @@ describe('ModalProduto — outros erros', () => {
 
 describe('ModalProduto — edição', () => {
   it('preenche os campos com os dados do produto existente', () => {
-    render(<ModalProduto produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     expect(screen.getByLabelText(/nome do produto/i)).toHaveValue('Batata')
     expect(screen.getByLabelText(/unidade padr[aã]o/i)).toHaveValue('KG')
     // produtoExistente.peso_medio e 0 gravado de verdade (nao ausente) — tem
@@ -198,13 +198,13 @@ describe('ModalProduto — edição', () => {
   })
 
   it('titulo do dialogo indica edicao', () => {
-    render(<ModalProduto produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     expect(screen.getByRole('dialog', { name: 'Editar produto' })).toBeInTheDocument()
   })
 
   it('usa PUT com o id do produto ao salvar', async () => {
     mockPut.mockResolvedValue(produtoExistente)
-    render(<ModalProduto produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
     await waitFor(() =>
       expect(mockPut).toHaveBeenCalledWith(`/api/produtos/${produtoExistente.id}`, expect.anything()),
@@ -216,21 +216,21 @@ describe('ModalProduto — edição', () => {
 describe('ModalProduto — fechar', () => {
   it('clicar no fundo (overlay) fecha o modal', () => {
     const onFechar = vi.fn()
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={onFechar} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={onFechar} />)
     fireEvent.click(screen.getByRole('dialog'))
     expect(onFechar).toHaveBeenCalledOnce()
   })
 
   it('clicar dentro do formulario nao fecha o modal', () => {
     const onFechar = vi.fn()
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={onFechar} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={onFechar} />)
     fireEvent.click(screen.getByLabelText(/nome do produto/i))
     expect(onFechar).not.toHaveBeenCalled()
   })
 
   it('clicar em Cancelar fecha o modal', () => {
     const onFechar = vi.fn()
-    render(<ModalProduto produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={onFechar} />)
+    render(<ModalProduto podeExcluir produto={null} onSalvo={() => {}} onExcluido={() => {}} onFechar={onFechar} />)
     fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
     expect(onFechar).toHaveBeenCalledOnce()
   })
@@ -238,14 +238,14 @@ describe('ModalProduto — fechar', () => {
 
 describe('ModalProduto — exclusão pede confirmação', () => {
   it('clicar em Excluir nao chama a API imediatamente — mostra confirmacao', () => {
-    render(<ModalProduto produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
     expect(mockDel).not.toHaveBeenCalled()
     expect(screen.getByText(/apagado definitivamente/i)).toBeInTheDocument()
   })
 
   it('cancelar a confirmacao nao chama a API e some com o aviso', () => {
-    render(<ModalProduto produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
+    render(<ModalProduto podeExcluir produto={produtoExistente} onSalvo={() => {}} onExcluido={() => {}} onFechar={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
     fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
     expect(mockDel).not.toHaveBeenCalled()
@@ -256,7 +256,7 @@ describe('ModalProduto — exclusão pede confirmação', () => {
     mockDel.mockResolvedValue({ ok: true })
     const onExcluido = vi.fn()
     render(
-      <ModalProduto produto={produtoExistente} onSalvo={() => {}} onExcluido={onExcluido} onFechar={() => {}} />,
+      <ModalProduto podeExcluir produto={produtoExistente} onSalvo={() => {}} onExcluido={onExcluido} onFechar={() => {}} />,
     )
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
@@ -268,7 +268,7 @@ describe('ModalProduto — exclusão pede confirmação', () => {
     mockDel.mockRejectedValue(new Error('falha'))
     const onExcluido = vi.fn()
     render(
-      <ModalProduto produto={produtoExistente} onSalvo={() => {}} onExcluido={onExcluido} onFechar={() => {}} />,
+      <ModalProduto podeExcluir produto={produtoExistente} onSalvo={() => {}} onExcluido={onExcluido} onFechar={() => {}} />,
     )
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
@@ -280,7 +280,7 @@ describe('ModalProduto — exclusão pede confirmação', () => {
     mockDel.mockRejectedValue(new ErroApi(401, { erro: 'sessao invalida' }))
     const onSessaoExpirada = vi.fn()
     render(
-      <ModalProduto
+      <ModalProduto podeExcluir
         produto={produtoExistente}
         onSalvo={() => {}}
         onExcluido={() => {}}
@@ -291,5 +291,59 @@ describe('ModalProduto — exclusão pede confirmação', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar exclusão' }))
     await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalledOnce())
+  })
+})
+
+/**
+ * `podeExcluir` vem de `podeExcluirCadastro` (web/src/telas.ts) atraves de
+ * ProdutosLista. O modal nao conhece papel — so a resposta.
+ *
+ * Esconder o botao e cortesia, nao seguranca: `DELETE /api/produtos/:id`
+ * exige admin e responde 403 a colaborador venha o pedido de onde vier
+ * (api/test/permissoes_por_papel.http.test.ts). O que o botao escondido evita
+ * e oferecer uma acao que vai falhar.
+ */
+describe('ModalProduto — botao Excluir por permissao', () => {
+  const existente = { id: 'p-1', nome: 'Batata', un: 'KG' as const, peso_medio: 0 }
+
+  it('sem permissao, editando: nao ha botao Excluir', () => {
+    render(
+      <ModalProduto
+        podeExcluir={false}
+        produto={existente}
+        onSalvo={() => {}}
+        onExcluido={() => {}}
+        onFechar={() => {}}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Excluir' })).not.toBeInTheDocument()
+    // Editar continua funcionando — e o ponto da mudanca.
+    expect(screen.getByRole('button', { name: 'Salvar' })).toBeInTheDocument()
+  })
+
+  it('com permissao, editando: o botao Excluir aparece', () => {
+    render(
+      <ModalProduto
+        podeExcluir
+        produto={existente}
+        onSalvo={() => {}}
+        onExcluido={() => {}}
+        onFechar={() => {}}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Excluir' })).toBeInTheDocument()
+  })
+
+  it('criando, nem com permissao ha Excluir (nao ha o que apagar ainda)', () => {
+    render(
+      <ModalProduto
+        podeExcluir
+        produto={null}
+        onSalvo={() => {}}
+        onExcluido={() => {}}
+        onFechar={() => {}}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Excluir' })).not.toBeInTheDocument()
   })
 })

@@ -132,25 +132,36 @@ export const clientes = new Hono<{
 }>()
 
 /**
- * Ler clientes exige apenas sessao; alterar exige admin.
+ * Ler, CRIAR e EDITAR cliente exige apenas sessao; EXCLUIR exige admin.
  *
- * A tela de Clientes — com ficha, limite de credito, inadimplencia e health
- * score — continua restrita ao admin: e informacao comercial sensivel, e o
- * design coloca `clientes` em ADMIN_ONLY_SCREENS.
+ * A leitura ja era liberada, e continua pelo mesmo motivo: o colaborador
+ * lanca vendas e nao existe venda sem escolher para quem — com admin exigido
+ * em toda a rota ele abria "Nova saida" e nao conseguia selecionar o cliente.
  *
- * Mas o colaborador lanca vendas, e nao existe venda sem escolher para quem.
- * Com admin exigido em toda a rota, ele abria "Nova saida" e nao conseguia
- * selecionar o cliente — a tela a que ele tem direito ficava inutil. A leitura
- * fica liberada para preencher esse seletor; a carteira completa continua
- * fora do alcance dele porque a TELA e que e restrita, nao o endpoint.
+ * POST e PUT passaram a aceitar colaborador por decisao do dono. Quem atende
+ * o estabelecimento na rua e quem descobre que o telefone mudou, que o
+ * responsavel e outro, que ha cliente novo para cadastrar; obrigar o admin a
+ * redigitar isso depois nao protege nada — so garante que nao seja digitado.
+ * `clientes` saiu de ADMIN_ONLY_SCREENS (web/src/telas.ts) junto com esta
+ * mudanca: a TELA de cadastro deixou de ser restrita.
  *
- * Se um dia for preciso esconder tambem os campos sensiveis na leitura do
- * colaborador, o caminho e um endpoint enxuto (id e nome apenas), nao
- * bloquear de novo o que ele precisa para trabalhar.
+ * DELETE continua admin, e a assimetria e deliberada: cadastro errado se
+ * corrige editando, cadastro apagado leva junto o vinculo do historico —
+ * `saidas.cliente_id` e ON DELETE SET NULL (014_fk_set_null_por_coluna.sql),
+ * entao a venda sobrevive orfa e some da carteira daquele cliente para
+ * sempre, sem erro nenhum na tela.
+ *
+ * O QUE ESTA ROTA NAO ESCONDE, de proposito: `limite`, `prazo` e os demais
+ * campos de `clientes` saem inteiros no GET, que o colaborador precisa ler
+ * para trabalhar. Nao mostrar o limite de credito a ele e decisao da TELA
+ * (`podeVerMetricasDeCadastro`, web/src/telas.ts) e vale como apresentacao,
+ * nao como permissao. O que a permissao protege de verdade sao as metricas
+ * AGREGADAS — faturado, ticket, inadimplencia, markup —, e essas nao passam
+ * por aqui: moram em /api/relatorios e /api/lancamentos, admin-only. Se um
+ * dia for preciso esconder campo tambem na leitura, o caminho e um endpoint
+ * enxuto (id e nome), nao bloquear de novo o que ele precisa para trabalhar.
  */
 clientes.use('*', exigirSessao)
-clientes.post('*', exigirAdmin)
-clientes.put('*', exigirAdmin)
 clientes.delete('*', exigirAdmin)
 
 clientes.get('/', async (c) => {

@@ -95,6 +95,14 @@
   align-items: center;
 }
 
+/* Colaborador vê só o cadastro: as cinco colunas de métrica não são
+   renderizadas (ProdutosLista.tsx, `verMetricas`), e a grade acompanha. Sem
+   isto as sete faixas continuariam reservadas e nome + unidade ficariam
+   espremidos no canto esquerdo de uma tabela aparentemente vazia. */
+.produtos-tabela--cadastro .produtos-linha {
+  grid-template-columns: 1.4fr 0.5fr;
+}
+
 .produtos-linha--cabecalho {
   padding: 12px 18px;
   background: #f3f0e6;

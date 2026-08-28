@@ -6,6 +6,7 @@ import { ModalProduto } from '../components/ModalProduto'
 import { queryDePeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import { statusIndiceDePerdas } from '../derive/dashboard'
 import type { Health } from '../derive/clientes'
+import { podeVerMetricasDeCadastro, podeExcluirCadastro, type Papel } from '../telas'
 import './ProdutosLista.css'
 
 const NEUTRO = '#9a9784'
@@ -82,6 +83,17 @@ function NumIncompleto({ texto, n }: { texto: string; n: number }) {
 
 interface ProdutosListaProps {
   /**
+   * Quem está olhando. O colaborador vê e edita o CADASTRO (nome, unidade,
+   * peso médio) e não vê as cinco métricas — compra média, venda média,
+   * markup, margem e perda —, nem o botão de excluir. As duas decisões vêm de
+   * `podeVerMetricasDeCadastro`/`podeExcluirCadastro` (telas.ts); aqui a tela
+   * só exibe o que elas respondem.
+   *
+   * Sem valor padrão de propósito: um default seria fail-open (a tela
+   * mostraria markup para quem o TypeScript não obrigou a informar o papel).
+   */
+  papel: Papel
+  /**
    * Período global do cabeçalho (App.tsx, achado S-3). O CADASTRO não some
    * com ele: um produto não deixa de existir porque não foi comprado nem
    * vendido em julho. O que respeita o recorte são as cinco métricas
@@ -99,7 +111,9 @@ interface ProdutosListaProps {
  * ficha — a tela cuida do próprio modal (criar/editar/excluir) e refaz o
  * fetch depois de salvar, incrementando `versao`.
  */
-export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: ProdutosListaProps) {
+export function ProdutosLista({ papel, periodo = PERIODO_TODOS, onSessaoExpirada }: ProdutosListaProps) {
+  const verMetricas = podeVerMetricasDeCadastro(papel)
+  const podeExcluir = podeExcluirCadastro(papel)
   const [produtos, setProdutos] = useState<Produto[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
@@ -143,7 +157,18 @@ export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Pro
   // Refeito a cada troca de período: o agregado já sai filtrado do servidor
   // (?de=&ate=), mesma rota e mesmo recorte que RelatoriosTela e o Dashboard
   // usam — as três telas mostram o mesmo número para o mesmo mês.
+  //
+  // A TELA NÃO PEDE O QUE NÃO VAI MOSTRAR. Para colaborador o efeito sai sem
+  // buscar nada: `GET /api/relatorios/produtos` exige admin (ver
+  // api/src/routes/relatorios.ts), então a chamada voltaria 403 — um erro no
+  // console e uma ida ao servidor para alimentar colunas que não vão ser
+  // renderizadas. `agregados` fica vazio, que é o estado inicial correto.
+  //
+  // Note a ordem da garantia: o 403 é a proteção (o servidor recusa mesmo se
+  // alguém digitar a URL), e este `return` é só higiene. Trocar um pelo outro
+  // seria teatro.
   useEffect(() => {
+    if (!verMetricas) return
     let cancelado = false
     setErroMetricas('')
     api.get<ProdutoAgregado[]>(`/api/relatorios/produtos${queryDePeriodo(periodo)}`)
@@ -157,7 +182,7 @@ export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Pro
         setErroMetricas('Não foi possível carregar as métricas de compra e venda — as colunas ficam indisponíveis.')
       })
     return () => { cancelado = true }
-  }, [periodo, onSessaoExpirada])
+  }, [periodo, verMetricas, onSessaoExpirada])
 
   function aoSalvar() {
     setModal(undefined)
@@ -189,6 +214,7 @@ export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Pro
         {modal !== undefined && (
           <ModalProduto
             produto={modal}
+            podeExcluir={podeExcluir}
             onSalvo={aoSalvar}
             onExcluido={aoExcluir}
             onFechar={() => setModal(undefined)}
@@ -218,10 +244,21 @@ export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Pro
               agregado somavam caixa com quilo, então o preço médio não era por
               nada em particular. Agora a API converte cada lançamento pelo peso
               médio da embalagem e as cinco métricas são por QUILO, para
-              qualquer produto — o que também as torna comparáveis entre si. */}
-          Clique num produto para editar · preços são <strong>por quilo</strong> (caixas convertidas pelo
-          peso médio do produto), calculados das compras e vendas de{' '}
-          <strong>{rotuloPeriodo(periodo)}</strong> · o cadastro aparece inteiro, independente do período
+              qualquer produto — o que também as torna comparáveis entre si.
+
+              Sem as métricas (colaborador) a frase inteira sobre preço e
+              período seria sobre colunas que não estão na tela — a dica vira
+              só o que sobrou de verdadeiro: dá para clicar e editar. */}
+          {verMetricas
+            ? (
+              <>
+                Clique num produto para editar · preços são <strong>por quilo</strong> (caixas convertidas
+                pelo peso médio do produto), calculados das compras e vendas de{' '}
+                <strong>{rotuloPeriodo(periodo)}</strong> · o cadastro aparece inteiro, independente do
+                período
+              </>
+            )
+            : 'Clique num produto para editar'}
         </div>
         <button type="button" className="produtos-botao-novo" onClick={() => setModal(null)}>
           ＋ Novo produto
@@ -232,15 +269,23 @@ export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Pro
         <p className="produtos-aviso-metricas" role="status">{erroMetricas}</p>
       )}
 
-      <div className="produtos-tabela">
+      {/* `--cadastro` reduz a grade de sete colunas para duas (ver
+          ProdutosLista.css): sem as cinco métricas, manter as faixas vazias
+          deixaria nome e unidade espremidos num canto de uma tabela que
+          parece ter perdido o conteúdo. */}
+      <div className={verMetricas ? 'produtos-tabela' : 'produtos-tabela produtos-tabela--cadastro'}>
         <div className="produtos-linha produtos-linha--cabecalho">
           <div>PRODUTO</div>
           <div>UNIDADE</div>
-          <div className="produtos-col-num">COMPRA MÉD.</div>
-          <div className="produtos-col-num">VENDA MÉD.</div>
-          <div className="produtos-col-num">MARKUP</div>
-          <div className="produtos-col-num">MARGEM</div>
-          <div className="produtos-col-num">PERDA</div>
+          {verMetricas && (
+            <>
+              <div className="produtos-col-num">COMPRA MÉD.</div>
+              <div className="produtos-col-num">VENDA MÉD.</div>
+              <div className="produtos-col-num">MARKUP</div>
+              <div className="produtos-col-num">MARGEM</div>
+              <div className="produtos-col-num">PERDA</div>
+            </>
+          )}
         </div>
 
         {produtos.map(p => {
@@ -267,36 +312,41 @@ export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Pro
                 <span className="produtos-nome">{p.nome}</span>
               </div>
               <div><span className="produtos-un-badge">{p.un}</span></div>
-              <div className="produtos-col-num produtos-mono">
-                {compraMedia != null ? <NumIncompleto texto={moneyDetalhado(compraMedia)} n={inc} /> : '—'}
-              </div>
-              <div className="produtos-col-num produtos-mono">
-                {vendaMedia != null ? <NumIncompleto texto={moneyDetalhado(vendaMedia)} n={inc} /> : '—'}
-              </div>
-              <div className="produtos-col-num produtos-mono">
-                {linha?.markupPct != null ? <NumIncompleto texto={pctInt(linha.markupPct)} n={inc} /> : '—'}
-              </div>
-              {/* MARGEM = quanto sobra POR QUILO, e que % isso é do preço de
-                  venda (achado P-2). Esta coluna mostrava a margem TOTAL do
-                  período em R$; o total continua existindo, na coluna MARGEM
-                  de Relatórios ▸ Produtos, que é a tela de análise. Aqui é
-                  onde se decide preço de venda, e a pergunta é por quilo.
-                  Travessão pelo mesmo critério de MARKUP (sem preço de compra
-                  E de venda no período não há comparação a fazer) — nunca
-                  "R$ 0,00", que afirmaria margem zero medida. */}
-              <div className="produtos-col-num produtos-mono">
-                {linha?.margemUnit != null && linha.margemPct != null
-                  ? (
-                    <NumIncompleto
-                      texto={`${moneyDetalhado(linha.margemUnit)} · ${pctInt(linha.margemPct)}`}
-                      n={inc}
-                    />
-                  )
-                  : '—'}
-              </div>
-              <div className="produtos-col-num produtos-mono">
-                {linha?.perdaPct != null ? <NumIncompleto texto={pct1(linha.perdaPct)} n={inc} /> : '—'}
-              </div>
+              {verMetricas && (
+                <>
+                  <div className="produtos-col-num produtos-mono">
+                    {compraMedia != null ? <NumIncompleto texto={moneyDetalhado(compraMedia)} n={inc} /> : '—'}
+                  </div>
+                  <div className="produtos-col-num produtos-mono">
+                    {vendaMedia != null ? <NumIncompleto texto={moneyDetalhado(vendaMedia)} n={inc} /> : '—'}
+                  </div>
+                  <div className="produtos-col-num produtos-mono">
+                    {linha?.markupPct != null ? <NumIncompleto texto={pctInt(linha.markupPct)} n={inc} /> : '—'}
+                  </div>
+                  {/* MARGEM = quanto sobra POR QUILO, e que % isso é do preço
+                      de venda (achado P-2). Esta coluna mostrava a margem
+                      TOTAL do período em R$; o total continua existindo, na
+                      coluna MARGEM de Relatórios ▸ Produtos, que é a tela de
+                      análise. Aqui é onde se decide preço de venda, e a
+                      pergunta é por quilo. Travessão pelo mesmo critério de
+                      MARKUP (sem preço de compra E de venda no período não há
+                      comparação a fazer) — nunca "R$ 0,00", que afirmaria
+                      margem zero medida. */}
+                  <div className="produtos-col-num produtos-mono">
+                    {linha?.margemUnit != null && linha.margemPct != null
+                      ? (
+                        <NumIncompleto
+                          texto={`${moneyDetalhado(linha.margemUnit)} · ${pctInt(linha.margemPct)}`}
+                          n={inc}
+                        />
+                      )
+                      : '—'}
+                  </div>
+                  <div className="produtos-col-num produtos-mono">
+                    {linha?.perdaPct != null ? <NumIncompleto texto={pct1(linha.perdaPct)} n={inc} /> : '—'}
+                  </div>
+                </>
+              )}
             </div>
           )
         })}
@@ -316,38 +366,44 @@ export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Pro
           é a MESMA grandeza nas três telas e não pode mudar de cor conforme
           onde se olha. Mesma decisão já registrada em EntradasLista.tsx.
         */}
-        <div className="produtos-linha produtos-linha--resumo">
-          <div className="produtos-resumo-titulo">Perda média (realizada)</div>
-          <div /><div /><div /><div />
-          <div className="produtos-col-num produtos-resumo-rotulo">MÉDIA →</div>
-          <div
-            className="produtos-col-num produtos-mono produtos-resumo-valor"
-            style={totais.perdaMediaPct != null
-              ? { color: CORES_SEMAFORO[statusIndiceDePerdas(totais.perdaMediaPct)] }
-              : undefined}
-          >
-            {totais.perdaMediaPct == null
-              ? '—'
-              : totais.itensSemConversao > 0
-                // `title` próprio, e não o de `NumIncompleto`: aquele texto
-                // diz "deste produto" (é título de célula de uma linha), e
-                // reusá-lo aqui afirmaria isso sobre a soma de todos.
-                ? (
-                  <span className="produtos-incompleto" title={avisoSemConversaoTotal(totais.itensSemConversao)}>
-                    {pct1(totais.perdaMediaPct)}*
-                  </span>
-                )
-                : pct1(totais.perdaMediaPct)}
+        {verMetricas && (
+          <div className="produtos-linha produtos-linha--resumo">
+            <div className="produtos-resumo-titulo">Perda média (realizada)</div>
+            <div /><div /><div /><div />
+            <div className="produtos-col-num produtos-resumo-rotulo">MÉDIA →</div>
+            <div
+              className="produtos-col-num produtos-mono produtos-resumo-valor"
+              style={totais.perdaMediaPct != null
+                ? { color: CORES_SEMAFORO[statusIndiceDePerdas(totais.perdaMediaPct)] }
+                : undefined}
+            >
+              {totais.perdaMediaPct == null
+                ? '—'
+                : totais.itensSemConversao > 0
+                  // `title` próprio, e não o de `NumIncompleto`: aquele texto
+                  // diz "deste produto" (é título de célula de uma linha), e
+                  // reusá-lo aqui afirmaria isso sobre a soma de todos.
+                  ? (
+                    <span className="produtos-incompleto" title={avisoSemConversaoTotal(totais.itensSemConversao)}>
+                      {pct1(totais.perdaMediaPct)}*
+                    </span>
+                  )
+                  : pct1(totais.perdaMediaPct)}
+            </div>
           </div>
+        )}
+      </div>
+
+      {/* A nota é a régua das métricas (markup mínimo, perda alvo): sem as
+          colunas na tela ela ficaria falando de números que ninguém vê. */}
+      {verMetricas && (
+        <div className="produtos-nota">
+          A <strong>perda</strong> acumula da coleta e do depósito, não é estimada. Markup mínimo{' '}
+          <strong>≥ 60%</strong> · Perda alvo <strong>≤ 10%</strong>.
         </div>
-      </div>
+      )}
 
-      <div className="produtos-nota">
-        A <strong>perda</strong> acumula da coleta e do depósito, não é estimada. Markup mínimo{' '}
-        <strong>≥ 60%</strong> · Perda alvo <strong>≤ 10%</strong>.
-      </div>
-
-      {totais.itensSemConversao > 0 && (
+      {verMetricas && totais.itensSemConversao > 0 && (
         // A nota fala do total da tela, então tem redação própria: o texto de
         // `avisoSemConversao` é "deste produto" (título de célula), e reusá-lo
         // aqui diria "deste produto" sobre a soma de vários.
@@ -364,6 +420,7 @@ export function ProdutosLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Pro
       {modal !== undefined && (
         <ModalProduto
           produto={modal}
+          podeExcluir={podeExcluir}
           onSalvo={aoSalvar}
           onExcluido={aoExcluir}
           onFechar={() => setModal(undefined)}

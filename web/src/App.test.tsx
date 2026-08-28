@@ -188,7 +188,10 @@ describe('App — o botao Sair tambem serve pra trocar de usuario sem fechar o n
     const email = await screen.findByLabelText('E-mail') as HTMLInputElement
     expect(email.value).toBe('')
     expect(screen.getByLabelText('Senha')).toHaveValue('')
-    expect(screen.queryByRole('button', { name: 'Fornecedores' })).not.toBeInTheDocument()
+    // 'Financeiro' e nao 'Fornecedores': Fornecedores passou a ser tela do
+    // colaborador tambem, entao ela nao serve mais de sentinela de "nada de
+    // admin na tela". As cinco que continuam admin-only servem.
+    expect(screen.queryByRole('button', { name: 'Financeiro' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Período')).not.toBeInTheDocument()
     expect(screen.queryByText('SALDO EM CAIXA · ACUMULADO')).not.toBeInTheDocument()
 
@@ -199,7 +202,8 @@ describe('App — o botao Sair tambem serve pra trocar de usuario sem fechar o n
 
     await screen.findByText('Entradas (Compras)', { selector: '.shell-header-titulo' })
     expect((screen.getByLabelText('Período') as HTMLSelectElement).value).toBe('all')
-    expect(screen.queryByRole('button', { name: 'Fornecedores' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Financeiro' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Relatórios' })).not.toBeInTheDocument()
     expect(screen.queryByText('SALDO EM CAIXA · ACUMULADO')).not.toBeInTheDocument()
   })
 })
@@ -260,11 +264,11 @@ describe('App — a sessao expirar nao pode descartar o que esta na tela', () =>
 
     const seletor = await screen.findByLabelText('Período') as HTMLSelectElement
     fireEvent.change(seletor, { target: { value: seletor.options[1].value } })
-    fireEvent.click(screen.getByRole('button', { name: 'Fornecedores' }))
-    await screen.findByText('Fornecedores', { selector: '.shell-header-titulo' })
+    fireEvent.click(screen.getByRole('button', { name: 'Financeiro' }))
+    await screen.findByText('Financeiro', { selector: '.shell-header-titulo' })
 
     expirarSessaoNoServidor()
-    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Relatórios' }))
     await screen.findByText(AVISO_EXPIRADA)
 
     mockTudo('colaborador', 'u-funcionario')
@@ -272,8 +276,12 @@ describe('App — a sessao expirar nao pode descartar o que esta na tela', () =>
 
     await screen.findByText('Entradas (Compras)', { selector: '.shell-header-titulo' })
     expect(screen.queryByText(AVISO_EXPIRADA)).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Produtos' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Fornecedores' })).not.toBeInTheDocument()
+    // A tela em que o dono estava (Financeiro) e a que ele tentou abrir
+    // (Relatorios) continuam admin-only — sao elas que provam que o
+    // funcionario nao herdou a tela do anterior. Produtos e Fornecedores
+    // deixaram de servir para isso: agora ele TAMBEM as ve.
+    expect(screen.queryByRole('button', { name: 'Financeiro' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Relatórios' })).not.toBeInTheDocument()
     expect(screen.queryByText('SALDO EM CAIXA · ACUMULADO')).not.toBeInTheDocument()
     expect((screen.getByLabelText('Período') as HTMLSelectElement).value).toBe('all')
   })
@@ -640,5 +648,64 @@ describe('App — a segunda aba derruba a primeira (consequencia aceita)', () =>
     expect(await em1.findByText(AVISO_EXPIRADA)).toBeInTheDocument()
     expect(em1.getByLabelText('Nome do estabelecimento')).toHaveValue('Mercado do Zé')
     expect(em1.getByLabelText('Período')).toBeInTheDocument()
+  })
+})
+
+/**
+ * O colaborador ganhou as tres telas de CADASTRO (Clientes, Produtos,
+ * Fornecedores). Aqui o que se prova e a navegacao inteira montada — menu,
+ * roteamento e guarda de tela —, nao o conteudo de cada uma (isso esta nos
+ * testes de cada tela).
+ */
+describe('App — as tres telas de cadastro para o colaborador', () => {
+  const CADASTROS = ['Clientes', 'Produtos', 'Fornecedores']
+  const CONTINUAM_RESTRITAS = [
+    'Saúde do Negócio', 'Financeiro', 'Relatórios', 'Funcionários', 'Veículos',
+  ]
+
+  it('o colaborador navega para as tres pelo menu', async () => {
+    mockTudo('colaborador', 'u-func')
+    render(<App />)
+    await screen.findByText('Entradas (Compras)', { selector: '.shell-header-titulo' })
+
+    for (const tela of CADASTROS) {
+      fireEvent.click(screen.getByRole('button', { name: tela }))
+      await screen.findByText(tela, { selector: '.shell-header-titulo' })
+    }
+  })
+
+  it('as cinco telas de dinheiro agregado continuam fora do menu dele', async () => {
+    mockTudo('colaborador', 'u-func')
+    render(<App />)
+    await screen.findByText('Entradas (Compras)', { selector: '.shell-header-titulo' })
+
+    for (const tela of CONTINUAM_RESTRITAS) {
+      expect(screen.queryByRole('button', { name: tela })).not.toBeInTheDocument()
+    }
+  })
+
+  it('na tela de Produtos, o colaborador nao dispara a busca das metricas', async () => {
+    mockTudo('colaborador', 'u-func')
+    render(<App />)
+    await screen.findByText('Entradas (Compras)', { selector: '.shell-header-titulo' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Produtos' }))
+    await screen.findByText('Produtos', { selector: '.shell-header-titulo' })
+
+    // O 403 e a protecao (GET /api/relatorios/produtos exige admin); nao
+    // pedir e a higiene que evita o erro no console e a viagem a toa.
+    const rotas = mockGet.mock.calls.map(c => c[0] as string)
+    expect(rotas.some(r => r.startsWith('/api/relatorios/produtos'))).toBe(false)
+  })
+
+  it('o admin continua alcancando as onze telas, cadastro e dinheiro', async () => {
+    mockTudo('admin', 'u-dono')
+    render(<App />)
+    await screen.findByLabelText('Período')
+
+    for (const tela of [...CADASTROS, ...CONTINUAM_RESTRITAS]) {
+      fireEvent.click(screen.getByRole('button', { name: tela }))
+      await screen.findByText(tela, { selector: '.shell-header-titulo' })
+    }
   })
 })

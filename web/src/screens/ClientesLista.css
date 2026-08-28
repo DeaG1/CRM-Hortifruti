@@ -102,6 +102,14 @@
   overflow: hidden;
 }
 
+/* Colaborador vê só o cadastro: as cinco colunas de métrica não são
+   renderizadas (ClientesLista.tsx, `verMetricas`), e a grade acompanha —
+   senão as sete faixas continuariam reservadas e a tabela pareceria ter
+   perdido o conteúdo. */
+.clientes-tabela--cadastro .clientes-linha {
+  grid-template-columns: 1.6fr 1fr;
+}
+
 .clientes-linha {
   display: grid;
   grid-template-columns: 1.6fr 1fr 0.9fr 0.9fr 0.7fr 0.8fr 0.9fr;

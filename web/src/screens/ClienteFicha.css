@@ -247,6 +247,14 @@
   gap: 16px;
 }
 
+/* Colaborador vê só o cadastro: a coluna da esquerda (métricas comerciais e
+   pedidos recentes) não é renderizada (ClienteFicha.tsx, `verMetricas`), e a
+   grade vira uma coluna — sem isto a ficha abriria com metade da largura
+   vazia e o cadastro espremido na direita. */
+.ficha-grid--cadastro {
+  grid-template-columns: 1fr;
+}
+
 .ficha-col {
   display: flex;
   flex-direction: column;

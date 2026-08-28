@@ -110,21 +110,31 @@ export const produtos = new Hono<{
 }>()
 
 /**
- * Ler produtos exige apenas sessao; alterar exige admin.
+ * Ler, CRIAR e EDITAR produto exige apenas sessao; EXCLUIR exige admin.
  *
- * A tela de Produtos e restrita ao admin no design, e essa restricao continua
- * valendo — mas ela e sobre GERENCIAR o cadastro, nao sobre CONSULTAR a lista.
- * O colaborador tem acesso a Entradas, Saidas e Estoque, e os tres precisam do
- * seletor de produto para lancar qualquer movimentacao.
+ * A leitura ja era liberada, e continua pelo mesmo motivo: o colaborador tem
+ * Entradas, Saidas e Estoque, e os tres precisam do seletor de produto. Com
+ * `exigirAdmin` em tudo ele abria "Nova entrada", recebia "nao foi possivel
+ * carregar a lista de produtos" e nao conseguia trabalhar.
  *
- * Com `exigirAdmin` em tudo, o colaborador abria "Nova entrada", recebia
- * "nao foi possivel carregar a lista de produtos" e simplesmente nao conseguia
- * trabalhar — as telas a que ele tem direito ficavam inuteis. Descoberto ao
- * construir os modais de entrada e perda.
+ * POST e PUT passaram a aceitar colaborador por decisao do dono, e aqui isso
+ * fecha um buraco pratico: quem recebe a mercadoria e quem encontra o produto
+ * que ainda nao existe no cadastro. Sem poder criar, o lancamento parava ali.
+ * `produtos` saiu de ADMIN_ONLY_SCREENS (web/src/telas.ts) junto.
+ *
+ * DELETE continua admin. As FKs de entrada_itens, saida_itens e perdas para
+ * `produtos` sao ON DELETE RESTRICT, entao produto com movimentacao ja nao
+ * pode ser apagado por ninguem (ver o 23503 em respostaDeErroPg acima) — o
+ * que a restricao guarda e o produto AINDA sem movimentacao, que some sem
+ * resistencia do banco.
+ *
+ * O QUE ESTA ROTA NAO ENTREGA, e por isso o dono aceitou liberar a escrita:
+ * nome, unidade e peso medio, nada mais. Compra media, venda media, markup,
+ * margem e perda nao sao colunas de `produtos` — sao o agregado de
+ * GET /api/relatorios/produtos, que exige admin inclusive na leitura. Ler o
+ * cadastro daqui nao aproxima ninguem daqueles cinco numeros.
  */
 produtos.use('*', exigirSessao)
-produtos.post('*', exigirAdmin)
-produtos.put('*', exigirAdmin)
 produtos.delete('*', exigirAdmin)
 
 produtos.get('/', async (c) => {

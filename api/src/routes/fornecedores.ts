@@ -124,17 +124,31 @@ export const fornecedores = new Hono<{
 }>()
 
 /**
- * Ler fornecedores exige apenas sessao; alterar exige admin.
+ * Ler, CRIAR e EDITAR fornecedor exige apenas sessao; EXCLUIR exige admin.
  *
- * A tela de Fornecedores e restrita ao admin no design, e continua sendo — mas
- * a restricao e sobre GERENCIAR o cadastro, nao sobre CONSULTAR a lista. O
- * colaborador lanca entradas, e o modal de entrada precisa do seletor de
- * fornecedor. Com admin exigido em tudo, ele abria "Nova entrada" e nao
- * conseguia escolher de quem comprou.
+ * A leitura ja era liberada, e continua pelo mesmo motivo: o colaborador
+ * lanca entradas e o modal de entrada precisa do seletor de fornecedor — com
+ * admin exigido em tudo ele nao conseguia escolher de quem comprou.
+ *
+ * POST e PUT passaram a aceitar colaborador por decisao do dono. Quem vai a
+ * feira e quem volta com produtor novo, com o contato certo e com a lista do
+ * que aquele produtor realmente entrega (o `produto_ids` do PUT abaixo);
+ * anotar isso num papel para o admin digitar depois e como perder a
+ * informacao. `fornecedores` saiu de ADMIN_ONLY_SCREENS (web/src/telas.ts).
+ *
+ * DELETE continua admin: `entradas.fornecedor_id` e ON DELETE SET NULL
+ * (014_fk_set_null_por_coluna.sql), entao apagar um fornecedor nao dá erro
+ * nenhum — so desliga silenciosamente todas as coletas dele do preco medio e
+ * da variacao que o dono usa para decidir de quem comprar.
+ *
+ * O QUE ESTA ROTA NAO ENTREGA: nome, regiao, contato e os produtos
+ * vinculados. Preco medio de compra, variacao, aproveitamento e ultima coleta
+ * nao vem daqui — sao derivados de GET /api/entradas, e quem os esconde do
+ * colaborador e a TELA (`podeVerMetricasDeCadastro`, web/src/telas.ts), nao
+ * esta rota. Ver o relatorio dessa decisao: /api/entradas ja e acessivel a
+ * ele porque Entradas e tela dele.
  */
 fornecedores.use('*', exigirSessao)
-fornecedores.post('*', exigirAdmin)
-fornecedores.put('*', exigirAdmin)
 fornecedores.delete('*', exigirAdmin)
 
 /**

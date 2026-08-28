@@ -27,16 +27,22 @@ const ITENS_ADMIN = [
   'Saúde do Negócio', 'Clientes', 'Entradas (Compras)', 'Saídas (Vendas)', 'Estoque',
   'Fornecedores', 'Produtos', 'Funcionários', 'Veículos', 'Financeiro', 'Relatórios',
 ]
-const ITENS_ADMIN_ONLY = [
-  'Saúde do Negócio', 'Clientes', 'Fornecedores', 'Produtos', 'Funcionários', 'Financeiro',
-  'Relatórios', 'Veículos',
-]
 // Veiculos PASSOU a ser admin-only. Enquanto a tela era check-in/check-out ela
 // ficava de fora: quem pega o carro no dia a dia e o colaborador. Com o
 // check-in/check-out removido, o que a tela mostra e quanto cada carro custou
 // no periodo — dado que vem de GET /api/lancamentos, admin-only. Ver o
 // comentario de ADMIN_ONLY_SCREENS em telas.ts.
-const ITENS_COLABORADOR = ['Entradas (Compras)', 'Saídas (Vendas)', 'Estoque']
+//
+// Clientes, Fornecedores e Produtos fizeram o caminho INVERSO: sairam da lista
+// admin-only, porque o colaborador passou a ver, criar e editar os tres
+// cadastros. O que ele nao ve nessas telas sao as metricas derivadas, e isso
+// nao e decidido aqui — o Shell so monta o menu.
+const ITENS_ADMIN_ONLY = [
+  'Saúde do Negócio', 'Funcionários', 'Financeiro', 'Relatórios', 'Veículos',
+]
+const ITENS_COLABORADOR = [
+  'Clientes', 'Entradas (Compras)', 'Saídas (Vendas)', 'Estoque', 'Fornecedores', 'Produtos',
+]
 
 describe('Shell — menu por papel', () => {
   it('admin ve as 11 entradas do menu', () => {
@@ -50,7 +56,7 @@ describe('Shell — menu por papel', () => {
     }
   })
 
-  it('colaborador ve so Entradas, Saidas e Estoque', () => {
+  it('colaborador ve operacao MAIS os tres cadastros', () => {
     render(
       <Shell papel="colaborador" telaAtual="entradas" {...PERIODO_PADRAO} onNavegar={() => {}} onSair={() => {}}>
         <p>conteudo</p>
@@ -62,6 +68,22 @@ describe('Shell — menu por papel', () => {
     for (const label of ITENS_ADMIN_ONLY) {
       expect(screen.queryByRole('button', { name: label })).not.toBeInTheDocument()
     }
+  })
+
+  // A metade que ninguem pode afrouxar por tabela junto com a outra: liberar
+  // os cadastros nao pode ter arrastado Financeiro, Relatorios, Funcionarios,
+  // Veiculos e o painel junto.
+  it('colaborador continua sem as cinco telas de dinheiro agregado', () => {
+    render(
+      <Shell papel="colaborador" telaAtual="clientes" {...PERIODO_PADRAO} onNavegar={() => {}} onSair={() => {}}>
+        <p>conteudo</p>
+      </Shell>,
+    )
+    expect(screen.queryByRole('button', { name: 'Financeiro' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Relatórios' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Funcionários' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Veículos' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Saúde do Negócio' })).not.toBeInTheDocument()
   })
 
   it('clicar num item do menu chama onNavegar com a chave certa', () => {

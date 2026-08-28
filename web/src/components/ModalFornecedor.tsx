@@ -10,6 +10,14 @@ interface ModalFornecedorProps {
   fornecedor: Partial<Fornecedor> | null // null = criando; `produtos` (se vier) prefila os selecionados
   /** Catálogo completo, para montar a lista de seleção — vem de GET /api/produtos. */
   produtosDisponiveis: Produto[]
+  /**
+   * Mostra ou não o botão "Excluir" — mesma história de ModalProduto: vem de
+   * `podeExcluirCadastro` (web/src/telas.ts) através de FornecedoresLista, o
+   * modal não conhece papel, e quem realmente barra é a API
+   * (`DELETE /api/fornecedores/:id` exige admin). Sem default, para nenhum
+   * ponto de uso conseguir esquecer de decidir.
+   */
+  podeExcluir: boolean
   onSalvo: (f: Fornecedor) => void
   /** Exclusão confirmada e concluída na API — quem chama decide o que fazer (fechar, recarregar a lista). */
   onExcluido: (id: string) => void
@@ -19,7 +27,10 @@ interface ModalFornecedorProps {
 }
 
 export function ModalFornecedor(
-  { fornecedor, produtosDisponiveis, onSalvo, onExcluido, onFechar, onSessaoExpirada }: ModalFornecedorProps,
+  {
+    fornecedor, produtosDisponiveis, podeExcluir,
+    onSalvo, onExcluido, onFechar, onSessaoExpirada,
+  }: ModalFornecedorProps,
 ) {
   const [rascunho, setRascunho] = useState<Rascunho>({ ...FORNECEDOR_NOVO, ...(fornecedor ?? {}) })
   const [produtoIds, setProdutoIds] = useState<string[]>((fornecedor?.produtos ?? []).map(p => p.id))
@@ -203,7 +214,7 @@ export function ModalFornecedor(
         </div>
 
         <div className="modal-rodape">
-          {editando && !confirmandoExclusao && (
+          {editando && podeExcluir && !confirmandoExclusao && (
             <button type="button" className="modal-botao-excluir" onClick={() => setConfirmandoExclusao(true)}>
               Excluir
             </button>

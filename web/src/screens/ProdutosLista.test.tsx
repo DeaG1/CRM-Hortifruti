@@ -61,27 +61,27 @@ beforeEach(() => {
 describe('ProdutosLista — os quatro estados', () => {
   it('carregando: mostra indicador enquanto a chamada esta pendente', () => {
     mockRotas(new Promise(() => {})) // nunca resolve nesta suite
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     expect(screen.getByText('Carregando…')).toBeInTheDocument()
   })
 
   it('erro: mostra alerta quando a API falha por motivo != sessao expirada', async () => {
     mockRotas(new Error('falha de rede'))
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     const alerta = await screen.findByRole('alert')
     expect(alerta).toHaveTextContent('Não foi possível carregar os produtos.')
   })
 
   it('vazio: mostra "nenhum produto cadastrado" quando a API devolve lista vazia', async () => {
     mockRotas([])
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     expect(await screen.findByText(/nenhum produto cadastrado/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /cadastrar primeiro produto/i })).toBeInTheDocument()
   })
 
   it('com dados: lista os produtos recebidos', async () => {
     mockRotas([produto({ id: '1', nome: 'Batata' }), produto({ id: '2', nome: 'Cenoura' })])
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     expect(await screen.findByText('Batata')).toBeInTheDocument()
     expect(screen.getByText('Cenoura')).toBeInTheDocument()
   })
@@ -98,7 +98,7 @@ describe('ProdutosLista — sessao expirada (401)', () => {
       new ErroApi(401, { erro: 'sessao invalida' }),
     )
     const onSessaoExpirada = vi.fn()
-    render(<ProdutosLista onSessaoExpirada={onSessaoExpirada} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={onSessaoExpirada} />)
     await waitFor(() => expect(onSessaoExpirada).toHaveBeenCalled())
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
@@ -113,7 +113,7 @@ describe('ProdutosLista — metricas (GET /api/relatorios/produtos)', () => {
         perda_coleta_qtd: 0, perda_deposito_qtd: 1,
       })],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     const linha = (await screen.findByText('Batata')).closest('.produtos-linha') as HTMLElement
 
     // compra media 50/10, venda media 80/10
@@ -136,7 +136,7 @@ describe('ProdutosLista — metricas (GET /api/relatorios/produtos)', () => {
       [produto({ id: '1', nome: 'Batata' })],
       [agregado({ produto_id: '1', compra_qtd: 10, compra_valor: 40, venda_qtd: 0, venda_valor: 0 })],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     const linha = (await screen.findByText('Batata')).closest('.produtos-linha') as HTMLElement
 
     // custo medio (compra) e um dado real: 40/10 = 4,00
@@ -148,7 +148,7 @@ describe('ProdutosLista — metricas (GET /api/relatorios/produtos)', () => {
 
   it('produto sem nenhuma movimentacao (fora do agregado) mostra as cinco colunas em travessao', async () => {
     mockRotas([produto({ id: '1', nome: 'Batata' })], [])
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     // 5 colunas por linha (compra, venda, markup, margem, perda) + 1 no resumo de perda media
     expect(screen.getAllByText('—')).toHaveLength(6)
@@ -156,7 +156,7 @@ describe('ProdutosLista — metricas (GET /api/relatorios/produtos)', () => {
 
   it('falha em /api/relatorios/produtos mantem a lista de produtos visivel, com metricas indisponiveis', async () => {
     mockRotas([produto({ id: '1', nome: 'Batata' })], new Error('falha de rede'))
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
 
     // o cadastro aparece normalmente...
     expect(await screen.findByText('Batata')).toBeInTheDocument()
@@ -168,7 +168,7 @@ describe('ProdutosLista — metricas (GET /api/relatorios/produtos)', () => {
 
   it('mostra a unidade do produto', async () => {
     mockRotas([produto({ un: 'CX' })])
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     expect(await screen.findByText('CX')).toBeInTheDocument()
   })
 })
@@ -176,7 +176,7 @@ describe('ProdutosLista — metricas (GET /api/relatorios/produtos)', () => {
 describe('ProdutosLista — abrir modal', () => {
   it('clicar em "Novo produto" abre o modal de criacao', async () => {
     mockRotas([produto()])
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     fireEvent.click(screen.getByRole('button', { name: /novo produto/i }))
     expect(screen.getByRole('dialog', { name: 'Novo produto' })).toBeInTheDocument()
@@ -184,7 +184,7 @@ describe('ProdutosLista — abrir modal', () => {
 
   it('clicar numa linha abre o modal de edicao com os dados do produto', async () => {
     mockRotas([produto({ id: 'xyz', nome: 'Batata' })])
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     fireEvent.click(await screen.findByText('Batata'))
     expect(screen.getByRole('dialog', { name: 'Editar produto' })).toBeInTheDocument()
     expect(screen.getByLabelText(/nome do produto/i)).toHaveValue('Batata')
@@ -192,7 +192,7 @@ describe('ProdutosLista — abrir modal', () => {
 
   it('vazio: clicar em "Cadastrar primeiro produto" abre o modal de criacao', async () => {
     mockRotas([])
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     fireEvent.click(await screen.findByRole('button', { name: /cadastrar primeiro produto/i }))
     expect(screen.getByRole('dialog', { name: 'Novo produto' })).toBeInTheDocument()
   })
@@ -216,7 +216,7 @@ describe('ProdutosLista — recarrega apos salvar/excluir no modal', () => {
       return Promise.reject(new Error('rota nao mockada: ' + url))
     })
     mockPost.mockResolvedValue(produto({ id: '2', nome: 'Cenoura' }))
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
 
     fireEvent.click(screen.getByRole('button', { name: /novo produto/i }))
@@ -239,7 +239,7 @@ describe('ProdutosLista — recarrega apos salvar/excluir no modal', () => {
       return Promise.reject(new Error('rota nao mockada: ' + url))
     })
     mockDel.mockResolvedValue({ ok: true })
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     fireEvent.click(await screen.findByText('Batata'))
 
     fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
@@ -269,7 +269,7 @@ describe('ProdutosLista — metricas incompletas (lancamento sem peso medio)', (
         perda_deposito_qtd: 1,
       })],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     const linha = (await screen.findByText('Batata')).closest('.produtos-linha') as HTMLElement
 
     expect(within(linha).getByText('R$ 5,00')).toBeInTheDocument()
@@ -285,7 +285,7 @@ describe('ProdutosLista — metricas incompletas (lancamento sem peso medio)', (
         perda_deposito_qtd: 1, itens_sem_conversao: 2,
       })],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     const linha = (await screen.findByText('Batata')).closest('.produtos-linha') as HTMLElement
 
     // compra media 5,00 · venda media 8,00 · markup 60% · margem R$ 3,00 · 38% · perda 10,0%
@@ -306,7 +306,7 @@ describe('ProdutosLista — metricas incompletas (lancamento sem peso medio)', (
         agregado({ produto_id: '2', nome: 'Cenoura', compra_qtd: 10, compra_valor: 50, itens_sem_conversao: 1 }),
       ],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
 
     const nota = screen.getByRole('note')
@@ -317,14 +317,14 @@ describe('ProdutosLista — metricas incompletas (lancamento sem peso medio)', (
 
   it('produto sem metrica nenhuma (fora do agregado) nao ganha marca — nao ha o que sinalizar', async () => {
     mockRotas([produto({ id: '1', nome: 'Batata' })], [])
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
   })
 
   it('a dica do topo diz que os precos sao por quilo, nao "por unidade do produto"', async () => {
     mockRotas([produto()])
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     // Depois da conversao na API, compra media e venda media sao R$/kg para
     // qualquer produto — inclusive os comprados em caixa.
@@ -337,14 +337,14 @@ describe('ProdutosLista — metricas incompletas (lancamento sem peso medio)', (
 describe('ProdutosLista — periodo global', () => {
   it('busca o agregado ja filtrado no servidor', async () => {
     mockRotas([produto()], [agregado()])
-    render(<ProdutosLista periodo="2026-06" onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" periodo="2026-06" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     expect(mockGet).toHaveBeenCalledWith('/api/relatorios/produtos?de=2026-06&ate=2026-06')
   })
 
   it('em "all" vai sem query nenhuma', async () => {
     mockRotas([produto()], [agregado()])
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     expect(mockGet).toHaveBeenCalledWith('/api/relatorios/produtos')
   })
@@ -353,14 +353,14 @@ describe('ProdutosLista — periodo global', () => {
     // O servidor devolve o agregado VAZIO para um mes sem compra nem venda —
     // e o produto continua listado, com travessao nas colunas derivadas.
     mockRotas([produto({ id: '1', nome: 'Batata' }), produto({ id: '2', nome: 'Cebola' })], [])
-    render(<ProdutosLista periodo="2026-01" onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" periodo="2026-01" onSessaoExpirada={() => {}} />)
     expect(await screen.findByText('Batata')).toBeInTheDocument()
     expect(screen.getByText('Cebola')).toBeInTheDocument()
   })
 
   it('a dica diz qual recorte vale para as metricas, e que o cadastro nao segue', async () => {
     mockRotas([produto()], [agregado()])
-    render(<ProdutosLista periodo="2026-06" onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" periodo="2026-06" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     const dica = screen.getByText(/calculados das compras e vendas/i)
     expect(dica).toHaveTextContent('Junho/2026')
@@ -393,7 +393,7 @@ describe('ProdutosLista — perda media realizada (rodape)', () => {
         agregado({ produto_id: '2', nome: 'Batata', compra_qtd: 900, compra_valor: 900 }),
       ],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Alface')
     expect(within(rodape()).getByText('2,0%')).toBeInTheDocument()
     expect(within(rodape()).queryByText('10,0%')).not.toBeInTheDocument()
@@ -409,7 +409,7 @@ describe('ProdutosLista — perda media realizada (rodape)', () => {
         perda_coleta_qtd: 10, perda_deposito_qtd: 15,
       })],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     expect(within(rodape()).getByText('5,0%')).toBeInTheDocument()
   })
@@ -419,7 +419,7 @@ describe('ProdutosLista — perda media realizada (rodape)', () => {
       [produto({ id: '1', nome: 'Batata' })],
       [agregado({ produto_id: '1', compra_qtd: 200, compra_valor: 400 })],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     expect(within(rodape()).getByText('0,0%')).toBeInTheDocument()
     expect(within(rodape()).queryByText('—')).not.toBeInTheDocument()
@@ -430,7 +430,7 @@ describe('ProdutosLista — perda media realizada (rodape)', () => {
       [produto({ id: '1', nome: 'Batata' })],
       [agregado({ produto_id: '1', compra_qtd: 0, compra_valor: 0, venda_qtd: 5, venda_valor: 40 })],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     expect(within(rodape()).getByText('—')).toBeInTheDocument()
     expect(within(rodape()).queryByText('0,0%')).not.toBeInTheDocument()
@@ -438,7 +438,7 @@ describe('ProdutosLista — perda media realizada (rodape)', () => {
 
   it('falha em /api/relatorios/produtos deixa a perda media em travessao, com a lista visivel', async () => {
     mockRotas([produto({ id: '1', nome: 'Batata' })], new Error('falha de rede'))
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     expect(await screen.findByText('Batata')).toBeInTheDocument()
     expect(await screen.findByRole('status')).toHaveTextContent(/não foi possível carregar as métricas/i)
     expect(within(rodape()).getByText('—')).toBeInTheDocument()
@@ -452,7 +452,7 @@ describe('ProdutosLista — perda media realizada (rodape)', () => {
         [produto({ id: '1', nome: 'Batata' })],
         [agregado({ produto_id: '1', compra_qtd: 100, compra_valor: 200, perda_coleta_qtd: perdaKg })],
       )
-      const { unmount } = render(<ProdutosLista onSessaoExpirada={() => {}} />)
+      const { unmount } = render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
       await screen.findByText('Batata')
       const cor = (rodape().querySelector('.produtos-resumo-valor') as HTMLElement).style.color
       unmount()
@@ -474,7 +474,7 @@ describe('ProdutosLista — perda media realizada (rodape)', () => {
         perda_coleta_qtd: 10, itens_sem_conversao: 3,
       })],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     const celula = within(rodape()).getByText('10,0%*')
     expect(celula.getAttribute('title')).toContain('3 lançamentos')
@@ -500,7 +500,7 @@ describe('ProdutosLista — coluna MARGEM e por quilo, com a %', () => {
       [produto({ id: '1', nome: 'Batata' })],
       [agregado({ produto_id: '1', compra_qtd: 100, compra_valor: 200, venda_qtd: 50, venda_valor: 160 })],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     expect(within(linhaDe('Batata')).getByText('R$ 1,20 · 38%')).toBeInTheDocument()
     expect(within(linhaDe('Batata')).getByText('60%')).toBeInTheDocument()
@@ -512,7 +512,7 @@ describe('ProdutosLista — coluna MARGEM e por quilo, com a %', () => {
       [produto({ id: '1', nome: 'Batata' })],
       [agregado({ produto_id: '1', compra_qtd: 10, compra_valor: 30, venda_qtd: 10, venda_valor: 20 })],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     expect(within(linhaDe('Batata')).getByText('R$ -1,00 · -50%')).toBeInTheDocument()
   })
@@ -522,7 +522,7 @@ describe('ProdutosLista — coluna MARGEM e por quilo, com a %', () => {
       [produto({ id: '1', nome: 'Batata' })],
       [agregado({ produto_id: '1', compra_qtd: 10, compra_valor: 30 })],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     const linha = linhaDe('Batata')
     // venda media, markup e margem: os tres em travessao
@@ -535,10 +535,91 @@ describe('ProdutosLista — coluna MARGEM e por quilo, com a %', () => {
       [produto({ id: '1', nome: 'Batata' })],
       [agregado({ produto_id: '1', venda_qtd: 10, venda_valor: 80 })],
     )
-    render(<ProdutosLista onSessaoExpirada={() => {}} />)
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
     await screen.findByText('Batata')
     // compra media, markup, margem e perda (compra_qtd 0): quatro travessoes
     const linha = linhaDe('Batata')
     expect(within(linha).getAllByText('—')).toHaveLength(4)
+  })
+})
+
+/**
+ * O colaborador passou a ver, criar e editar o CADASTRO de produtos, e a NAO
+ * ver as cinco metricas (compra media, venda media, markup, margem, perda) —
+ * ver `podeVerMetricasDeCadastro` em telas.ts.
+ *
+ * Estes testes sao sobre o que a TELA mostra. A protecao de verdade e outra e
+ * mora no servidor: `GET /api/relatorios/produtos` exige admin
+ * (api/test/permissoes_por_papel.http.test.ts). Se so estes daqui existissem,
+ * bastaria abrir o navegador para ver o markup.
+ */
+describe('ProdutosLista — colaborador ve o cadastro, nao as metricas', () => {
+  /** Um agregado com numero em toda metrica: se alguma vazar, vaza aqui. */
+  const AGREGADO_CHEIO = agregado({
+    produto_id: '1', compra_qtd: 100, compra_valor: 250,
+    venda_qtd: 80, venda_valor: 480, perda_coleta_qtd: 4, perda_deposito_qtd: 6,
+  })
+
+  const COLUNAS_DE_METRICA = ['COMPRA MÉD.', 'VENDA MÉD.', 'MARKUP', 'MARGEM', 'PERDA']
+
+  it('nao dispara a busca das metricas — a tela nao pede o que nao vai mostrar', async () => {
+    mockRotas([produto()], [AGREGADO_CHEIO])
+    render(<ProdutosLista papel="colaborador" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+
+    const rotas = mockGet.mock.calls.map(c => c[0] as string)
+    expect(rotas).toContain('/api/produtos')
+    // Nem com querystring: a rota e casada por prefixo porque leva ?de=&ate=.
+    expect(rotas.some(r => r.startsWith('/api/relatorios/produtos'))).toBe(false)
+  })
+
+  it('nao mostra nenhuma das cinco colunas de metrica', async () => {
+    mockRotas([produto()], [AGREGADO_CHEIO])
+    render(<ProdutosLista papel="colaborador" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+
+    for (const coluna of COLUNAS_DE_METRICA) {
+      expect(screen.queryByText(coluna)).not.toBeInTheDocument()
+    }
+    // O rodape e a regua das metricas — sai junto com elas.
+    expect(screen.queryByText('Perda média (realizada)')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Markup mínimo/)).not.toBeInTheDocument()
+  })
+
+  it('mostra o cadastro (nome e unidade) e o botao de criar', async () => {
+    mockRotas([produto({ nome: 'Batata', un: 'CX' })])
+    render(<ProdutosLista papel="colaborador" onSessaoExpirada={() => {}} />)
+
+    expect(await screen.findByText('Batata')).toBeInTheDocument()
+    expect(screen.getByText('CX')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Novo produto/ })).toBeInTheDocument()
+  })
+
+  it('abre o modal de edicao SEM o botao Excluir', async () => {
+    mockRotas([produto()])
+    render(<ProdutosLista papel="colaborador" onSessaoExpirada={() => {}} />)
+    fireEvent.click(await screen.findByText('Batata'))
+
+    // O modal abriu e da para salvar...
+    expect(screen.getByRole('button', { name: 'Salvar' })).toBeInTheDocument()
+    // ...mas nao para excluir. A API tambem recusaria (403), o botao some
+    // para nao oferecer uma acao que vai falhar.
+    expect(screen.queryByRole('button', { name: 'Excluir' })).not.toBeInTheDocument()
+  })
+
+  it('admin continua vendo as colunas, o rodape e o botao Excluir', async () => {
+    mockRotas([produto()], [AGREGADO_CHEIO])
+    render(<ProdutosLista papel="admin" onSessaoExpirada={() => {}} />)
+    await screen.findByText('Batata')
+
+    for (const coluna of COLUNAS_DE_METRICA) {
+      expect(screen.getByText(coluna)).toBeInTheDocument()
+    }
+    expect(screen.getByText('Perda média (realizada)')).toBeInTheDocument()
+    expect(mockGet.mock.calls.map(c => c[0] as string)
+      .some(r => r.startsWith('/api/relatorios/produtos'))).toBe(true)
+
+    fireEvent.click(screen.getByText('Batata'))
+    expect(screen.getByRole('button', { name: 'Excluir' })).toBeInTheDocument()
   })
 })

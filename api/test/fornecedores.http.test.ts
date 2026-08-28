@@ -132,22 +132,78 @@ describe('autorizacao', () => {
 
   // Este teste ja exigiu 403 tambem na leitura. Mas o colaborador lanca
   // entradas, e o modal de entrada precisa do seletor de fornecedor — sem ler a
-  // lista, ele nao conseguia registrar de quem comprou. A tela de Fornecedores
-  // segue restrita ao admin; consultar a lista deixou de ser a mesma coisa que
-  // gerenciar o cadastro.
+  // lista, ele nao conseguia registrar de quem comprou.
   it('colaborador LE fornecedores (precisa disso para lancar entrada)', async () => {
     const res = await pedir('/api/fornecedores', comoColab())
     expect(res.status).toBe(200)
   })
 
-  it('colaborador NAO cria fornecedor', async () => {
+  // O colaborador PASSOU a poder criar e editar fornecedor: quem vai a feira e
+  // quem volta com produtor novo e com a lista do que ele entrega.
+  // `fornecedores` saiu de ADMIN_ONLY_SCREENS junto — ver
+  // src/routes/fornecedores.ts.
+  it('colaborador CRIA fornecedor', async () => {
     const res = await pedir('/api/fornecedores', {
       ...comoColab(), method: 'POST',
       headers: { ...comoColab().headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ nome: 'Tentativa do colaborador' }),
+      body: JSON.stringify({ nome: 'Sitio do colaborador', regiao: 'Norte' }),
     })
+    expect(res.status).toBe(201)
+    const corpo = await res.json() as { id: string; nome: string }
+    expect(corpo.nome).toBe('Sitio do colaborador')
+    await admin`delete from fornecedores where id = ${corpo.id}`
+  })
+
+  // O PUT do colaborador inclui `produto_ids`: e justamente a informacao que
+  // ele traz da feira ("este produtor tambem entrega alface"), e liberar o
+  // cadastro sem liberar o vinculo deixaria a metade util de fora.
+  it('colaborador EDITA fornecedor, inclusive os produtos vinculados', async () => {
+    const criado = await pedir('/api/fornecedores', comoAdmin(json({ nome: 'Para o colaborador editar' })))
+    const { id } = await criado.json() as { id: string }
+    const produtoId = await criarProduto('Alface do colaborador')
+
+    const res = await pedir(`/api/fornecedores/${id}`, {
+      ...comoColab(), method: 'PUT',
+      headers: { ...comoColab().headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ contato: '44 98888-1111', produto_ids: [produtoId] }),
+    })
+    expect(res.status).toBe(200)
+    const corpo = await res.json() as { contato: string; produtos: { id: string }[] }
+    expect(corpo.contato).toBe('44 98888-1111')
+    expect(corpo.produtos.map(p => p.id)).toEqual([produtoId])
+
+    await admin`delete from fornecedor_produtos where fornecedor_id = ${id}`
+    await admin`delete from fornecedores where id = ${id}`
+    await admin`delete from produtos where id = ${produtoId}`
+  })
+
+  /**
+   * Excluir continua so do admin, e aqui o estrago e silencioso:
+   * `entradas.fornecedor_id` e ON DELETE SET NULL, entao apagar nao da erro —
+   * so desliga todas as coletas daquele produtor do preco medio. A recusa
+   * precisa vir do SERVIDOR; esconder o botao nao impediria a chamada.
+   */
+  it('colaborador NAO exclui fornecedor -> 403', async () => {
+    const criado = await pedir('/api/fornecedores', comoAdmin(json({ nome: 'Nao deve sumir' })))
+    const { id } = await criado.json() as { id: string }
+
+    const res = await pedir(`/api/fornecedores/${id}`, { ...comoColab(), method: 'DELETE' })
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ erro: 'sem permissao' })
+
+    const [ainda] = await admin`select id from fornecedores where id = ${id}`
+    expect(ainda).toBeDefined()
+    await admin`delete from fornecedores where id = ${id}`
+  })
+
+  it('admin exclui fornecedor -> 200', async () => {
+    const criado = await pedir('/api/fornecedores', comoAdmin(json({ nome: 'Admin pode apagar' })))
+    const { id } = await criado.json() as { id: string }
+
+    const res = await pedir(`/api/fornecedores/${id}`, { ...comoAdmin(), method: 'DELETE' })
+    expect(res.status).toBe(200)
+    const [sumiu] = await admin`select id from fornecedores where id = ${id}`
+    expect(sumiu).toBeUndefined()
   })
 
   it('admin -> 200', async () => {

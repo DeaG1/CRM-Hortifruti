@@ -8,7 +8,13 @@ import {
   posicaoEstoque,
   avisoSaidasSemData,
   totalEstoqueKg,
+  situacaoSaldo,
+  SELO_SITUACAO,
+  AVISO_SITUACAO,
+  resumoEstoque,
+  textoResumoEstoque,
   type MovimentacaoEstoque,
+  type SituacaoSaldo,
 } from '../derive/estoque'
 import { PerdasLista } from './PerdasLista'
 import './EstoqueLista.css'
@@ -31,6 +37,11 @@ interface LinhaEstoque {
   produto_id: string
   nome: string
   un: string
+  /** `true` quando a linha nasceu de movimentação; `false` quando nasceu do
+   * CADASTRO — produto que existe e nunca foi movimentado. Os dois têm saldo
+   * zero medido, e é só isto que os distingue. Ver `situacaoSaldo`
+   * (derive/estoque.ts) e a CTE `chaves` em api/src/routes/estoque.ts. */
+  movimentada: boolean
   entrou: number
   perda: number
   saiu: number
@@ -71,23 +82,67 @@ const VERMELHO = '#c2502f'
 const fmtQtd = (n: number) =>
   (Number.isFinite(n) ? n : 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })
 
-/** Saldo negativo é o alerta que importa nesta tela — vermelho. Zero fica
- * neutro (produto zerado não é risco, só não tem estoque agora). Positivo
- * usa o texto padrão. Portado de `saldoColor` em logica-estoque.txt.
+/**
+ * A cor do número do saldo, por situação — as cinco situações e o porquê de
+ * cada uma estão em `situacaoSaldo` (derive/estoque.ts), que é onde a
+ * classificação mora. Aqui só se escolhe como exibi-la.
  *
- * `perdaDeFora`: linha cujo saldo deixa de fora quilos de perda que não cabem
- * na unidade dela não recebe a cor de alerta. O vermelho é um julgamento
- * ("está faltando mercadoria") e esse saldo está incompleto por construção —
- * ele ignora uma perda real, então erra PARA CIMA e um vermelho ali seria
- * arbitrário. A marca conserta a leitura; a cor criaria um alarme que a marca
- * não desfaz. Mesma decisão de 35f3a2e, agora aplicada à condição certa: a
- * falta de peso médio não deixa mais o saldo incompleto — ele é exato na
- * unidade lançada —, então ela deixou de suprimir a cor. */
-function corSaldo(saldo: number, perdaDeFora: boolean): string {
-  if (perdaDeFora) return SUAVE
-  if (saldo < 0) return VERMELHO
-  if (saldo === 0) return SUAVE
-  return TEXTO
+ * DUAS CORES, TRÊS SIGNIFICADOS. O vermelho quer dizer "não tem mercadoria" e
+ * cobre os dois casos em que o dono precisa agir hoje: `acabou` (comprar) e
+ * `negativo` (corrigir o lançamento). O que separa esses dois NÃO é a cor —
+ * é o selo escrito ao lado e o preenchimento dele. Cor sozinha não comunica,
+ * e uma terceira cor pediria de quem lê um vocabulário que a tela não ensina
+ * em lugar nenhum.
+ *
+ * `nunca_comprado` fica NEUTRO de propósito. Ele também está zerado, mas nada
+ * aconteceu com ele: é item de catálogo que ninguém comprou. Pintar de
+ * vermelho os 17 produtos que o dono não estoca afogaria os 2 que realmente
+ * acabaram — alerta que aparece em toda linha deixa de ser alerta. O selo
+ * continua lá dizendo o que é, e o número continua sendo zero.
+ *
+ * `sem_conta_fechada` também fica neutro, pela decisão que já valia antes
+ * desta classificação existir: aquele saldo deixa quilos de perda de fora, e
+ * um julgamento sobre número incompleto POR CONSTRUÇÃO seria arbitrário — a
+ * marca `‡` conserta a leitura, e a cor criaria um alarme que a marca não
+ * desfaz.
+ */
+const COR_SITUACAO: Record<SituacaoSaldo, string> = {
+  positivo: TEXTO,
+  acabou: VERMELHO,
+  nunca_comprado: SUAVE,
+  negativo: VERMELHO,
+  sem_conta_fechada: SUAVE,
+}
+
+/**
+ * O tom do selo — o que o distingue ALÉM da cor, e por isso sobrevive a uma
+ * impressão em preto e branco:
+ *
+ *   `falta`          contorno vermelho sobre fundo claro. "Compre."
+ *   `neutro`         contorno cinza. "Está no catálogo e nunca entrou."
+ *   `inconsistente`  PREENCHIDO, texto claro sobre vermelho. "Conserte o
+ *                    lançamento." O preenchimento é o degrau a mais que o
+ *                    negativo precisa: um zero atrapalha uma compra, um
+ *                    negativo põe em dúvida a tabela inteira — e ele é raro,
+ *                    então o peso visual não vira ruído.
+ */
+const TOM_SELO: Record<SituacaoSaldo, string> = {
+  positivo: '',
+  acabou: 'falta',
+  nunca_comprado: 'neutro',
+  negativo: 'inconsistente',
+  sem_conta_fechada: '',
+}
+
+/** A classe da linha inteira. Só o saldo negativo marca a LINHA (uma barra
+ * vermelha à esquerda), e não só a célula: ele é o único que o dono precisa
+ * achar rolando uma lista de vinte produtos sem ler número nenhum. O zero não
+ * ganha barra porque zero é comum — marcar todos seria não marcar nenhum. */
+function classeItem(situacao: SituacaoSaldo, aberto: boolean): string {
+  const classes = ['estoque-item']
+  if (situacao === 'negativo') classes.push('estoque-item--inconsistente')
+  if (aberto) classes.push('estoque-item--aberto')
+  return classes.join(' ')
 }
 
 /** A unidade impressa junto do número: '45 UN'. Ver "os rótulos das colunas"
@@ -423,7 +478,10 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
       .finally(() => { if (montado.current) setCarregandoHistorico(false) })
   }
 
-  const comEstoque = linhas.filter(l => l.saldo > 0).length
+  // Quantas linhas há, quantas têm mercadoria, e quantas estão zeradas ou
+  // negativas — tudo de uma contagem só, para o número do cartão e a frase sob
+  // ele nunca divergirem. Ver `resumoEstoque` (derive/estoque.ts).
+  const resumo = resumoEstoque(linhas)
   // O total ENTRE linhas — e o único lugar desta tela onde o quilo é
   // obrigatório: somar 45 UN com 10 CX e 30 KG não dá número nenhum. Ele diz
   // quantas linhas ficaram de fora, para não afirmar um depósito que ignora
@@ -500,17 +558,23 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
             <div className="estado-vazio estoque-vazio">
               <div className="estoque-vazio-titulo">Nada em estoque em {posicao.texto}</div>
               <div className="estoque-vazio-sub">
-                Nenhuma movimentação registrada até essa data. Produto comprado depois dela ainda
-                não existia no depósito — por isso fica <strong>fora da lista</strong>, e não com
-                saldo zero.
+                Nenhum produto existia até essa data, e nada tinha sido movimentado. Produto
+                cadastrado depois dela ainda não existia — por isso fica{' '}
+                <strong>fora da lista</strong>, e não com saldo zero.
               </div>
             </div>
           ) : (
+            // A lista traz TODO produto cadastrado, então vazia aqui não quer
+            // mais dizer "nada foi movimentado": quer dizer que não há produto
+            // nenhum. Mandar lançar uma entrada seria conselho impossível —
+            // entrada exige um produto.
             <div className="estado-vazio estoque-vazio">
-              <div className="estoque-vazio-titulo">Nada em estoque ainda</div>
+              <div className="estoque-vazio-titulo">Nenhum produto cadastrado</div>
               <div className="estoque-vazio-sub">
-                O estoque se preenche sozinho: lance uma <strong>Entrada (compra)</strong> e a
-                quantidade aparece aqui.
+                Esta lista mostra <strong>todos os produtos cadastrados</strong>, movimentados ou
+                não — então ela só fica vazia quando não há nenhum. Cadastre em{' '}
+                <strong>Produtos</strong> e ele já aparece aqui, zerado, esperando a primeira{' '}
+                <strong>Entrada (compra)</strong>.
               </div>
             </div>
           )
@@ -529,10 +593,15 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
                 <div className="estoque-stat-label">
                   ITENS COM ESTOQUE{posicao.historica ? ` EM ${posicao.texto}` : ''}
                 </div>
-                <div className="estoque-stat-valor">{comEstoque}</div>
+                <div className="estoque-stat-valor">{resumo.comEstoque}</div>
+                {/* Dizia "N item(ns) movimentados" — verdade enquanto a lista
+                    era só de itens movimentados. Ela passou a trazer TODO
+                    produto cadastrado, e a mesma frase contaria uma coisa e
+                    nomearia outra. Agora ela conta as LINHAS da tabela e diz
+                    isso, mais as duas coisas que o dono abre esta tela para
+                    ver. Ver `textoResumoEstoque` (derive/estoque.ts). */}
                 <div className="estoque-stat-sub">
-                  {linhas.length} item(ns) movimentados
-                  {posicao.historica ? ` até ${posicao.texto}` : ''}
+                  {textoResumoEstoque(resumo, posicao.historica ? posicao.texto : null)}
                 </div>
               </div>
 
@@ -588,13 +657,19 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
                 // quilos por contrato. Marcar as quatro, como antes, acusaria
                 // de incompleto um número que fecha.
                 const perdaDeFora = l.perda_fora_da_unidade || 0
+                // A classificação inteira (o que zero, negativo e "nunca
+                // movimentado" significam) mora em derive/ e é testada lá;
+                // aqui só se escolhe cor, selo e classe da linha.
+                const situacao = situacaoSaldo(l)
+                const selo = SELO_SITUACAO[situacao]
+                const avisoSituacao = AVISO_SITUACAO[situacao]
                 const inc = l.itens_sem_conversao || 0
                 const chave = chaveEstoque(l.produto_id, l.un)
                 const aberto = expandido === chave
                 const ultima = ultimaMovimentacao(l)
                 const historico = historicoPorChave?.get(chave) ?? []
                 return (
-                  <div key={chave} className={aberto ? 'estoque-item estoque-item--aberto' : 'estoque-item'}>
+                  <div key={chave} className={classeItem(situacao, aberto)}>
                     {/* Botão de verdade (não div com onClick): a linha agora
                         tem estado — aria-expanded — e precisa ser alcançável
                         pelo teclado. Mesmo padrão de FuncionariosLista. */}
@@ -637,12 +712,29 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
                         />
                       </div>
                       <div className="estoque-col-num estoque-mono estoque-saldo">
+                        {/* O NÚMERO NÃO MUDA. Zero medido continua sendo zero,
+                            com todas as casas de sempre e a unidade colada: o
+                            destaque é acréscimo, nunca substituição. */}
                         <span
                           className="estoque-saldo-valor"
-                          style={{ color: corSaldo(l.saldo, perdaDeFora > 0) }}
+                          style={{ color: COR_SITUACAO[situacao] }}
+                          title={avisoSituacao || undefined}
                         >
                           <NumPerdaDeFora texto={comUn(l.saldo, l.un)} kg={perdaDeFora} un={l.un} />
                         </span>
+                        {/* O selo ESCRITO. É ele que separa "acabou" de "nunca
+                            comprado" — os dois imprimem o mesmo zero, e
+                            nenhuma diferença de cor daria conta disso — e é
+                            ele que faz quem não distingue vermelho perceber a
+                            mesma coisa que os outros. */}
+                        {selo && (
+                          <div
+                            className={'estoque-saldo-selo estoque-saldo-selo--' + TOM_SELO[situacao]}
+                            title={avisoSituacao}
+                          >
+                            {selo}
+                          </div>
+                        )}
                         {/* A conversão em quilos, secundária. Aparece quando é
                             possível; some quando não é — nunca substitui a
                             quantidade por zero. Numa linha em KG seria a
@@ -741,6 +833,33 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
               não entra nesse total, mas a quantidade dela continua exata aqui.
             </div>
 
+            {/* A legenda dos destaques. Ela existe porque a tela passou a
+                afirmar três coisas com dois tons: sem ela, o vermelho de um
+                zero e o vermelho de um negativo pediriam a mesma ação — e as
+                ações são opostas. Só aparece quando há algum destaque na
+                tabela: explicar o que não aconteceu é ruído. */}
+            {(resumo.semEstoque > 0 || resumo.negativo > 0) && (
+              <div
+                className="estoque-legenda"
+                role="note"
+                aria-label="O que os destaques do saldo significam"
+              >
+                <span className="estoque-saldo-selo estoque-saldo-selo--falta">Acabou</span>{' '}
+                é saldo zero <strong style={{ color: TEXTO }}>por consumo</strong>: teve entrada e
+                saiu tudo. O caminho é comprar.{' '}
+                <span className="estoque-saldo-selo estoque-saldo-selo--neutro">Nunca comprado</span>{' '}
+                é produto cadastrado que <strong style={{ color: TEXTO }}>nunca se moveu</strong> —
+                também está zerado, mas não acabou: nunca entrou no depósito.{' '}
+                <span className="estoque-saldo-selo estoque-saldo-selo--inconsistente">
+                  Conferir lançamento
+                </span>{' '}
+                é saldo <strong style={{ color: TEXTO }}>negativo</strong>, e não é falta de
+                mercadoria: saiu mais do que entrou, então falta lançamento — quase sempre uma
+                entrada que não foi registrada. Aí o caminho é{' '}
+                <strong style={{ color: TEXTO }}>corrigir o lançamento</strong>, não comprar.
+              </div>
+            )}
+
             <div className="estoque-legenda">
               <strong style={{ color: TEXTO }}>ÚLTIMA MOVIMENTAÇÃO</strong> é a mais recente entre
               entrada, saída e perda daquele item — a saída conta pela{' '}
@@ -766,9 +885,11 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
               aconteceu dentro dela — o que sobrou de um mês continua no estoque no mês seguinte. A{' '}
               <strong style={{ color: TEXTO }}>última movimentação</strong> e o histórico de cada item
               seguem o mesmo corte, e continuam fora do filtro de período: recortados por um mês, um
-              item parado desde maio apareceria como nunca movimentado. Item sem nenhuma movimentação
-              até a data escolhida <strong style={{ color: TEXTO }}>não aparece na lista</strong> —
-              ele ainda não tinha sido comprado, e isso não é saldo zero. O registro de perdas do
+              item parado desde maio apareceria como nunca movimentado. Produto{' '}
+              <strong style={{ color: TEXTO }}>cadastrado depois</strong> da data escolhida{' '}
+              <strong style={{ color: TEXTO }}>não aparece na lista</strong> — naquele dia ele não
+              existia, e isso não é saldo zero; produto que já existia e nunca se moveu aparece{' '}
+              <strong style={{ color: TEXTO }}>zerado</strong>, marcado como nunca comprado. O registro de perdas do
               depósito, abaixo, continua mostrando tudo: ele é a lista de trabalho, não a posição.
               Para o movimento de um período, veja Entradas, Saídas ou Relatórios ▸ Perdas.
             </div>

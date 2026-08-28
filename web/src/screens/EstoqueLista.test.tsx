@@ -20,6 +20,10 @@ const mockGet = api.get as unknown as ReturnType<typeof vi.fn>
 // funcionava, e ele nao pode mudar.
 const linha = (over: Record<string, unknown> = {}) => ({
   produto_id: 'p-1', nome: 'Tomate', un: 'KG',
+  // A linha padrao nasceu de MOVIMENTACAO — o caso que ja existia antes de a
+  // lista passar a trazer tambem o produto so cadastrado. Quem testa o
+  // cadastro passa `movimentada: false`.
+  movimentada: true,
   entrou: 100, perda: 15, saiu: 30, saldo: 55,
   peso_medio: 0, perda_fora_da_unidade: 0,
   em_kg: { entrou: 100, perda: 15, saiu: 30, saldo: 55 },
@@ -95,10 +99,10 @@ describe('EstoqueLista — os quatro estados', () => {
     expect(alerta).toHaveTextContent('Não foi possível carregar o estoque.')
   })
 
-  it('vazio: mostra "nada em estoque ainda" quando a API devolve lista vazia', async () => {
+  it('vazio: a lista so fica vazia quando NAO HA PRODUTO — e e isso que ela diz', async () => {
     mockRotas([])
     render(<EstoqueLista />)
-    expect(await screen.findByText(/nada em estoque ainda/i)).toBeInTheDocument()
+    expect(await screen.findByText(/nenhum produto cadastrado/i)).toBeInTheDocument()
   })
 
   it('com dados: lista as linhas de estoque recebidas', async () => {
@@ -150,13 +154,19 @@ describe('EstoqueLista — saldo = entradas - perdas - saidas', () => {
     expect(saldo).toHaveStyle({ color: '#2a2a24' })
   })
 
-  it('saldo zero usa a cor neutra (sem estoque, mas nao e alerta)', async () => {
+  it('saldo zero POR CONSUMO e o alerta que o dono quer: vermelho, e escrito', async () => {
+    // Ate 2026-08-28 este zero era cinza ("sem estoque, mas nao e alerta").
+    // Numa tela de estoque ele e exatamente o alerta: o produto acabou e
+    // precisa ser comprado.
     mockRotas([linha({ entrou: 10, perda: 0, saiu: 10, saldo: 0 })])
-    render(<EstoqueLista />)
+    const { container } = render(<EstoqueLista />)
     const saldos = await screen.findAllByText('0 KG')
     // duas colunas podem estar zeradas (perda e saldo) — a do saldo e a que tem a classe estoque-saldo-valor
     const saldoCel = saldos.find(el => el.className.includes('estoque-saldo-valor'))
-    expect(saldoCel).toHaveStyle({ color: '#6a685c' })
+    expect(saldoCel).toHaveStyle({ color: '#c2502f' })
+    // E cor sozinha nao comunica: o selo escrito vai junto.
+    const selo = container.querySelector('.estoque-tabela .estoque-saldo-selo') as HTMLElement
+    expect(selo).toHaveTextContent('Acabou')
   })
 
   it('entrou 45 e saiu 45: o zero e MEDICAO — cinza, sem marca nenhuma', async () => {
@@ -170,9 +180,231 @@ describe('EstoqueLista — saldo = entradas - perdas - saidas', () => {
     await screen.findByText('Rucula')
     expect(screen.getAllByText('45 UN')).toHaveLength(2) // ENTROU e SAIU
     const saldo = container.querySelector('.estoque-saldo-valor') as HTMLElement
+    // O NUMERO nao muda: continua sendo o zero inteiro, na unidade lancada, e
+    // sem a marca de "nao sei converter". O destaque e acrescimo.
     expect(saldo).toHaveTextContent('0 UN')
     expect(saldo.className).not.toContain('estoque-incompleto')
-    expect(saldo).toHaveStyle({ color: '#6a685c' })
+    // E como esse zero e de consumo (entrou 45, saiu 45), ele e o alerta.
+    expect(saldo).toHaveStyle({ color: '#c2502f' })
+    expect(container.querySelector('.estoque-tabela .estoque-saldo-selo'))
+      .toHaveTextContent('Acabou')
+  })
+})
+
+// ============================ o que o saldo zerado (e o negativo) significam
+//
+// Tres situacoes, dois tons e o texto fazendo o trabalho pesado. A
+// classificacao mora em derive/estoque.ts (`situacaoSaldo`) e e testada la;
+// aqui se prova o que a TELA mostra de cada uma.
+
+describe('EstoqueLista — o zero que acabou, o que nunca teve, e o negativo', () => {
+  const valor = (c: HTMLElement) =>
+    c.querySelector('.estoque-tabela .estoque-saldo-valor') as HTMLElement
+  const selo = (c: HTMLElement) =>
+    c.querySelector('.estoque-tabela .estoque-saldo-selo') as HTMLElement | null
+
+  it('ACABOU: teve entrada, saiu tudo — vermelho, selo escrito, e o zero inteiro', async () => {
+    mockRotas([linha({ entrou: 40, perda: 0, saiu: 40, saldo: 0 })])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(valor(container)).toHaveTextContent('0 KG')
+    expect(valor(container)).toHaveStyle({ color: '#c2502f' })
+    expect(selo(container)).toHaveTextContent('Acabou')
+    expect(selo(container)!.className).toContain('estoque-saldo-selo--falta')
+    // E diz por que, para quem passar o mouse ou usar leitor de tela.
+    expect(selo(container)).toHaveAttribute('title', expect.stringContaining('saiu tudo'))
+  })
+
+  it('NUNCA COMPRADO: produto cadastrado sem movimentacao — zerado, selo proprio, sem o vermelho', async () => {
+    // Tambem esta zerado, mas nada aconteceu com ele. Pintar de vermelho os
+    // produtos que o dono nao estoca afogaria os que de fato acabaram.
+    mockRotas([linha({
+      nome: 'Gengibre', movimentada: false,
+      entrou: 0, perda: 0, saiu: 0, saldo: 0,
+      em_kg: { entrou: 0, perda: 0, saiu: 0, saldo: 0 },
+    })])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Gengibre')
+    expect(valor(container)).toHaveTextContent('0 KG')
+    expect(valor(container)).toHaveStyle({ color: '#6a685c' })
+    expect(selo(container)).toHaveTextContent('Nunca comprado')
+    expect(selo(container)!.className).toContain('estoque-saldo-selo--neutro')
+    expect(selo(container)).toHaveAttribute('title', expect.stringContaining('nunca foi comprado'))
+  })
+
+  it('o mesmo zero, dois significados: so o selo os separa', async () => {
+    mockRotas([
+      linha({ produto_id: 'p-1', nome: 'Tomate', entrou: 40, saiu: 40, perda: 0, saldo: 0 }),
+      linha({
+        produto_id: 'p-2', nome: 'Gengibre', movimentada: false,
+        entrou: 0, perda: 0, saiu: 0, saldo: 0,
+        em_kg: { entrou: 0, perda: 0, saiu: 0, saldo: 0 },
+      }),
+    ])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Gengibre')
+    const valores = container.querySelectorAll('.estoque-tabela .estoque-saldo-valor')
+    // O NUMERO e o mesmo nos dois — nenhuma cor distinguiria isto.
+    expect(valores[0]).toHaveTextContent('0 KG')
+    expect(valores[1]).toHaveTextContent('0 KG')
+    const selos = container.querySelectorAll('.estoque-tabela .estoque-saldo-selo')
+    expect(selos[0]).toHaveTextContent('Acabou')
+    expect(selos[1]).toHaveTextContent('Nunca comprado')
+  })
+
+  it('NEGATIVO: selo preenchido e barra na LINHA — tratamento proprio, mais forte que o zero', async () => {
+    mockRotas([linha({ saldo: -15 })])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(valor(container)).toHaveTextContent('-15 KG')
+    expect(valor(container)).toHaveStyle({ color: '#c2502f' })
+    expect(selo(container)).toHaveTextContent('Conferir lançamento')
+    expect(selo(container)!.className).toContain('estoque-saldo-selo--inconsistente')
+    // O que separa "conserte o lancamento" de "compre": a acao, dita por
+    // extenso, e a barra na linha inteira — que o zero nao tem.
+    expect(selo(container)).toHaveAttribute('title', expect.stringContaining('não é falta de mercadoria'))
+    expect(container.querySelector('.estoque-item--inconsistente')).toBeInTheDocument()
+  })
+
+  it('o zero NAO marca a linha inteira: so o negativo faz isso', async () => {
+    mockRotas([linha({ entrou: 40, perda: 0, saiu: 40, saldo: 0 })])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(container.querySelector('.estoque-item--inconsistente')).not.toBeInTheDocument()
+  })
+
+  it('POSITIVO nao recebe nada: nem selo, nem barra, nem cor de alerta', async () => {
+    mockRotas([linha({ saldo: 55 })])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(valor(container)).toHaveStyle({ color: '#2a2a24' })
+    expect(selo(container)).toBeNull()
+    expect(container.querySelector('.estoque-item--inconsistente')).not.toBeInTheDocument()
+    expect(screen.queryByRole('note', { name: 'O que os destaques do saldo significam' }))
+      .not.toBeInTheDocument()
+  })
+
+  it('linha cujo saldo deixa quilos de perda de fora continua sem destaque — a marca ‡ ja explica', async () => {
+    mockRotas([linha({
+      nome: 'Melancia', un: 'CX', peso_medio: 15,
+      entrou: 0, perda: 0, saiu: 0, saldo: 0, perda_fora_da_unidade: 2,
+      em_kg: { entrou: 0, perda: 2, saiu: 0, saldo: -2 },
+    })])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Melancia')
+    expect(valor(container)).toHaveStyle({ color: '#6a685c' })
+    expect(selo(container)).toBeNull()
+  })
+
+  it('a legenda distingue "compre" de "conserte o lancamento"', async () => {
+    mockRotas([linha({ saldo: -15 })])
+    render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    const nota = screen.getByRole('note', { name: 'O que os destaques do saldo significam' })
+    expect(nota).toHaveTextContent(/o caminho é comprar/i)
+    expect(nota).toHaveTextContent(/corrigir o lançamento/i)
+    expect(nota).toHaveTextContent(/não é falta de mercadoria/i)
+    expect(nota).toHaveTextContent(/nunca entrou no depósito/i)
+  })
+
+  it('a legenda aparece quando ha zerados, e some quando nao ha destaque nenhum', async () => {
+    mockRotas([linha({ entrou: 40, perda: 0, saiu: 40, saldo: 0 })])
+    const { unmount } = render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(screen.getByRole('note', { name: 'O que os destaques do saldo significam' }))
+      .toBeInTheDocument()
+    unmount()
+
+    mockRotas([linha({ saldo: 55 })])
+    render(<EstoqueLista />)
+    await screen.findByText('Tomate')
+    expect(screen.queryByRole('note', { name: 'O que os destaques do saldo significam' }))
+      .not.toBeInTheDocument()
+  })
+})
+
+// ================================== a lista traz TODO produto cadastrado
+
+describe('EstoqueLista — a lista completa e o cartao do topo', () => {
+  const semMovimento = (over: Record<string, unknown> = {}) => linha({
+    movimentada: false, entrou: 0, perda: 0, saiu: 0, saldo: 0,
+    em_kg: { entrou: 0, perda: 0, saiu: 0, saldo: 0 },
+    ...over,
+  })
+
+  it('produto sem movimentacao aparece com saldo zero, e travessao so na ULTIMA MOVIMENTACAO', async () => {
+    mockRotas([semMovimento({ produto_id: 'p-9', nome: 'Gengibre' })])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Gengibre')
+    // O saldo dele e conhecido e e zero — nunca travessao.
+    const saldo = container.querySelector('.estoque-tabela .estoque-saldo-valor') as HTMLElement
+    expect(saldo).toHaveTextContent('0 KG')
+    expect(saldo.textContent).not.toContain('—')
+    // O travessao continua onde ele significa "nao ha como saber": a data.
+    expect(container.querySelector('.estoque-sem-mov')).toHaveTextContent('—')
+  })
+
+  it('o cartao do topo conta LINHAS listadas — nao mais "itens movimentados"', async () => {
+    mockRotas([
+      linha({ produto_id: 'p-1', nome: 'Tomate', saldo: 55 }),
+      semMovimento({ produto_id: 'p-2', nome: 'Gengibre' }),
+      semMovimento({ produto_id: 'p-3', nome: 'Inhame' }),
+    ])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Gengibre')
+    const cartao = within(secaoSaldo(container)).getByText('ITENS COM ESTOQUE').parentElement!
+    // O numero grande: so uma linha tem mercadoria.
+    expect(cartao).toHaveTextContent('1')
+    // E o rotulo bate com o que ele conta: tres linhas na tabela, duas
+    // zeradas. "Itens movimentados" contaria uma coisa e nomearia outra.
+    expect(cartao).toHaveTextContent('3 linha(s) listada(s)')
+    expect(cartao).toHaveTextContent('2 sem estoque')
+    expect(cartao.textContent).not.toContain('movimentados')
+    expect(container.querySelectorAll('.estoque-item')).toHaveLength(3)
+  })
+
+  it('o cartao diz quantas estao com saldo negativo, e omite o que nao aconteceu', async () => {
+    mockRotas([
+      linha({ produto_id: 'p-1', nome: 'Tomate', saldo: 55 }),
+      linha({ produto_id: 'p-2', nome: 'Batata', saldo: -8 }),
+    ])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Batata')
+    const cartao = within(secaoSaldo(container)).getByText('ITENS COM ESTOQUE').parentElement!
+    expect(cartao).toHaveTextContent('2 linha(s) listada(s)')
+    expect(cartao).toHaveTextContent('1 com saldo negativo')
+    // Nenhuma zerada: a tela nao anuncia o que nao aconteceu.
+    expect(cartao.textContent).not.toContain('sem estoque')
+  })
+
+  it('produto em duas unidades continua com duas linhas, e o cartao conta as duas', async () => {
+    mockRotas([
+      linha({ produto_id: 'p-1', nome: 'Melancia', un: 'CX', saldo: 10, peso_medio: 15,
+        em_kg: { entrou: 150, perda: 0, saiu: 0, saldo: 150 } }),
+      linha({ produto_id: 'p-1', nome: 'Melancia', un: 'KG', saldo: 15 }),
+    ])
+    const { container } = render(<EstoqueLista />)
+    expect(await screen.findAllByText('Melancia')).toHaveLength(2)
+    expect(container.querySelectorAll('.estoque-item')).toHaveLength(2)
+    const cartao = within(secaoSaldo(container)).getByText('ITENS COM ESTOQUE').parentElement!
+    expect(cartao).toHaveTextContent('2 linha(s) listada(s)')
+  })
+
+  it('na posicao historica o rotulo carrega a data — e continua contando linhas', async () => {
+    mockRotas([semMovimento({ nome: 'Gengibre' })])
+    const { container } = render(<EstoqueLista />)
+    await screen.findByText('Gengibre')
+    fireEvent.change(seletorDeData(container), { target: { value: '2026-03-09' } })
+    await screen.findByText('Gengibre')
+    const cartao = within(secaoSaldo(container)).getByText(/ITENS COM ESTOQUE EM 09\/03/).parentElement!
+    expect(cartao).toHaveTextContent('1 linha(s) listada(s) até 09/03')
+  })
+
+  it('lista vazia agora quer dizer "nenhum produto cadastrado", e manda cadastrar', async () => {
+    mockRotas([])
+    render(<EstoqueLista />)
+    expect(await screen.findByText(/nenhum produto cadastrado/i)).toBeInTheDocument()
+    expect(screen.getByText(/todos os produtos cadastrados/i)).toBeInTheDocument()
   })
 })
 
@@ -387,7 +619,7 @@ describe('EstoqueLista — compoe a secao de perdas do deposito', () => {
   it('estoque vazio nao impede a secao de perdas de aparecer', async () => {
     mockRotas([], [])
     render(<EstoqueLista />)
-    expect(await screen.findByText(/nada em estoque ainda/i)).toBeInTheDocument()
+    expect(await screen.findByText(/nenhum produto cadastrado/i)).toBeInTheDocument()
     expect(await screen.findByText(/nenhuma perda registrada/i)).toBeInTheDocument()
   })
 })
@@ -414,7 +646,7 @@ describe('EstoqueLista — nao segue o periodo global, e diz isso', () => {
   it('a nota nao aparece quando nao ha nada em estoque (nao ha o que explicar)', async () => {
     mockRotas([])
     render(<EstoqueLista />)
-    await screen.findByText(/nada em estoque ainda/i)
+    await screen.findByText(/nenhum produto cadastrado/i)
     expect(screen.queryByRole('note', { name: 'Escopo do estoque' })).not.toBeInTheDocument()
   })
 })
@@ -929,7 +1161,7 @@ describe('EstoqueLista — produto que ainda nao existia na data', () => {
     fireEvent.change(seletorDeData(container), { target: { value: '2026-03-09' } })
 
     expect(await screen.findByText(/nada em estoque em 09\/03/i)).toBeInTheDocument()
-    expect(screen.queryByText(/nada em estoque ainda/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/nenhum produto cadastrado/i)).not.toBeInTheDocument()
     // E diz o motivo: ausencia, nao saldo zero.
     expect(screen.getByText(/fora da lista/i)).toBeInTheDocument()
   })
@@ -937,7 +1169,7 @@ describe('EstoqueLista — produto que ainda nao existia na data', () => {
   it('em hoje, a lista vazia continua com a mensagem de sempre', async () => {
     mockRotas([])
     render(<EstoqueLista />)
-    expect(await screen.findByText(/nada em estoque ainda/i)).toBeInTheDocument()
+    expect(await screen.findByText(/nenhum produto cadastrado/i)).toBeInTheDocument()
   })
 })
 
@@ -1006,13 +1238,18 @@ describe('EstoqueLista — a nota de escopo passou a cobrir a data propria', () 
     expect(nota).toHaveTextContent(/intervalo/i)
   })
 
-  it('diz que item sem movimentacao ate a data fica FORA da lista — travessao nunca vira zero', async () => {
+  it('diz que produto CADASTRADO DEPOIS da data fica fora, e que o nunca movimentado fica zerado', async () => {
     mockRotas([linha()])
     render(<EstoqueLista />)
     await screen.findByText('Tomate')
     const nota = screen.getByRole('note', { name: 'Escopo do estoque' })
+    expect(nota).toHaveTextContent(/cadastrado depois/i)
     expect(nota).toHaveTextContent(/não aparece na lista/i)
     expect(nota).toHaveTextContent(/não é saldo zero/i)
+    // E a outra metade, que a nota antiga negava: quem ja existia e nunca se
+    // moveu APARECE, zerado.
+    expect(nota).toHaveTextContent(/nunca se moveu/i)
+    expect(nota).toHaveTextContent(/zerado/i)
   })
 })
 

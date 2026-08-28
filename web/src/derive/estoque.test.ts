@@ -10,6 +10,12 @@ import {
   avisoSaidasSemData,
   totalEstoqueKg,
   PARAM_POSICAO,
+  situacaoSaldo,
+  resumoEstoque,
+  textoResumoEstoque,
+  SELO_SITUACAO,
+  AVISO_SITUACAO,
+  SITUACOES_SALDO,
   type MovimentacaoEstoque,
 } from './estoque'
 
@@ -334,5 +340,136 @@ describe('totalEstoqueKg', () => {
     const t = totalEstoqueKg([soma(-30), soma(50)])
     expect(t.saldo).toBe(20)
     expect(t.linhasSomadas).toBe(2)
+  })
+})
+
+// ================================== o que o saldo diz, e o que ele alerta
+
+const cls = (over: Partial<{ saldo: number; movimentada: boolean; perda_fora_da_unidade: number }> = {}) => ({
+  saldo: 10,
+  movimentada: true,
+  perda_fora_da_unidade: 0,
+  ...over,
+})
+
+describe('situacaoSaldo — tres zeros, tres significados diferentes', () => {
+  it('positivo: tem mercadoria, nada a sinalizar', () => {
+    expect(situacaoSaldo(cls({ saldo: 55 }))).toBe('positivo')
+  })
+
+  it('acabou: teve movimentacao e o saldo zerou — o alerta de compra', () => {
+    expect(situacaoSaldo(cls({ saldo: 0, movimentada: true }))).toBe('acabou')
+  })
+
+  it('nunca_comprado: produto cadastrado sem movimentacao nenhuma', () => {
+    // O mesmo numero do caso acima. So a origem da linha os distingue, e por
+    // isso ela viaja da API ate aqui em vez de ser deduzida dos numeros.
+    expect(situacaoSaldo(cls({ saldo: 0, movimentada: false }))).toBe('nunca_comprado')
+  })
+
+  it('negativo: saiu mais do que entrou — dado inconsistente, nao falta de mercadoria', () => {
+    expect(situacaoSaldo(cls({ saldo: -15 }))).toBe('negativo')
+  })
+
+  it('negativo VENCE a origem da linha: uma linha de cadastro negativa nao vira "nunca comprado"', () => {
+    // Impossivel pela query de hoje (linha de cadastro soma zero em tudo), e
+    // e exatamente por isso que a ordem esta escrita: se um dia acontecer, a
+    // tela nao pode esconder a inconsistencia atras de outro rotulo.
+    expect(situacaoSaldo(cls({ saldo: -3, movimentada: false }))).toBe('negativo')
+  })
+
+  it('linha que deixa quilos de perda de fora nao e classificada — o saldo dela nao fecha', () => {
+    // Mantem a decisao que ja valia para a cor antes desta classificacao: um
+    // julgamento sobre numero incompleto por construcao seria arbitrario.
+    expect(situacaoSaldo(cls({ saldo: 0, perda_fora_da_unidade: 2 }))).toBe('sem_conta_fechada')
+    expect(situacaoSaldo(cls({ saldo: -2, perda_fora_da_unidade: 2 }))).toBe('sem_conta_fechada')
+    expect(situacaoSaldo(cls({ saldo: 9, perda_fora_da_unidade: 2 }))).toBe('sem_conta_fechada')
+  })
+
+  it('perda_fora_da_unidade ausente conta como zero — a linha e classificada normalmente', () => {
+    expect(situacaoSaldo({ saldo: 0, movimentada: true })).toBe('acabou')
+  })
+
+  it('toda situacao tem selo e aviso definidos, e so as duas neutras vem vazias', () => {
+    // O controle inerte deste bloco: ele nao muda com nenhuma regra de
+    // classificacao, e tem de sobreviver a qualquer mexida nela.
+    for (const s of SITUACOES_SALDO) {
+      expect(typeof SELO_SITUACAO[s]).toBe('string')
+      expect(typeof AVISO_SITUACAO[s]).toBe('string')
+    }
+    expect(SELO_SITUACAO.positivo).toBe('')
+    expect(SELO_SITUACAO.sem_conta_fechada).toBe('')
+    // As tres que a tela precisa distinguir sao escritas — cor sozinha nao
+    // comunica, e "acabou" e "nunca comprado" imprimem o MESMO numero.
+    expect(SELO_SITUACAO.acabou).toBeTruthy()
+    expect(SELO_SITUACAO.nunca_comprado).toBeTruthy()
+    expect(SELO_SITUACAO.negativo).toBeTruthy()
+    expect(new Set([
+      SELO_SITUACAO.acabou, SELO_SITUACAO.nunca_comprado, SELO_SITUACAO.negativo,
+    ]).size).toBe(3)
+  })
+
+  it('o aviso do negativo manda CORRIGIR, e o do zero manda COMPRAR — sao acoes opostas', () => {
+    expect(AVISO_SITUACAO.acabou).toMatch(/comprar/i)
+    expect(AVISO_SITUACAO.negativo).toMatch(/corrigir o lançamento|não comprar/i)
+    expect(AVISO_SITUACAO.negativo).toMatch(/não é falta de mercadoria/i)
+    expect(AVISO_SITUACAO.nunca_comprado).toMatch(/nunca foi comprado/i)
+  })
+})
+
+describe('resumoEstoque e textoResumoEstoque — o cartao conta o que o rotulo diz', () => {
+  it('conta as linhas, as que tem estoque e as zeradas de cada tipo', () => {
+    const r = resumoEstoque([
+      cls({ saldo: 55 }),
+      cls({ saldo: 0 }),
+      cls({ saldo: 0, movimentada: false }),
+      cls({ saldo: 0, movimentada: false }),
+      cls({ saldo: -8 }),
+    ])
+    expect(r.linhas).toBe(5)
+    expect(r.comEstoque).toBe(1)
+    expect(r.acabou).toBe(1)
+    expect(r.nuncaComprado).toBe(2)
+    expect(r.negativo).toBe(1)
+    expect(r.semEstoque).toBe(3)
+  })
+
+  it('a linha sem conta fechada nao entra em nenhuma das contagens de falta', () => {
+    const r = resumoEstoque([cls({ saldo: 0, perda_fora_da_unidade: 2 })])
+    expect(r.linhas).toBe(1)
+    expect(r.semEstoque).toBe(0)
+    expect(r.negativo).toBe(0)
+    expect(r.acabou).toBe(0)
+  })
+
+  it('o texto conta LINHAS listadas — nao "itens movimentados"', () => {
+    const r = resumoEstoque([cls({ saldo: 55 }), cls({ saldo: 0 }), cls({ saldo: 0, movimentada: false })])
+    const t = textoResumoEstoque(r)
+    expect(t).toContain('3 linha(s) listada(s)')
+    expect(t).toContain('2 sem estoque')
+    expect(t).not.toContain('movimentados')
+  })
+
+  it('o numero do texto e o MESMO que o resumo conta — nunca dois numeros diferentes', () => {
+    const linhas = [cls({ saldo: 1 }), cls({ saldo: 2 }), cls({ saldo: 0 }), cls({ saldo: -1 })]
+    const r = resumoEstoque(linhas)
+    expect(textoResumoEstoque(r)).toContain(`${linhas.length} linha(s) listada(s)`)
+    expect(textoResumoEstoque(r)).toContain('1 com saldo negativo')
+  })
+
+  it('omite o que nao aconteceu: sem zerados e sem negativos, so o total', () => {
+    expect(textoResumoEstoque(resumoEstoque([cls({ saldo: 5 })]))).toBe('1 linha(s) listada(s)')
+  })
+
+  it('na posicao historica a data entra no texto', () => {
+    expect(textoResumoEstoque(resumoEstoque([cls({ saldo: 5 })]), '15/08'))
+      .toBe('1 linha(s) listada(s) até 15/08')
+  })
+
+  it('lista vazia: zero linhas, e nada mais afirmado', () => {
+    const r = resumoEstoque([])
+    expect(r.linhas).toBe(0)
+    expect(r.comEstoque).toBe(0)
+    expect(textoResumoEstoque(r)).toBe('0 linha(s) listada(s)')
   })
 })

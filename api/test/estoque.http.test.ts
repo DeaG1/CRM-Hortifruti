@@ -148,6 +148,26 @@ describe('forma da resposta', () => {
     expect(linha.itens_sem_conversao).toBe(0)
   })
 
+  it('expoe movimentada, e o produto so cadastrado vem na lista com saldo zero', async () => {
+    const [parado] = await admin`
+      insert into produtos (tenant_id, nome, un, peso_medio)
+      values (${tenantId}, 'Parado HTTP', 'UN', 0) returning id`
+    expect(parado.id).toBeTruthy()
+
+    const res = await pedir('/api/estoque', comoAdmin())
+    const corpo = await res.json()
+
+    const linha = corpo.find((l: { nome: string }) => l.nome === 'Parado HTTP')
+    expect(linha).toBeDefined()
+    expect(linha.movimentada).toBe(false)
+    expect(linha.un).toBe('UN')
+    expect(linha.saldo).toBe(0)
+
+    // A linha movimentada continua dizendo que foi movimentada.
+    const melancia = corpo.find((l: { nome: string }) => l.nome === 'Melancia HTTP')
+    expect(melancia.movimentada).toBe(true)
+  })
+
   it('expoe em_kg como leitura secundaria — a mesma conta em quilos, para somar entre linhas', async () => {
     const res = await pedir('/api/estoque', comoAdmin())
     const corpo = await res.json()

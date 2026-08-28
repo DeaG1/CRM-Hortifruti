@@ -67,6 +67,12 @@ interface LinhaEstoque {
   produto_id: string
   nome: string
   un: string
+  /** `true` quando a linha nasceu de MOVIMENTACAO (entrada, perda ou saida);
+   * `false` quando nasceu do CADASTRO — produto que existe em `produtos` e
+   * nunca foi movimentado. As duas tem saldo MEDIDO; o que muda e o que o
+   * zero delas significa, e so a query sabe de onde a linha veio. Ver a CTE
+   * `chaves`. */
+  movimentada: boolean
   peso_medio: string | number
   /** EM KG — a soma entre linhas. Ver acima. */
   entrou: string | number
@@ -119,7 +125,7 @@ interface LinhaMovimentacao {
  * a soma pesada (todo o historico de itens ja movimentados) fica no banco;
  * o resultado que sai daqui ja e por linha da tabela da tela.
  *
- * `chaves`: uniao dos pares (produto_id, un) que aparecem em QUALQUER uma
+ * `movimentadas`: uniao dos pares (produto_id, un) que aparecem em QUALQUER
  * das tres fontes. Nenhuma das tres pode ser a tabela "esquerda" sozinha —
  * um produto so com perda de deposito (sem nunca ter tido entrada) e
  * igualmente valido no prototipo, e o mesmo vale pras outras duas. Os tres
@@ -128,11 +134,37 @@ interface LinhaMovimentacao {
  * fato: uma fonte sem linha para aquela chave simplesmente soma 0
  * (coalesce), em vez de derrubar a chave inteira como um inner join faria.
  *
- * Produto sem NENHUMA movimentacao nao entra em `chaves` e portanto nao
- * aparece no resultado — fidelidade ao prototipo, cujo stockMap so nasce de
- * iterar entradas/perdas/pedidos, nunca da lista de produtos (ver
- * logica-estoque.txt: `entradasRaw.forEach(... if(!stockMap[k]) ...)`, o
- * mapa e criado sob demanda pela movimentacao, nunca pre-populado).
+ * ---- e o produto que nunca se moveu ----
+ *
+ * Ate 2026-08-28 `chaves` era SO essa uniao, e produto cadastrado e nunca
+ * movimentado nao aparecia — fidelidade ao prototipo, cujo stockMap so nasce
+ * de iterar entradas/perdas/pedidos, nunca da lista de produtos (ver
+ * logica-estoque.txt: `entradasRaw.forEach(... if(!stockMap[k]) ...)`, o mapa
+ * e criado sob demanda pela movimentacao, nunca pre-populado).
+ *
+ * Numa tela de ESTOQUE isso e o avesso do util: de 21 produtos cadastrados
+ * apareciam 4, e o que sumia era justamente o que o dono mais precisa ver —
+ * o que ele NAO TEM. "Nao esta na lista" e indistinguivel de "nao existe".
+ *
+ * Entao a uniao das tres fontes virou a CTE `movimentadas`, e `chaves`
+ * passou a ser ela MAIS `cadastro`: os produtos de `produtos` sem
+ * movimentacao nenhuma. O saldo deles e zero, e esse zero e MEDICAO (nada
+ * entrou, nada saiu) — nunca travessao, que continua reservado para "nao ha
+ * como saber".
+ *
+ * A UNIDADE da linha de cadastro e `produtos.un`, porque nao existe chave
+ * (produto, un) para ela: nada foi lancado. Produto movimentado em mais de
+ * uma unidade continua com uma linha por unidade e NAO ganha uma linha de
+ * cadastro por cima — `cadastro` exige `not exists` em `movimentadas` para o
+ * produto INTEIRO, sem olhar a unidade. Sem isso, um produto cadastrado em KG
+ * e movimentado em UN ganharia uma segunda linha "KG zerada": mercadoria
+ * inventada numa unidade em que ninguem lancou nada.
+ *
+ * `chaves.movimentada` viaja ate a tela (ver `paraJson`) porque os dois
+ * saldos zero significam coisas diferentes — um acabou (teve entrada, saiu
+ * tudo), o outro nunca foi comprado. Deduzir isso dos numeros seria
+ * adivinhacao: entrou 0 / saiu 0 tambem descreve uma entrada de quantidade
+ * zero. So a query sabe de qual metade a linha veio.
  *
  * Saidas com status Cancelado/Devolvido ficam de fora do "saiu" (e, pelo
  * mesmo motivo, da perda-na-entrega abaixo) — mesmo filtro do prototipo
@@ -433,11 +465,35 @@ interface LinhaMovimentacao {
  * visivel. O HISTORICO nao a lista (e uma lista de datas, e ela nao tem),
  * exatamente como ja acontecia antes deste corte.
  *
- * PRODUTO QUE AINDA NAO EXISTIA NA DATA nao vira "0 kg": o corte se aplica
- * tambem a CTE `chaves`, entao a linha simplesmente NAO NASCE. E a mesma
- * regra que ja valia para produto sem nenhuma movimentacao (ver `chaves`
- * acima) — ausencia, nao saldo zero: zero seria uma medicao, e ninguem mediu
- * um produto que nao tinha sido comprado ainda.
+ * PRODUTO QUE AINDA NAO EXISTIA NA DATA nao vira "0 kg" — a linha NAO NASCE.
+ * Isso vale nas duas metades de `chaves`, por caminhos diferentes:
+ *
+ *   MOVIMENTADAS: o corte ja derruba a movimentacao posterior, e sem
+ *   movimentacao ate a data a chave nao aparece.
+ *
+ *   CADASTRO: o corte compara `produtos.criado_em::date <= posicaoEm`.
+ *   Listar numa posicao de agosto um produto cadastrado em setembro
+ *   AFIRMARIA ALGO FALSO SOBRE O PASSADO — diria "em 15/08 este produto
+ *   estava zerado no deposito" de um produto que em 15/08 nao existia. Zero
+ *   e uma medicao, e ninguem mediu o que ainda nao tinha sido cadastrado.
+ *
+ * O CORTE POR `criado_em` VALE SO PARA A LINHA DE CADASTRO, de proposito.
+ * Movimentacao datada ANTES do corte e prova direta de que a mercadoria
+ * estava la naquele dia, e essa prova vence `criado_em`: lancamento
+ * retroativo e comum (a entrada de agosto registrada em setembro), e
+ * `criado_em` diz quando o REGISTRO nasceu, nao quando o produto passou a
+ * existir no negocio. Filtrar tambem as linhas movimentadas por `criado_em`
+ * esconderia mercadoria que comprovadamente estava no deposito. `criado_em`
+ * so decide onde nao ha nenhuma outra evidencia — a linha que nao tem
+ * movimentacao alguma para se apoiar.
+ *
+ * `criado_em` e `timestamptz` e o corte e um dia de calendario, entao a
+ * comparacao usa `::date` no fuso da sessao do banco. Na borda — produto
+ * cadastrado na virada da meia-noite — isso pode deslocar a linha em um dia;
+ * e a mesma aproximacao que o projeto ja aceita ao gravar as datas de
+ * movimentacao como `date` a partir do calendario do navegador, e o dano
+ * possivel e uma linha de saldo zero a mais ou a menos numa posicao
+ * historica, nunca uma quantidade errada.
  *
  * RLS cuida do isolamento por tenant em cada tabela referenciada — nenhuma
  * dessas queries filtra tenant_id explicitamente porque tudo roda dentro de
@@ -452,10 +508,10 @@ export async function buscarEstoque(
   posicaoEm: string | null = null,
 ): Promise<LinhaEstoque[]> {
   return withTenant(sql, tenantId, tx => tx<LinhaEstoque[]>`
-    with chaves as (
-      -- O corte entra AQUI tambem, e nao so nas somas: linha sem nenhuma
-      -- movimentacao ate a data escolhida nao nasce, em vez de aparecer
-      -- zerada. Zero seria uma medicao; ausencia e a verdade.
+    with movimentadas as (
+      -- As chaves (produto, unidade) que tiveram MOVIMENTACAO ate o corte. O
+      -- corte entra AQUI tambem, e nao so nas somas: unidade em que nada se
+      -- moveu ate a data escolhida nao nasce como linha movimentada.
       select ei.produto_id, ei.un
       from entrada_itens ei
       join entradas e on e.id = ei.entrada_id
@@ -472,6 +528,36 @@ export async function buscarEstoque(
         and (${posicaoEm}::date is null
              or s.entrega is null
              or s.entrega <= ${posicaoEm}::date)
+    ),
+    cadastro as (
+      -- O produto CADASTRADO e nunca movimentado. Nao existe chave
+      -- (produto, un) para ele em fonte nenhuma, entao a unidade e a do
+      -- CADASTRO (produtos.un) — a unica que existe.
+      --
+      -- O not-exists NAO compara a unidade, de proposito: produto
+      -- cadastrado em KG e movimentado em UN ja tem a sua linha (UN), e uma
+      -- segunda linha "KG zerada" seria mercadoria inventada numa unidade em
+      -- que ninguem lancou nada. A linha de cadastro so existe quando NAO HA
+      -- MOVIMENTACAO NENHUMA daquele produto.
+      --
+      -- criado_em corta so AQUI: movimentacao anterior a data ja prova que a
+      -- mercadoria estava la, mesmo que o cadastro tenha sido digitado
+      -- depois. Ver "posicao num dia passado" no comentario acima.
+      select p.id as produto_id, p.un
+      from produtos p
+      where (${posicaoEm}::date is null or p.criado_em::date <= ${posicaoEm}::date)
+        and not exists (
+          select 1 from movimentadas m where m.produto_id = p.id
+        )
+    ),
+    chaves as (
+      -- union all, nao union: as duas metades sao disjuntas por
+      -- construcao (cadastro so aceita produto sem NENHUMA linha em
+      -- movimentadas). A coluna diz de qual metade a linha veio — e e ela
+      -- que deixa a tela distinguir "acabou" de "nunca foi comprado".
+      select produto_id, un, true as movimentada from movimentadas
+      union all
+      select produto_id, un, false as movimentada from cadastro
     ),
     entrada_totais as (
       -- Por ENTRADA (nao por produto): soma dos itens dela mesma, usada na
@@ -613,6 +699,10 @@ export async function buscarEstoque(
       p.id as produto_id,
       p.nome,
       k.un,
+      -- De qual metade de chaves a linha veio. Numa linha de cadastro os
+      -- tres LEFT JOINs abaixo nao casam com nada e todas as somas caem no
+      -- coalesce 0 — que ali e MEDICAO, nao ausencia de dado.
+      k.movimentada,
       p.peso_medio,
       -- EM KG, para a soma ENTRE linhas. Identicas ao que esta query devolve
       -- desde 35f3a2e — o coalesce aqui e o de "esta fonte nao tem linha para
@@ -676,6 +766,14 @@ export async function buscarEstoque(
  * daqui com saldo 0 e `itens_sem_conversao` 0 — medicao, sem marca nenhuma.
  * O que nao pode e ausencia de conversao virar zero, e e so isso que muda.
  *
+ * O MESMO vale para a linha de CADASTRO (produto nunca movimentado): as tres
+ * somas sao 0 porque nada foi lancado, e o saldo dela e zero MEDIDO, nao
+ * travessao. `movimentada: false` e o que permite a tela dizer "nunca
+ * comprado" em vez de "acabou" — os dois zeros sao iguais no numero e
+ * diferentes no significado. `em_kg` dessa linha sai `{0,0,0,0}` e nao
+ * `null`: zero de qualquer unidade sao zero quilos exatos, sem fator nenhum
+ * no meio, entao ela entra no total sem tirar nada dele.
+ *
  * ---- e por que o kg continua existindo, e continua obrigatorio ----
  *
  * Somar CX com KG so acontece ENTRE linhas, e la o kg e a unica unidade em
@@ -735,6 +833,11 @@ export function paraJson(linha: LinhaEstoque) {
     produto_id: linha.produto_id,
     nome: linha.nome,
     un: linha.un,
+    // A linha veio de movimentacao ou do cadastro. `!== false` porque so a
+    // query produz esta coluna, e dela ela vem sempre: `undefined` seria um
+    // chamador montando a linha na mao, e a leitura conservadora ali e
+    // "movimentada" — o comportamento de antes desta coluna existir.
+    movimentada: linha.movimentada !== false,
     entrou,
     perda,
     saiu,

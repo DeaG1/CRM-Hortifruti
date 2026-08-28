@@ -424,3 +424,188 @@ export function avisoSaidasSemData(n: number): string {
     + `${um ? 'ela conta' : 'elas contam'} em todas — inclusive nas anteriores ao pedido. `
     + 'Preencha a entrega na tela de Saídas para a posição histórica ficar exata.'
 }
+
+// =================================== o que o saldo diz, e o que ele alerta
+
+/**
+ * As situações em que o saldo de uma linha pode estar. Elas NÃO são graus da
+ * mesma coisa: três delas imprimem zero (ou menos) e significam coisas
+ * diferentes para quem decide a compra do dia.
+ *
+ *   `positivo`           tem mercadoria. Nada a sinalizar.
+ *
+ *   `acabou`             teve entrada e saiu tudo: zero POR CONSUMO. É o
+ *                        alerta que o dono quer — este produto ele estoca, e
+ *                        agora não tem. A ação é comprar.
+ *
+ *   `nunca_comprado`     produto cadastrado sem nenhuma movimentação. Também
+ *                        está zerado, mas não "acabou": nunca entrou no
+ *                        depósito. Não é reposição atrasada, é um item do
+ *                        catálogo que ninguém comprou ainda — e tratá-lo como
+ *                        alerta encheria a tela de vermelho justamente onde
+ *                        não há nada de novo acontecendo.
+ *
+ *   `negativo`           saiu mais do que entrou. Isso NÃO é falta de
+ *                        mercadoria: é DADO INCONSISTENTE, quase sempre uma
+ *                        entrada que não foi lançada. A ação é corrigir o
+ *                        lançamento, não comprar — por isso não pode receber
+ *                        o mesmo tratamento do zero, e precisa de um mais
+ *                        forte: um saldo zero atrapalha uma compra, um saldo
+ *                        negativo põe em dúvida a tabela inteira.
+ *
+ *   `sem_conta_fechada`  a linha carrega perda gravada em quilos que não cabe
+ *                        na unidade dela (`perda_fora_da_unidade` > 0), então
+ *                        o saldo exibido não é a conta inteira. Não recebe
+ *                        destaque: a marca `‡` já conserta a leitura, e um
+ *                        alarme sobre um número incompleto POR CONSTRUÇÃO
+ *                        seria arbitrário — é a mesma decisão que já valia
+ *                        para a cor do saldo antes desta classificação
+ *                        existir, agora escrita num lugar só.
+ */
+export const SITUACOES_SALDO = [
+  'positivo', 'acabou', 'nunca_comprado', 'negativo', 'sem_conta_fechada',
+] as const
+export type SituacaoSaldo = (typeof SITUACOES_SALDO)[number]
+
+/** O que `situacaoSaldo` precisa de uma linha de GET /api/estoque — só isto,
+ * para a função continuar pura e testável sem montar a linha inteira. */
+export interface LinhaClassificavel {
+  /** O saldo NA UNIDADE LANÇADA, como a API publica. */
+  saldo: number
+  /** `true` quando a linha nasceu de movimentação; `false` quando nasceu do
+   * cadastro (produto que nunca se moveu). Vem da API — ver a CTE `chaves`
+   * em api/src/routes/estoque.ts. Não é dedutível dos números: entrou 0 /
+   * saiu 0 também descreve uma entrada de quantidade zero. */
+  movimentada: boolean
+  /** Quilos de perda que não cabem na unidade desta linha. > 0 significa que
+   * o saldo exibido não é a conta inteira. */
+  perda_fora_da_unidade?: number
+}
+
+/**
+ * Em que situação está o saldo de uma linha.
+ *
+ * A ORDEM DAS PERGUNTAS É A DECISÃO. Ela vai da menos para a mais
+ * interpretável:
+ *
+ *   1. A conta fecha? Se a linha deixa quilos de perda de fora, nenhuma
+ *      afirmação sobre "falta" ou "sobra" se sustenta — sai antes de tudo.
+ *   2. É negativo? Vence qualquer outra leitura, inclusive a de cadastro:
+ *      saldo negativo é o único caso em que a tela está dizendo algo
+ *      impossível sobre o depósito, e esconder isso atrás de outro rótulo
+ *      seria pior do que qualquer alarme.
+ *   3. Nunca se moveu? Então o zero é de catálogo, não de consumo.
+ *   4. É zero? Então acabou — sobrou a única leitura possível.
+ *
+ * Trocar 3 por 4 dá o mesmo resultado hoje (linha de cadastro tem saldo 0 por
+ * construção), mas a ordem escrita é a que continua certa se um dia a API
+ * publicar uma linha de cadastro com saldo diferente de zero.
+ */
+export function situacaoSaldo(linha: LinhaClassificavel): SituacaoSaldo {
+  if ((linha.perda_fora_da_unidade ?? 0) > 0) return 'sem_conta_fechada'
+  if (linha.saldo < 0) return 'negativo'
+  if (!linha.movimentada) return 'nunca_comprado'
+  if (linha.saldo === 0) return 'acabou'
+  return 'positivo'
+}
+
+/**
+ * O selo escrito ao lado do número — `''` quando não há nenhum.
+ *
+ * ELE EXISTE PORQUE COR SOZINHA NÃO COMUNICA. Quem não distingue vermelho
+ * precisa perceber a mesma coisa, e o selo é texto de verdade: aparece na
+ * tela, no leitor de tela e numa impressão em preto e branco. A cor é o
+ * atalho para quem enxerga; o selo é a informação.
+ *
+ * E ele é o que separa os dois zeros. "Acabou" e "Nunca comprado" imprimem o
+ * MESMO número — zero —, então nenhuma diferença de cor os distinguiria de
+ * verdade: só a palavra faz isso.
+ */
+export const SELO_SITUACAO: Record<SituacaoSaldo, string> = {
+  positivo: '',
+  acabou: 'Acabou',
+  nunca_comprado: 'Nunca comprado',
+  negativo: 'Conferir lançamento',
+  sem_conta_fechada: '',
+}
+
+/** A explicação de cada situação — vai no `title` do número e do selo, e é o
+ * que transforma um rótulo de três palavras na frase inteira. `''` onde não
+ * há o que explicar. */
+export const AVISO_SITUACAO: Record<SituacaoSaldo, string> = {
+  positivo: '',
+  acabou: 'Este produto teve entrada e saiu tudo: o saldo é zero. Não é erro de '
+    + 'lançamento — é mercadoria que acabou, e é hora de comprar.',
+  nunca_comprado: 'Produto cadastrado que nunca foi movimentado: nenhuma entrada, nenhuma '
+    + 'saída, nenhuma perda. O saldo é zero e é medido — ele não acabou, nunca foi comprado.',
+  negativo: 'Saiu mais do que entrou. Isso não é falta de mercadoria: é lançamento faltando, '
+    + 'quase sempre uma entrada que não foi registrada. Confira as Entradas e as Saídas deste '
+    + 'produto — o caminho aqui é corrigir o lançamento, não comprar.',
+  sem_conta_fechada: '',
+}
+
+/** Os números do cartão do topo — ver `resumoEstoque`. */
+export interface ResumoEstoque {
+  /** Quantas linhas a tabela tem. É o que o cartão CONTA quando diz "linhas
+   * listadas", e desde que a lista passou a trazer todo produto cadastrado
+   * ele não é mais "itens movimentados". */
+  linhas: number
+  /** Linhas com saldo maior que zero — o número grande do cartão. */
+  comEstoque: number
+  acabou: number
+  nuncaComprado: number
+  negativo: number
+  /** `acabou` + `nuncaComprado`: o que está zerado e SE SABE que está. A
+   * linha sem conta fechada fica de fora dos dois — o saldo dela não é uma
+   * afirmação sobre ter ou não ter. */
+  semEstoque: number
+}
+
+/**
+ * Conta as linhas por situação, para o cartão do topo.
+ *
+ * Existe porque o rótulo do cartão PRECISA bater com o que ele conta. Ele
+ * dizia "N itens movimentados" quando a lista era só de itens movimentados; a
+ * lista passou a trazer todo produto cadastrado e a frase virou mentira, sem
+ * que nenhum número mudasse. Contar aqui, uma vez, é o que impede o texto e o
+ * número de divergirem de novo.
+ */
+export function resumoEstoque(linhas: readonly LinhaClassificavel[]): ResumoEstoque {
+  let comEstoque = 0, acabou = 0, nuncaComprado = 0, negativo = 0
+  for (const l of linhas) {
+    if (l.saldo > 0) comEstoque += 1
+    const s = situacaoSaldo(l)
+    if (s === 'acabou') acabou += 1
+    else if (s === 'nunca_comprado') nuncaComprado += 1
+    else if (s === 'negativo') negativo += 1
+  }
+  return {
+    linhas: linhas.length,
+    comEstoque,
+    acabou,
+    nuncaComprado,
+    negativo,
+    semEstoque: acabou + nuncaComprado,
+  }
+}
+
+/**
+ * A legenda sob o número do cartão. Diz o denominador (quantas linhas a
+ * tabela tem) e, quando existem, as duas coisas que o dono abre esta tela
+ * para ver: quantas estão zeradas e quantas estão negativas.
+ *
+ * "linha(s) listada(s)" e não "itens movimentados": a lista traz todo produto
+ * cadastrado, e um produto lançado em duas unidades ocupa duas linhas. Linha é
+ * o que a tabela tem e o que este número conta — dizer "produtos" seria a
+ * mesma classe de erro que a frase antiga cometia.
+ *
+ * `ate`: o rótulo curto da posição histórica ('15/08'), ou `null`/omitido em
+ * hoje. Fica aqui, e não concatenado na tela, para a frase inteira ter um
+ * dono só.
+ */
+export function textoResumoEstoque(r: ResumoEstoque, ate?: string | null): string {
+  const partes = [`${r.linhas} linha(s) listada(s)${ate ? ` até ${ate}` : ''}`]
+  if (r.semEstoque > 0) partes.push(`${r.semEstoque} sem estoque`)
+  if (r.negativo > 0) partes.push(`${r.negativo} com saldo negativo`)
+  return partes.join(' · ')
+}

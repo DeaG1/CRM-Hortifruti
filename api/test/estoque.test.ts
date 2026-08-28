@@ -43,12 +43,21 @@ beforeAll(async () => {
 
 afterAll(async () => { await sql?.end(); await admin?.end() })
 
+/**
+ * `opts.criado_em`: quando o CADASTRO do produto foi registrado. Fica no
+ * default do banco (now()) na maioria dos testes; so os do corte por data
+ * precisam controla-lo, porque `produtos.criado_em` e o unico dado que
+ * responde "este produto ja existia em 15/08?" para a linha que nao tem
+ * movimentacao nenhuma. Ver "posicao num dia passado" em buscarEstoque.
+ */
 async function criarProduto(
-  tenantId: string, nome: string, opts: { un?: string; peso_medio?: number } = {},
+  tenantId: string, nome: string,
+  opts: { un?: string; peso_medio?: number; criado_em?: string } = {},
 ): Promise<string> {
   const [p] = await withTenant(sql, tenantId, tx => tx`
-    insert into produtos (tenant_id, nome, un, peso_medio)
-    values (${tenantId}, ${nome}, ${opts.un ?? 'KG'}, ${opts.peso_medio ?? 0})
+    insert into produtos (tenant_id, nome, un, peso_medio, criado_em)
+    values (${tenantId}, ${nome}, ${opts.un ?? 'KG'}, ${opts.peso_medio ?? 0},
+            ${opts.criado_em ?? sql`now()`})
     returning id`)
   return p.id as string
 }
@@ -190,10 +199,86 @@ describe('buscarEstoque', () => {
     expect(linhasB.some(l => l.produto_id === produtoA)).toBe(false)
   })
 
-  it('produto sem nenhuma movimentacao nao aparece no resultado (fidelidade ao prototipo)', async () => {
+  // ---------------- o produto cadastrado e nunca movimentado
+  //
+  // Ate 2026-08-28 este bloco afirmava o CONTRARIO: "produto sem nenhuma
+  // movimentacao nao aparece no resultado (fidelidade ao prototipo)". A
+  // fidelidade era real (o stockMap do prototipo nasce da movimentacao, nunca
+  // da lista de produtos) e o resultado, numa tela de ESTOQUE, era o avesso
+  // do util: de 21 produtos cadastrados apareciam 4, e o que sumia era
+  // justamente o que o dono precisa ver — o que ele nao tem.
+
+  it('produto cadastrado e nunca movimentado APARECE, com saldo zero medido', async () => {
     const produtoId = await criarProduto(tenantA, 'Produto Parado')
-    const linhas = await buscarEstoque(sql, tenantA)
-    expect(linhas.some(l => l.produto_id === produtoId)).toBe(false)
+
+    const linha = (await buscarEstoque(sql, tenantA)).find(l => l.produto_id === produtoId)
+    expect(linha).toBeDefined()
+    expect(linha!.movimentada).toBe(false)
+
+    const j = paraJson(linha!)
+    // Zero MEDIDO, nao travessao: nada entrou e nada saiu, e isso se sabe.
+    expect(j.entrou).toBe(0)
+    expect(j.perda).toBe(0)
+    expect(j.saiu).toBe(0)
+    expect(j.saldo).toBe(0)
+    expect(j.movimentada).toBe(false)
+    // Sem movimentacao, sem data nenhuma — as tres continuam nulas (a tela
+    // imprime travessao na coluna de ultima movimentacao, que e outra coisa).
+    expect(j.ultima_entrada).toBeNull()
+    expect(j.ultima_saida).toBeNull()
+    expect(j.ultima_perda).toBeNull()
+    // Zero de qualquer unidade sao zero quilos exatos: a linha entra no total
+    // em kg sem tirar nada dele, e nao precisa de peso medio para isso.
+    expect(j.itens_sem_conversao).toBe(0)
+    expect(j.em_kg).toEqual({ entrou: 0, perda: 0, saiu: 0, saldo: 0 })
+  })
+
+  it('a unidade da linha de cadastro e a do PRODUTO — nao existe chave (produto, un) para ela', async () => {
+    const produtoId = await criarProduto(tenantA, 'Parado Em Caixa', { un: 'CX', peso_medio: 12 })
+
+    const doProduto = (await buscarEstoque(sql, tenantA)).filter(l => l.produto_id === produtoId)
+    expect(doProduto).toHaveLength(1)
+    expect(doProduto[0].un).toBe('CX')
+  })
+
+  it('produto MOVIMENTADO nao ganha linha de cadastro por cima — nem lancado em outra unidade', async () => {
+    // O caso que duplicaria: cadastrado em KG, lancado em UN. Uma linha "KG
+    // zerada" ao lado da linha UN seria mercadoria inventada numa unidade em
+    // que ninguem lancou nada.
+    const produtoId = await criarProduto(tenantA, 'Alface Cadastro Kg Mov Un', { un: 'KG' })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, un: 'UN', qtd: 45 }])
+
+    const doProduto = (await buscarEstoque(sql, tenantA)).filter(l => l.produto_id === produtoId)
+    expect(doProduto).toHaveLength(1)
+    expect(doProduto[0].un).toBe('UN')
+    expect(doProduto[0].movimentada).toBe(true)
+    expect(doProduto.some(l => l.un === 'KG')).toBe(false)
+  })
+
+  it('produto movimentado em DUAS unidades continua com duas linhas, e nenhuma e de cadastro', async () => {
+    const produtoId = await criarProduto(tenantA, 'Duas Unidades Cadastro', { un: 'MC' })
+    await criarEntrada(tenantA, [
+      { produto_id: produtoId, un: 'CX', qtd: 10 },
+      { produto_id: produtoId, un: 'KG', qtd: 20 },
+    ])
+
+    const doProduto = (await buscarEstoque(sql, tenantA)).filter(l => l.produto_id === produtoId)
+    expect(doProduto).toHaveLength(2)
+    expect(doProduto.map(l => l.un).sort()).toEqual(['CX', 'KG'])
+    expect(doProduto.every(l => l.movimentada === true)).toBe(true)
+    // A unidade do CADASTRO (MC) nao vira uma terceira linha.
+    expect(doProduto.some(l => l.un === 'MC')).toBe(false)
+  })
+
+  it('linha movimentada continua marcada como movimentada — o controle inerte deste bloco', async () => {
+    const produtoId = await criarProduto(tenantA, 'Controle Movimentada')
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 10 }])
+    await criarSaida(tenantA, 'Entregue', [{ produto_id: produtoId, qtd: 4 }], { entrega: '2026-08-05' })
+
+    const l = (await buscarEstoque(sql, tenantA)).find(x => x.produto_id === produtoId)!
+    expect(l.movimentada).toBe(true)
+    expect(paraJson(l).movimentada).toBe(true)
+    expect(paraJson(l).saldo).toBe(6)
   })
 
   it('produto com perda de deposito mas sem NUNCA ter tido entrada ainda aparece (LEFT JOIN, nao INNER)', async () => {
@@ -1034,6 +1119,54 @@ describe('buscarEstoque — posicao num dia passado', () => {
     const l = (await buscarEstoque(sql, tenantA, '2026-02-20')).find(x => x.produto_id === produtoId)!
     expect(Number(l.saiu)).toBe(0)
     expect(Number(l.itens_saida_sem_data)).toBe(0)
+  })
+
+  it('produto cadastrado DEPOIS da data escolhida nao aparece na posicao daquele dia', async () => {
+    // Listar aqui um produto que so foi cadastrado em julho afirmaria algo
+    // FALSO sobre o passado: "em 10/01 ele estava zerado no deposito".
+    const produtoId = await criarProduto(tenantA, 'Cadastrado Depois', {
+      criado_em: '2026-07-20T10:00:00Z',
+    })
+
+    const antes = (await buscarEstoque(sql, tenantA, '2026-01-10')).find(l => l.produto_id === produtoId)
+    expect(antes).toBeUndefined()
+    // E na posicao atual ele esta la, zerado.
+    const agora = (await buscarEstoque(sql, tenantA)).find(l => l.produto_id === produtoId)
+    expect(agora).toBeDefined()
+    expect(agora!.movimentada).toBe(false)
+  })
+
+  it('produto cadastrado ATE a data escolhida e nunca movimentado aparece zerado nela', async () => {
+    const produtoId = await criarProduto(tenantA, 'Cadastrado Antes', {
+      criado_em: '2026-01-05T10:00:00Z',
+    })
+
+    const l = (await buscarEstoque(sql, tenantA, '2026-01-10')).find(x => x.produto_id === produtoId)
+    expect(l).toBeDefined()
+    expect(l!.movimentada).toBe(false)
+    expect(paraJson(l!).saldo).toBe(0)
+
+    // O corte e inclusivo tambem aqui: no proprio dia do cadastro ele ja
+    // aparece; na vespera, nao.
+    const noDia = (await buscarEstoque(sql, tenantA, '2026-01-05')).find(x => x.produto_id === produtoId)
+    expect(noDia).toBeDefined()
+    const vespera = (await buscarEstoque(sql, tenantA, '2026-01-04')).find(x => x.produto_id === produtoId)
+    expect(vespera).toBeUndefined()
+  })
+
+  it('movimentacao anterior ao corte VENCE criado_em — lancamento retroativo nao some', async () => {
+    // O cadastro foi digitado em julho, mas a entrada e de janeiro: a
+    // mercadoria comprovadamente estava no deposito em 10/01. criado_em diz
+    // quando o REGISTRO nasceu, nao quando o produto passou a existir.
+    const produtoId = await criarProduto(tenantA, 'Retroativo', {
+      criado_em: '2026-07-20T10:00:00Z',
+    })
+    await criarEntrada(tenantA, [{ produto_id: produtoId, qtd: 30 }], { data: '2026-01-08' })
+
+    const l = (await buscarEstoque(sql, tenantA, '2026-01-10')).find(x => x.produto_id === produtoId)
+    expect(l).toBeDefined()
+    expect(l!.movimentada).toBe(true)
+    expect(Number(l!.entrou)).toBe(30)
   })
 
   it('o rateio da perda de coleta continua correto dentro do corte (a entrada entra inteira)', async () => {

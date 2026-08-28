@@ -180,6 +180,70 @@
   margin-top: 2px;
 }
 
+/* ---------- o saldo que precisa de ação ----------
+
+   Três situações, dois tons, e o texto fazendo o trabalho pesado.
+
+   A cor do NÚMERO vem do componente (COR_SITUACAO, inline) — ela é a mesma
+   decisão de sempre, só que agora por situação e não por sinal. O que vive
+   aqui é o SELO, que é o que sobrevive à daltonia e ao preto e branco: cada
+   tom tem contorno próprio e um deles é preenchido, então os três se
+   distinguem sem depender de matiz nenhum.
+
+   O selo fica ABAIXO do número, alinhado à direita como ele, na mesma
+   linha secundária onde mora a leitura em quilos. Não substitui o número em
+   nenhum caso: zero medido continua impresso com todas as casas e a unidade
+   colada — o destaque é acréscimo. */
+
+.estoque-saldo-selo {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-family: 'Public Sans', sans-serif;
+  font-weight: 700;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+/* ACABOU — teve entrada, saiu tudo. O alerta de compra: contorno vermelho
+   sobre fundo claro, no mesmo tom do número. */
+.estoque-saldo-selo--falta {
+  color: #c2502f;
+  background: #fbeee9;
+  border: 1px solid #e0a893;
+}
+
+/* NUNCA COMPRADO — cadastrado e nunca movimentado. Cinza de propósito: também
+   está zerado, mas nada aconteceu com ele. Se ele fosse vermelho, os produtos
+   que o dono não estoca afogariam os que de fato acabaram. */
+.estoque-saldo-selo--neutro {
+  color: #6a685c;
+  background: #f2f0e7;
+  border: 1px solid #d8d3c2;
+}
+
+/* CONFERIR LANÇAMENTO — saldo negativo, que não é falta de mercadoria e sim
+   dado inconsistente. PREENCHIDO: o degrau a mais que o negativo precisa
+   sobre o zero, e a única diferença que não depende de enxergar cor. */
+.estoque-saldo-selo--inconsistente {
+  color: #fffefa;
+  background: #c2502f;
+  border: 1px solid #c2502f;
+}
+
+/* A linha inteira do saldo negativo, para ele ser achável rolando a lista sem
+   ler número nenhum. Usa box-shadow inset em vez de border-left: uma borda
+   de verdade empurraria as colunas do grid e desalinharia a tabela toda. O zero NÃO
+   ganha barra — zero é comum, e marcar todas as linhas seria não marcar
+   nenhuma. */
+.estoque-item--inconsistente .estoque-linha--dados {
+  box-shadow: inset 3px 0 0 #c2502f;
+}
+
 .estoque-legenda {
   font-size: 12px;
   color: #6a685c;

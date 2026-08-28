@@ -475,10 +475,19 @@
     display: none !important;
   }
 
+  /* O Shell e uma coluna de `height: 100vh` com `overflow: hidden` e rolagem
+     interna (ver Shell.css). Sem soltar `.shell` TAMBEM, o papel herda a
+     altura de uma tela e o relatorio sai cortado na primeira pagina — foi o
+     que aconteceu em producao: a previa dizia "1 pagina" e a tabela parava no
+     meio. `.shell` estava de fora desta lista; `max-height` idem.
+     RomaneioEntregas.css ja fazia certo, e por isso imprimia inteiro. */
+  .shell,
   .shell-main,
   .shell-conteudo {
+    display: block !important;
     overflow: visible !important;
     height: auto !important;
+    max-height: none !important;
   }
 
   .relatorios-tabela,

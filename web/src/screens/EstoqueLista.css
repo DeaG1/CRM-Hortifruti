@@ -196,6 +196,9 @@
    colada — o destaque é acréscimo. */
 
 .estoque-saldo-selo {
+  /* inline-block serve a LEGENDA, onde o selo aparece no meio de uma frase.
+     Na celula da tabela ele precisa de linha propria — ver a regra escopada
+     logo abaixo. */
   display: inline-block;
   margin-top: 3px;
   padding: 1px 7px;
@@ -211,6 +214,18 @@
 
 /* ACABOU — teve entrada, saiu tudo. O alerta de compra: contorno vermelho
    sobre fundo claro, no mesmo tom do número. */
+/* O selo DENTRO da celula de saldo ocupa linha propria, alinhado a direita
+   como o numero acima dele. Sem isto ele herda o `inline-block` que a legenda
+   precisa, cola ao lado do valor numa coluna alinhada a direita e VAZA pela
+   borda da tabela — foi assim que ele saiu cortado em producao. `fit-content`
+   + `margin-left: auto` mantem o selo do tamanho do texto e encostado a
+   direita, do mesmo jeito que `.estoque-saldo-kg` ja fazia. */
+.estoque-saldo .estoque-saldo-selo {
+  display: block;
+  width: fit-content;
+  margin-left: auto;
+}
+
 .estoque-saldo-selo--falta {
   color: #c2502f;
   background: #fbeee9;

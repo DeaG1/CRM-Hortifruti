@@ -8,6 +8,7 @@ import { derivarResumoSaidas, type ResumoSaidas } from '../derive/resumoOperacio
 import { filtrarPorPeriodo, rotuloPeriodo, PERIODO_TODOS, type Periodo } from '../derive/periodo'
 import { ModalSaida, type Saida, type StatusSaida, type PagSaida } from '../components/ModalSaida'
 import { SeletorPagamento } from '../components/SeletorPagamento'
+import { RomaneioEntregas } from './RomaneioEntregas'
 import './SaidasLista.css'
 
 const STATUS_FILTROS = ['Todos', 'Pendente', 'Em rota', 'Entregue', 'Devolvido', 'Cancelado'] as const
@@ -208,6 +209,23 @@ export function SaidasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Saida
   const [modal, setModal] = useState<string | null | undefined>(undefined)
   // Muda a cada salvamento/exclusao pra forcar o refetch da lista.
   const [versao, setVersao] = useState(0)
+  /**
+   * A folha de conferência do caminhão (screens/RomaneioEntregas.tsx) abre NO
+   * LUGAR da lista, e não numa camada por cima dela.
+   *
+   * Um modal seria o padrão desta base para "abrir uma coisa a partir de
+   * outra", mas aqui ele custaria caro: sobreposição em `position: fixed` é
+   * exatamente o que o navegador imprime pior (a camada vira uma página só,
+   * ou repete em todas), e este é um componente que existe para virar papel.
+   * Trocar a lista pela folha deixa o documento em fluxo normal, que é o
+   * arranjo em que a impressão é previsível.
+   *
+   * E não é uma tela nova de menu: a matéria é a mesma (as entregas do dia
+   * SÃO as saídas), a permissão já está certa ('pedidos' não é admin-only) e
+   * imprimir é uma AÇÃO sobre esta lista, como exportar CSV é uma ação sobre
+   * um relatório.
+   */
+  const [romaneioAberto, setRomaneioAberto] = useState(false)
 
   useEffect(() => {
     let cancelado = false
@@ -281,6 +299,19 @@ export function SaidasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Saida
   function aoExcluir() {
     setModal(undefined)
     setVersao(v => v + 1)
+  }
+
+  // A folha tem busca própria (por DIA de entrega) e não depende da lista
+  // nem do período do cabeçalho — por isso vem antes dos estados de
+  // carregamento/erro daqui: um erro ao listar saídas não pode impedir a
+  // impressão do romaneio, que fala com outro endpoint.
+  if (romaneioAberto) {
+    return (
+      <RomaneioEntregas
+        onVoltar={() => setRomaneioAberto(false)}
+        onSessaoExpirada={onSessaoExpirada}
+      />
+    )
   }
 
   if (carregando) return <p className="saidas-estado">Carregando…</p>
@@ -384,6 +415,15 @@ export function SaidasLista({ periodo = PERIODO_TODOS, onSessaoExpirada }: Saida
     <div className="saidas-lista">
       <div className="saidas-topo">
         <div className="saidas-topo-dica">Clique numa saída para editar</div>
+        {/* O romaneio fica AQUI, e não no estado vazio nem num menu: quem vai
+            imprimir a folha do dia já está olhando as entregas. */}
+        <button
+          type="button"
+          className="saidas-botao-romaneio"
+          onClick={() => setRomaneioAberto(true)}
+        >
+          Romaneio de entregas
+        </button>
         <button type="button" className="saidas-botao-novo" onClick={() => setModal(null)}>
           ＋ Novo pedido
         </button>

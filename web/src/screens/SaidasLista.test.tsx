@@ -736,3 +736,78 @@ describe('SaidasLista — sub-linha "forma · data" do pagamento (achado S-3)', 
   })
 })
 
+
+// ============================================ o botão do romaneio de entregas
+
+describe('SaidasLista — o romaneio de entregas', () => {
+  beforeEach(() => {
+    mockGet.mockReset()
+    window.localStorage.clear()
+  })
+
+  /** O romaneio busca por DIA numa rota própria; o mock cobre qualquer dia. */
+  function mockComRomaneio(lista: Saida[], itensDoDia: unknown[] = []) {
+    mockGet.mockImplementation((rota: string) => {
+      if (rota === '/api/saidas') return Promise.resolve(lista)
+      if (rota === '/api/clientes') return Promise.resolve([clienteA])
+      if (rota === '/api/produtos') return Promise.resolve([])
+      const m = rota.match(/^\/api\/saidas\/romaneio\/(\d{4}-\d{2}-\d{2})$/)
+      if (m) {
+        return Promise.resolve({
+          data: m[1], itens: itensDoDia, sem_data_entrega: { total: 0, numeros: [] },
+        })
+      }
+      return Promise.reject(new Error('rota inesperada no teste: ' + rota))
+    })
+  }
+
+  it('o botão fica no topo da lista, ao lado de "Novo pedido"', async () => {
+    mockComRomaneio([saida()])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+
+    const topo = document.querySelector('.saidas-topo') as HTMLElement
+    expect(within(topo).getByRole('button', { name: 'Romaneio de entregas' })).toBeInTheDocument()
+    expect(within(topo).getByRole('button', { name: /Novo pedido/ })).toBeInTheDocument()
+  })
+
+  it('abre a folha NO LUGAR da lista (documento em fluxo normal, não camada por cima)', async () => {
+    mockComRomaneio([saida()])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Romaneio de entregas' }))
+    await screen.findByLabelText('Entregas de')
+    // A tabela de saídas saiu de cena — nada sobreposto a nada.
+    expect(screen.queryByText('S-0001')).toBeNull()
+    expect(document.querySelector('.saidas-tabela')).toBeNull()
+  })
+
+  it('voltar devolve a lista intacta', async () => {
+    mockComRomaneio([saida()])
+    render(<SaidasLista onSessaoExpirada={() => {}} />)
+    await screen.findByText('S-0001')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Romaneio de entregas' }))
+    await screen.findByLabelText('Entregas de')
+    fireEvent.click(screen.getByRole('button', { name: '← Voltar para a lista' }))
+    await screen.findByText('S-0001')
+    expect(screen.getByRole('button', { name: 'Romaneio de entregas' })).toBeInTheDocument()
+  })
+
+  it('a folha não depende do período do cabeçalho — ela tem o DIA dela', async () => {
+    // Período global em outro mês: a lista fica vazia, mas o romaneio do dia
+    // continua buscando e mostrando o que há naquele dia.
+    mockComRomaneio([saida({ entrega: '2026-08-05' })], [{
+      saida_id: 'p1', numero: '#77', status: 'Pendente', obs: '', rota: 'Norte',
+      cliente_id: 'cli-1', cliente_nome: 'Mercado A', cliente_endereco: '', cliente_tel: '',
+      cliente_rota: 'Norte', item_id: 'i1', produto: 'Alface', un: 'UN', qtd: 45, preco: 0,
+    }])
+    render(<SaidasLista periodo="2020-01" onSessaoExpirada={() => {}} />)
+    await screen.findByText(/Nenhuma saída em Janeiro\/2020/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Romaneio de entregas' }))
+    expect(await screen.findByText('Alface')).toBeInTheDocument()
+    expect(screen.getByText('45 UN')).toBeInTheDocument()
+  })
+})

@@ -1078,3 +1078,345 @@ describe('GET /ultimos-precos/:clienteId — memoria de preco por cliente', () =
     expect(await res.json()).toEqual({ erro: 'clienteId invalido' })
   })
 })
+
+/**
+ * ===================== GET /romaneio/:data — a folha de conferencia do dia
+ *
+ * TENANT PROPRIO, e nao os fixtures do resto do arquivo. Duas razoes:
+ *
+ *  1. `sem_data_entrega` conta TODAS as saidas do tenant sem `entrega`, e os
+ *     blocos acima criam dezenas delas (semearVenda nao preenche entrega).
+ *     Num tenant compartilhado, "quantas vendas estao sem data" viraria um
+ *     numero dependente da ordem de execucao dos outros testes — exatamente o
+ *     tipo de teste que passa hoje e mente amanha.
+ *  2. A separacao POR DIA e o objeto do teste. Um tenant limpo deixa provar
+ *     "so as entregas daquele dia" contra um conjunto conhecido inteiro, e
+ *     nao contra "pelo menos essas".
+ */
+describe('GET /romaneio/:data', () => {
+  let tenantRom: string
+  let tokenRomAdmin: string
+  let tokenRomColab: string
+  let clienteBoaSafra: string
+  let clienteZe: string
+  let produtoAlface: string
+  let produtoMelanciaCx: string
+
+  const comoRomAdmin = (init: RequestInit = {}): RequestInit => ({
+    ...init, headers: { ...init.headers, cookie: `${COOKIE_SESSAO}=${tokenRomAdmin}` },
+  })
+  const comoRomColab = (init: RequestInit = {}): RequestInit => ({
+    ...init, headers: { ...init.headers, cookie: `${COOKIE_SESSAO}=${tokenRomColab}` },
+  })
+
+  /** Semeia uma entrega direto via `admin` (fora da RLS): estes testes
+   * precisam controlar `entrega`, `status` e a unidade de cada item —
+   * inclusive combinacoes que o POST nao produz (entrega nula). */
+  async function semearEntrega(
+    numero: string,
+    entrega: string | null,
+    status: string,
+    clienteAlvo: string | null,
+    itens: { produto: string; un: string; qtd: number; preco: number }[],
+    extra: { rota?: string; obs?: string } = {},
+  ) {
+    const [s] = await admin`
+      insert into saidas (tenant_id, cliente_id, numero, data_pedido, entrega, status, rota, obs)
+      values (${tenantRom}, ${clienteAlvo}, ${numero}, '2026-08-20', ${entrega}, ${status},
+              ${extra.rota ?? ''}, ${extra.obs ?? ''})
+      returning id`
+    for (const it of itens) {
+      await admin`
+        insert into saida_itens (tenant_id, saida_id, produto_id, un, qtd, preco)
+        values (${tenantRom}, ${s.id}, ${it.produto}, ${it.un}, ${it.qtd}, ${it.preco})`
+    }
+    return s.id as string
+  }
+
+  beforeAll(async () => {
+    const [t] = await admin`
+      insert into tenants (slug, nome) values ('teste-romaneio', 'Romaneio')
+      on conflict (slug) do update set nome = excluded.nome returning id`
+    tenantRom = t.id
+
+    await admin`delete from saida_itens where tenant_id = ${tenantRom}`
+    await admin`delete from saidas where tenant_id = ${tenantRom}`
+    await admin`delete from produtos where tenant_id = ${tenantRom}`
+    await admin`delete from clientes where tenant_id = ${tenantRom}`
+    await admin`delete from usuarios where tenant_id = ${tenantRom}`
+
+    const hash = await hashSenha('segredo123')
+    const [uA] = await admin`
+      insert into usuarios (tenant_id, email, senha_hash, nome, papel)
+      values (${tenantRom}, 'admin@romaneio.com', ${hash}, 'Admin', 'admin') returning id`
+    const [uC] = await admin`
+      insert into usuarios (tenant_id, email, senha_hash, nome, papel)
+      values (${tenantRom}, 'colab@romaneio.com', ${hash}, 'Colab', 'colaborador') returning id`
+    tokenRomAdmin = await criarSessao(sql, uA.id, tenantRom)
+    tokenRomColab = await criarSessao(sql, uC.id, tenantRom)
+
+    const [pAlface] = await admin`
+      insert into produtos (tenant_id, nome, un, peso_medio)
+      values (${tenantRom}, 'Alface Hidroponica', 'KG', 0) returning id`
+    produtoAlface = pAlface.id
+    // Caixa SEM peso medio: o item que a conversao para kg nao alcanca. No
+    // romaneio ele tem de sair "10 CX" — e o caso real de 88318ee.
+    const [pMel] = await admin`
+      insert into produtos (tenant_id, nome, un, peso_medio)
+      values (${tenantRom}, 'Melancia', 'CX', 0) returning id`
+    produtoMelanciaCx = pMel.id
+
+    const [c1] = await admin`
+      insert into clientes (tenant_id, nome, endereco, tel, rota)
+      values (${tenantRom}, 'Mercado Boa Safra', 'Rua das Flores, 120', '(43) 99999-1111', 'Sul A')
+      returning id`
+    clienteBoaSafra = c1.id
+    const [c2] = await admin`
+      insert into clientes (tenant_id, nome, endereco, tel, rota)
+      values (${tenantRom}, 'Hortifruti Ze', 'Av. Central, 9', '(43) 98888-2222', 'Norte B')
+      returning id`
+    clienteZe = c2.id
+
+    // 28/08 — o dia do romaneio.
+    await semearEntrega('#1001', '2026-08-28', 'Pendente', clienteBoaSafra, [
+      { produto: produtoAlface, un: 'UN', qtd: 45, preco: 2.5 },
+      { produto: produtoMelanciaCx, un: 'CX', qtd: 10, preco: 30 },
+    ], { rota: 'Sul A', obs: 'Entregar pelos fundos' })
+    await semearEntrega('#1002', '2026-08-28', 'Em rota', clienteZe, [
+      { produto: produtoAlface, un: 'KG', qtd: 12.5, preco: 8 },
+    ], { rota: 'Norte B' })
+    // Mesmo cliente, segundo pedido no MESMO dia — a folha tem de juntar os
+    // dois no mesmo bloco (o agrupamento acontece em derive/romaneio.ts).
+    await semearEntrega('#1003', '2026-08-28', 'Entregue', clienteBoaSafra, [
+      { produto: produtoAlface, un: 'MC', qtd: 6, preco: 3 },
+    ], { rota: 'Sul A' })
+
+    // 27/08 — vespera, para provar que nao vaza para o dia seguinte.
+    await semearEntrega('#0900', '2026-08-27', 'Entregue', clienteZe, [
+      { produto: produtoAlface, un: 'KG', qtd: 5, preco: 8 },
+    ])
+
+    // Fora do romaneio por STATUS, no mesmo dia.
+    await semearEntrega('#1004', '2026-08-28', 'Cancelado', clienteBoaSafra, [
+      { produto: produtoAlface, un: 'KG', qtd: 99, preco: 1 },
+    ])
+    await semearEntrega('#1005', '2026-08-28', 'Devolvido', clienteBoaSafra, [
+      { produto: produtoAlface, un: 'KG', qtd: 88, preco: 1 },
+    ])
+
+    // SEM data de entrega: nao pertence a dia nenhum.
+    await semearEntrega('#2001', null, 'Pendente', clienteBoaSafra, [
+      { produto: produtoAlface, un: 'KG', qtd: 7, preco: 1 },
+    ])
+    await semearEntrega('#2002', null, 'Em rota', clienteZe, [
+      { produto: produtoAlface, un: 'KG', qtd: 7, preco: 1 },
+    ])
+    // Sem data E cancelada: nao e problema a resolver, entao nao entra no
+    // contador — cobrar a data de uma venda que nunca aconteceu seria ruido.
+    await semearEntrega('#2003', null, 'Cancelado', clienteZe, [
+      { produto: produtoAlface, un: 'KG', qtd: 7, preco: 1 },
+    ])
+  })
+
+  async function romaneio(data: string, init = comoRomAdmin()) {
+    const res = await pedir(`/api/saidas/romaneio/${data}`, init)
+    return { res, corpo: await res.json() as Record<string, never> }
+  }
+
+  it('sem cookie -> 401', async () => {
+    const res = await pedir('/api/saidas/romaneio/2026-08-28')
+    expect(res.status).toBe(401)
+  })
+
+  it('COLABORADOR le a folha: e ele quem carrega o caminhao', async () => {
+    const { res } = await romaneio('2026-08-28', comoRomColab())
+    expect(res.status).toBe(200)
+  })
+
+  it('colaborador e admin recebem exatamente a mesma folha', async () => {
+    const a = await romaneio('2026-08-28', comoRomAdmin())
+    const c = await romaneio('2026-08-28', comoRomColab())
+    expect(c.corpo).toEqual(a.corpo)
+  })
+
+  it('data fora do formato -> 400, e nunca um dia arbitrario', async () => {
+    for (const ruim of ['hoje', '28-08-2026', '2026-8-28', '2026']) {
+      const res = await pedir(`/api/saidas/romaneio/${ruim}`, comoRomAdmin())
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ erro: 'data invalida (use AAAA-MM-DD)' })
+    }
+  })
+
+  it('a data volta na resposta, igual a pedida', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    expect(corpo.data).toBe('2026-08-28')
+  })
+
+  it('traz SO as entregas daquele dia — a vespera nao vaza', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    const numeros = [...new Set((corpo.itens as { numero: string }[]).map(i => i.numero))].sort()
+    expect(numeros).toEqual(['#1001', '#1002', '#1003'])
+  })
+
+  it('o dia anterior traz o dele, e so o dele', async () => {
+    const { res, corpo } = await romaneio('2026-08-27')
+    expect(res.status).toBe(200)
+    const numeros = [...new Set((corpo.itens as { numero: string }[]).map(i => i.numero))]
+    expect(numeros).toEqual(['#0900'])
+  })
+
+  it('CANCELADO e DEVOLVIDO ficam fora — nao sobem no caminhao', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    const itens = corpo.itens as { numero: string; status: string }[]
+    expect(itens.map(i => i.numero)).not.toContain('#1004')
+    expect(itens.map(i => i.numero)).not.toContain('#1005')
+    expect([...new Set(itens.map(i => i.status))].sort()).toEqual(['Em rota', 'Entregue', 'Pendente'])
+  })
+
+  it('venda SEM data de entrega nao aparece em dia nenhum', async () => {
+    for (const dia of ['2026-08-26', '2026-08-27', '2026-08-28', '2026-08-29']) {
+      const { corpo } = await romaneio(dia)
+      const numeros = (corpo.itens as { numero: string }[]).map(i => i.numero)
+      expect(numeros).not.toContain('#2001')
+      expect(numeros).not.toContain('#2002')
+    }
+  })
+
+  it('...mas ela e CONTADA e NOMEADA, para nao sumir em silencio', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    const sem = corpo.sem_data_entrega as unknown as { total: number; numeros: string[] }
+    expect(sem.total).toBe(2)
+    expect([...sem.numeros].sort()).toEqual(['#2001', '#2002'])
+  })
+
+  it('o contador nao depende do dia consultado — a venda sem data nao e "de" dia nenhum', async () => {
+    const a = await romaneio('2026-08-28')
+    const b = await romaneio('2026-01-01')
+    expect(b.corpo.sem_data_entrega).toEqual(a.corpo.sem_data_entrega)
+  })
+
+  it('venda cancelada sem data NAO entra no contador — nao ha o que corrigir', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    const sem = corpo.sem_data_entrega as unknown as { numeros: string[] }
+    expect(sem.numeros).not.toContain('#2003')
+  })
+
+  it('dia sem entrega nenhuma: 200 com lista vazia, nao erro', async () => {
+    const { res, corpo } = await romaneio('2026-08-30')
+    expect(res.status).toBe(200)
+    expect(corpo.itens).toEqual([])
+    expect(corpo.data).toBe('2026-08-30')
+  })
+
+  it('cada item traz o cadastro do cliente que a folha precisa', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    const item = (corpo.itens as Record<string, unknown>[]).find(i => i.numero === '#1001')!
+    expect(item.cliente_nome).toBe('Mercado Boa Safra')
+    expect(item.cliente_endereco).toBe('Rua das Flores, 120')
+    expect(item.cliente_tel).toBe('(43) 99999-1111')
+    expect(item.cliente_rota).toBe('Sul A')
+    expect(item.rota).toBe('Sul A')
+    expect(item.obs).toBe('Entregar pelos fundos')
+    expect(item.cliente_id).toBe(clienteBoaSafra)
+  })
+
+  it('dois pedidos do mesmo cliente no mesmo dia vem os dois, identificados', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    const doCliente = (corpo.itens as { cliente_id: string; numero: string }[])
+      .filter(i => i.cliente_id === clienteBoaSafra)
+    expect([...new Set(doCliente.map(i => i.numero))].sort()).toEqual(['#1001', '#1003'])
+  })
+
+  it('QUANTIDADE NA UNIDADE LANCADA: caixa sem peso medio sai 10 CX, nunca 0', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    const melancia = (corpo.itens as Record<string, unknown>[])
+      .find(i => i.produto === 'Melancia')!
+    expect(melancia.qtd).toBe(10)
+    expect(melancia.un).toBe('CX')
+  })
+
+  it('cada item sai na unidade em que foi lancado, sem conversao', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    const porUnidade = (corpo.itens as { un: string; qtd: number }[])
+      .map(i => `${i.qtd} ${i.un}`).sort()
+    expect(porUnidade).toEqual(['10 CX', '12.5 KG', '45 UN', '6 MC'])
+  })
+
+  it('qtd e preco chegam como NUMERO, nao string do driver', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    for (const i of corpo.itens as { qtd: unknown; preco: unknown }[]) {
+      expect(typeof i.qtd).toBe('number')
+      expect(typeof i.preco).toBe('number')
+    }
+    const sem = corpo.sem_data_entrega as unknown as { total: unknown }
+    expect(typeof sem.total).toBe('number')
+  })
+
+  it('o nome do produto vem junto — a folha nao imprime uuid', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    const nomes = [...new Set((corpo.itens as { produto: string }[]).map(i => i.produto))].sort()
+    expect(nomes).toEqual(['Alface Hidroponica', 'Melancia'])
+  })
+
+  it('a ordem e deterministica: por numero de pedido, depois pela ordem dos itens', async () => {
+    const a = await romaneio('2026-08-28')
+    const b = await romaneio('2026-08-28')
+    expect(b.corpo.itens).toEqual(a.corpo.itens)
+    const numeros = (a.corpo.itens as { numero: string }[]).map(i => i.numero)
+    expect(numeros).toEqual([...numeros].sort())
+  })
+
+  it('nenhum tenant_id vaza no corpo', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    for (const i of corpo.itens as Record<string, unknown>[]) {
+      expect(i.tenant_id).toBeUndefined()
+    }
+  })
+
+  it('isolamento: outro tenant nao ve as entregas deste', async () => {
+    const res = await pedir('/api/saidas/romaneio/2026-08-28', comoAdmin())
+    expect(res.status).toBe(200)
+    const corpo = await res.json() as { itens: { numero: string }[] }
+    expect(corpo.itens.map(i => i.numero)).not.toContain('#1001')
+  })
+})
+
+/**
+ * A LISTA DE NUMEROS SEM DATA E TRUNCADA, O TOTAL NAO. Tenant proprio pelo
+ * mesmo motivo do bloco acima: 60 vendas penduradas contaminariam qualquer
+ * contagem vizinha.
+ */
+describe('GET /romaneio/:data — muitas vendas sem data de entrega', () => {
+  let tenantVol: string
+  let tokenVol: string
+
+  beforeAll(async () => {
+    const [t] = await admin`
+      insert into tenants (slug, nome) values ('teste-romaneio-volume', 'Romaneio Volume')
+      on conflict (slug) do update set nome = excluded.nome returning id`
+    tenantVol = t.id
+    await admin`delete from saida_itens where tenant_id = ${tenantVol}`
+    await admin`delete from saidas where tenant_id = ${tenantVol}`
+    await admin`delete from usuarios where tenant_id = ${tenantVol}`
+
+    const hash = await hashSenha('segredo123')
+    const [u] = await admin`
+      insert into usuarios (tenant_id, email, senha_hash, nome, papel)
+      values (${tenantVol}, 'admin@romaneio-vol.com', ${hash}, 'Admin', 'admin') returning id`
+    tokenVol = await criarSessao(sql, u.id, tenantVol)
+
+    await admin`
+      insert into saidas (tenant_id, numero, data_pedido, entrega, status)
+      select ${tenantVol}, 'V-' || lpad(n::text, 3, '0'), '2026-08-20', null, 'Pendente'
+      from generate_series(1, 60) as n`
+  })
+
+  it('o TOTAL e exato mesmo com a lista limitada a 50 numeros', async () => {
+    const res = await pedir('/api/saidas/romaneio/2026-08-28', {
+      headers: { cookie: `${COOKIE_SESSAO}=${tokenVol}` },
+    })
+    const corpo = await res.json() as { sem_data_entrega: { total: number; numeros: string[] } }
+    expect(corpo.sem_data_entrega.total).toBe(60)
+    expect(corpo.sem_data_entrega.numeros).toHaveLength(50)
+  })
+})

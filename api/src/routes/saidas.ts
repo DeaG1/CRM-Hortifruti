@@ -402,6 +402,187 @@ saidas.get('/ultimos-precos/:clienteId', async (c) => {
   })))
 })
 
+/** Linha crua da consulta do romaneio — um ITEM de uma saida do dia, com o
+ * cabecalho e o cadastro do cliente repetidos pelo join. `qtd`/`preco` sao
+ * numeric (string no postgres.js), convertidos na borda como no resto da API. */
+interface LinhaRomaneioCrua {
+  saida_id: string
+  numero: string
+  status: string
+  obs: string
+  rota: string
+  cliente_id: string | null
+  cliente_nome: string | null
+  cliente_endereco: string | null
+  cliente_tel: string | null
+  cliente_rota: string | null
+  item_id: string
+  produto: string
+  un: string
+  qtd: string | number
+  preco: string | number
+}
+
+/** Linha de `numeros` + `count(*) over ()` da consulta das saidas sem data de
+ * entrega — ver `GET /romaneio/:data`. O count vem como bigint (string). */
+interface LinhaSemDataCrua {
+  numero: string
+  total: string | number
+}
+
+/**
+ * GET /romaneio/:data — O ROMANEIO DE ENTREGAS DE UM DIA.
+ *
+ * A folha que o motorista leva na mao para conferir o caminhao antes de sair:
+ * todas as entregas de UM dia, item a item. Devolve as LINHAS CRUAS (um item
+ * por linha, com cabecalho e cliente repetidos pelo join); o agrupamento por
+ * cliente e a formatacao ficam em web/src/derive/romaneio.ts, funcao pura,
+ * como manda o padrao do projeto.
+ *
+ * ---- A DATA E A DE ENTREGA, E ELA E O PARAMETRO DA ROTA ----
+ *
+ * `s.entrega`, nunca `s.data_pedido`: e quando a mercadoria sobe no caminhao.
+ * A escolha ja estava fixada no projeto para movimentacao de estoque (4bee3f0
+ * e a CTE `said` de api/src/routes/estoque.ts, que usa `max(s.entrega)` como
+ * data da saida) e esta rota a segue sem reabrir.
+ *
+ * A data e PARAMETRO OBRIGATORIO da rota, e nao um filtro opcional, de
+ * proposito: assim NAO EXISTE forma de esta rota devolver "todas as entregas"
+ * ou um dia misturado com outro. A separacao por dia — a exigencia que o dono
+ * resumiu como "se nao for bem separado pode foder todo o fluxo" — fica
+ * garantida pela FORMA da rota, nao pela disciplina de quem chama. Sem data
+ * valida, 400; nunca um dia arbitrario.
+ *
+ * ---- SAIDA SEM DATA DE ENTREGA NAO PERTENCE A DIA NENHUM ----
+ *
+ * `s.entrega = <data>` deixa de fora, por construcao, toda saida com
+ * `entrega` nula — ela nao aparece no romaneio de 28/08 nem no de 27/08 nem
+ * em nenhum outro. Sumiria do processo em silencio, e ninguem descobriria ate
+ * o cliente ligar cobrando.
+ *
+ * Por isso a resposta carrega `sem_data_entrega`: QUANTAS sao e QUAIS
+ * (numeros dos pedidos, para a pessoa achar e corrigir), independente do dia
+ * consultado. Mesmo espirito de `itens_saida_sem_data` em
+ * api/src/routes/estoque.ts — la o contador existe para o total nao mudar sem
+ * explicacao; aqui existe para a venda nao sumir sem aviso. O contador NAO
+ * depende da data pedida (uma venda sem data nao e "de" nenhuma data), e a
+ * lista vem limitada a 50 numeros com o total cheio ao lado: com 400 pedidos
+ * pendurados, imprimir 400 numeros na tela nao ajuda ninguem, mas o TOTAL
+ * continua exato.
+ *
+ * ---- CANCELADO E DEVOLVIDO FICAM DE FORA ----
+ *
+ * `status not in ('Cancelado','Devolvido')` — exatamente o mesmo filtro da
+ * CTE `said` de estoque.ts e de `diasEstoque` (web/src/derive/financeiro.ts).
+ * A pergunta aqui e a mesma daquelas: "que mercadoria de fato se move". Venda
+ * cancelada nunca aconteceu; devolvida voltou pra prateleira. Nenhuma das
+ * duas sobe no caminhao, entao nenhuma das duas entra na folha de conferencia
+ * — imprimi-las faria o motorista procurar caixa que ninguem separou.
+ *
+ * (Isto destoa, de proposito, de `GET /ultimos-precos/:clienteId` logo acima,
+ * que exclui so 'Cancelado': la a pergunta e sobre o PRECO ACORDADO, que a
+ * devolucao nao desfaz. Ver o comentario daquela rota.)
+ *
+ * ---- QUANTIDADE SAI CRUA, NA UNIDADE LANCADA ----
+ *
+ * `i.qtd` e `i.un` sem conversao nenhuma para quilos, ao contrario de `peso`
+ * em GET / (que agrega saidas inteiras e por isso PRECISA de uma unidade
+ * comum). Aqui nao ha agregacao: cada linha e um item, com uma unidade so, e
+ * o motorista confere CAIXA, nao quilo convertido. E a mesma correcao que
+ * 88318ee fez na tela de Estoque — dentro de uma linha nao existe mistura de
+ * unidades a reconciliar, e converter a forca destroi informacao.
+ *
+ * ---- PERMISSAO ----
+ *
+ * Nada alem de `exigirSessao` (aplicado em '*' no topo): quem carrega o
+ * caminhao e o colaborador, e e ele quem precisa da folha. 'pedidos' nao esta
+ * em ADMIN_ONLY_SCREENS (web/src/telas.ts).
+ *
+ * E nao expoe NADA que ele ja nao veja. Cabecalho e itens da saida: GET / e
+ * GET /:id, as duas telas dele. Nome/endereco/telefone/rota do cliente:
+ * `GET /api/clientes` exige so sessao (so o DELETE exige admin — ver
+ * clientes.ts), e a tela de Clientes deixou de ser admin-only. Nome do
+ * produto: `GET /api/produtos`, idem. Preco do item: e o preco que ele mesmo
+ * digita ao lancar a venda. Esta rota junta o que ja era dele; nao abre nada.
+ *
+ * Roda dentro de withTenant como toda consulta de negocio — fora dele a RLS
+ * nao acha `app.tenant_id` e devolve zero linhas EM SILENCIO, o que aqui
+ * significaria um romaneio vazio num dia cheio de entregas.
+ */
+saidas.get('/romaneio/:data', async (c) => {
+  const data = c.req.param('data')
+  if (!DATA_RE.test(data)) return c.json({ erro: 'data invalida (use AAAA-MM-DD)' }, 400)
+
+  const resultado = await withTenant(c.get('sql'), c.get('tenantId'), async (tx) => {
+    // Uma linha por ITEM. `join saida_itens`/`join produtos` (inner): a API
+    // exige >= 1 item por saida (validarItens) e `saida_itens.produto_id` e
+    // not null com `on delete restrict` (migrations 009/010), entao os dois
+    // lados existem sempre. `left join clientes` porque `saidas.cliente_id` E
+    // anulavel (nasce nulo, e a FK e `on delete set null` — migration 014):
+    // uma entrega sem cliente cadastrado continua sendo carga no caminhao e
+    // tem de aparecer na folha.
+    //
+    // A ordem aqui e so DETERMINISTICA (numero, depois id do item — a mesma
+    // ordem de gravacao que GET /:id usa). A ordem de LEITURA da folha — por
+    // rota, depois por cliente — e decidida em derive/romaneio.ts, onde da
+    // para testa-la sem banco.
+    const itens = await tx<LinhaRomaneioCrua[]>`
+      select s.id as saida_id, s.numero, s.status, s.obs, s.rota,
+             s.cliente_id,
+             c.nome     as cliente_nome,
+             c.endereco as cliente_endereco,
+             c.tel      as cliente_tel,
+             c.rota     as cliente_rota,
+             i.id as item_id, p.nome as produto, i.un, i.qtd, i.preco
+      from saidas s
+      join saida_itens i on i.saida_id = s.id
+      join produtos p on p.id = i.produto_id
+      left join clientes c on c.id = s.cliente_id
+      where s.entrega = ${data}::date
+        and s.status not in ('Cancelado', 'Devolvido')
+      order by s.numero, i.id`
+
+    // As saidas que nao pertencem a dia nenhum. `count(*) over ()` da o total
+    // exato na MESMA varredura em que os 50 primeiros numeros saem — sem uma
+    // segunda consulta que pudesse discordar da primeira. Mais recentes
+    // primeiro: sao as que a pessoa acabou de lancar e ainda lembra.
+    const semData = await tx<LinhaSemDataCrua[]>`
+      select numero, count(*) over () as total
+      from saidas
+      where entrega is null
+        and status not in ('Cancelado', 'Devolvido')
+      order by data_pedido desc, numero
+      limit 50`
+
+    return { itens, semData }
+  })
+
+  return c.json({
+    data,
+    itens: resultado.itens.map(l => ({
+      saida_id: l.saida_id,
+      numero: l.numero,
+      status: l.status,
+      obs: l.obs,
+      rota: l.rota,
+      cliente_id: l.cliente_id,
+      cliente_nome: l.cliente_nome,
+      cliente_endereco: l.cliente_endereco,
+      cliente_tel: l.cliente_tel,
+      cliente_rota: l.cliente_rota,
+      item_id: l.item_id,
+      produto: l.produto,
+      un: l.un,
+      qtd: Number(l.qtd),
+      preco: Number(l.preco),
+    })),
+    sem_data_entrega: {
+      total: Number(resultado.semData[0]?.total ?? 0),
+      numeros: resultado.semData.map(l => l.numero),
+    },
+  })
+})
+
 // GET /:id devolve o cabecalho COM os itens — ao contrario de GET /, aqui a
 // tela de ficha/edicao precisa da lista completa para poder editar.
 saidas.get('/:id', async (c) => {

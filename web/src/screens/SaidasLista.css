@@ -69,6 +69,29 @@
   background: #4a6b2e;
 }
 
+/* Secundário ao lado do "Novo pedido": lançar venda é o trabalho de todo dia
+   desta tela; imprimir o romaneio é uma vez por manhã. A hierarquia visual
+   diz isso. */
+.saidas-botao-romaneio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  color: #3f6b33;
+  border: 1px solid #cfe0c2;
+  border-radius: 9px;
+  padding: 9px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Public Sans', sans-serif;
+}
+
+.saidas-botao-romaneio:hover {
+  background: #eef4e8;
+  border-color: #b6d0a4;
+}
+
 /* ---------- cartões de resumo ---------- */
 
 .saidas-stats {

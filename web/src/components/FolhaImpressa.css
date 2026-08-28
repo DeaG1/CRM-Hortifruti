@@ -267,44 +267,61 @@
 
 /* ============================================================== A FOLHA */
 
+/* A ENTRELINHA DA FOLHA — a linha mais cara deste arquivo, e por isso a
+   primeira.
+
+   `index.css` declara `:root { font: 18px/145% ... }`. Entrelinha em
+   PORCENTAGEM computa no elemento onde é declarada e herda como COMPRIMENTO:
+   os 145% viram 26,1px fixos e descem por toda a árvore. Uma célula de tabela
+   com letra de 12px continuava ocupando 26,1px de altura de linha — mais que
+   o dobro do que a letra pede — sem que nada no CSS da folha dissesse isso.
+   Era o maior desperdício das quatro folhas, e não tinha nada a ver com corpo
+   de letra.
+
+   1.35 é entrelinha de leitura normal (o padrão tipográfico fica entre 1.2 e
+   1.5). Quem precisa de outra — a data grande, o alerta emoldurado — declara a
+   sua logo abaixo. */
 .folha {
   background: #fff;
   border: 1px solid #e6e2d4;
   border-radius: 13px;
-  padding: 26px 28px 22px;
+  padding: 16px 18px 14px;
   color: #1c1c17;
+  line-height: 1.35;
 }
 
 .folha-topo {
   border-bottom: 2px solid #1c1c17;
-  padding-bottom: 12px;
-  margin-bottom: 18px;
+  padding-bottom: 6px;
+  margin-bottom: 10px;
 }
 
 .folha-titulo {
   font-family: 'Archivo', sans-serif;
-  font-size: 13px;
+  font-size: 10.5px;
   font-weight: 700;
-  letter-spacing: 2px;
+  letter-spacing: 1.4px;
   color: #4a4838;
 }
 
 /* A DATA GRANDE. Maior que o título do documento de propósito: quem pega a
-   folha errada tem de perceber antes de conferir a primeira linha. */
+   folha errada tem de perceber antes de conferir a primeira linha. Encolheu
+   de 30px para 20px e continua sendo, com folga, o maior texto da folha — o
+   que a faz funcionar é o CONTRASTE com o resto, não o tamanho absoluto. */
 .folha-data {
   font-family: 'Archivo', sans-serif;
-  font-size: 30px;
+  font-size: 20px;
   font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.5px;
-  margin-top: 2px;
+  line-height: 1.1;
+  letter-spacing: -0.3px;
+  margin-top: 1px;
   color: #1c1c17;
 }
 
 .folha-resumo {
-  font-size: 13px;
+  font-size: 11px;
   color: #4a4838;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 /* O AVISO QUE VAI PARA O PAPEL — não confundir com `.folha-aviso`, que é da
@@ -318,56 +335,83 @@
 .folha-alerta {
   border: 2px solid #1c1c17;
   border-radius: 6px;
-  padding: 9px 12px;
-  margin: 12px 0 0;
-  font-size: 13px;
-  line-height: 1.5;
+  padding: 5px 9px;
+  margin: 7px 0 0;
+  font-size: 11px;
+  line-height: 1.35;
   color: #1c1c17;
   background: #f6efd8;
 }
 
 /* Um bloco que não pode ser cortado ao meio pela quebra de página: um cliente
-   do romaneio, o cabeçalho de uma entrada. Ver o @media print. */
+   do romaneio, o cabeçalho de uma entrada. Ver o @media print.
+
+   A CAIXA CONTINUA, MAGRA. Ela é o que diz "isto é UMA entrega, deste
+   cliente" para quem lê a folha de longe, e trocá-la por uma régua fina
+   economizaria uns 2px e custaria essa leitura. O que saiu foi o excesso:
+   12px+10px de recheio viraram 6px+5px, e a margem entre blocos caiu de 16px
+   para 8px — 21px por cliente em vez de 40px, sem tirar nada do papel. */
 .folha-bloco {
   border: 1px solid #1c1c17;
-  border-radius: 8px;
-  padding: 12px 14px 10px;
-  margin-bottom: 16px;
+  border-radius: 6px;
+  padding: 6px 9px 5px;
+  margin-bottom: 8px;
+}
+
+/* O BLOCO QUE É A FOLHA INTEIRA — a conferência de carga tem uma coleta só.
+   `break-inside: avoid` existe para não separar um cliente do romaneio do
+   cliente seguinte; num bloco único não há de quem separar, e o efeito
+   passa a ser só destrutivo: o navegador empurra o bloco inteiro para a
+   página 2 e deixa a primeira com o cabeçalho e mais nada. Medido: 17 itens
+   saíam em 2 páginas com a primeira quase vazia, 19 itens em 3. */
+.folha-bloco--unico {
+  break-inside: auto;
+  page-break-inside: auto;
 }
 
 .folha-tabela {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 6px;
-  font-size: 13.5px;
+  margin-top: 3px;
+  font-size: 12px;
 }
 
 .folha-tabela th {
   text-align: left;
-  font-size: 10.5px;
-  letter-spacing: 0.6px;
+  font-size: 10px;
+  letter-spacing: 0.4px;
   color: #4a4838;
   font-weight: 700;
   border-bottom: 1px solid #1c1c17;
-  padding: 3px 6px;
+  padding: 2px 5px;
 }
 
-/* Linha ALTA de propósito: quem confere risca item por item com a folha
-   apoiada no caminhão ou numa prateleira. Densidade aqui não é economia, é
-   folha inutilizável. */
+/* A ALTURA DA LINHA — o piso, e por que ele fica onde fica.
+
+   Quem confere risca item por item com a folha apoiada no caminhão ou numa
+   prateleira: densidade demais aqui não é economia, é folha inutilizável. Mas
+   o que fazia a linha ter 44px NÃO era o recheio de 9px — era a entrelinha de
+   26,1px herdada de `index.css` (ver `.folha`). Com a entrelinha corrigida,
+   4px de recheio dão uma linha de ~24px (6,4mm) nas folhas de riscar e de
+   ~28px (7,4mm) nas de escrever, onde `.folha-branco` manda na altura.
+
+   6,4mm é o espaçamento de um caderno universitário (7,1mm) menos uma fração,
+   e o quadradinho de marcar continua com 15px (4mm) — medida de caixa de
+   formulário impresso. Abaixo disto a caneta começa a invadir a linha
+   vizinha, e aí a folha para de servir ao que motiva imprimi-la. */
 .folha-tabela td {
-  padding: 9px 6px;
+  padding: 4px 5px;
   border-bottom: 1px solid #cfc9b4;
   vertical-align: middle;
 }
 
 .folha-col-check {
-  width: 30px;
+  width: 26px;
   text-align: center;
 }
 
 .folha-col-qtd {
-  width: 130px;
+  width: 118px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
@@ -411,12 +455,16 @@
   display: inline-block;
   border: 1px solid #1c1c17;
   border-radius: 999px;
-  padding: 0 7px;
-  font-size: 10px;
+  padding: 0 6px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.3px;
-  line-height: 15px;
+  line-height: 13px;
   white-space: nowrap;
+  /* Encosta no saldo se não pedir espaço: a coluna é `nowrap` e o selo vem
+     colado ao número no JSX. "0 KG" e "Acabou" são duas informações, e
+     precisam se ler como duas. */
+  margin-left: 4px;
 }
 
 .folha-linha-assinatura {
@@ -435,12 +483,12 @@
 
 .folha-rodape {
   display: flex;
-  gap: 26px;
+  gap: 20px;
   align-items: baseline;
   border-top: 1px solid #1c1c17;
-  padding-top: 12px;
-  margin-top: 6px;
-  font-size: 12px;
+  padding-top: 7px;
+  margin-top: 4px;
+  font-size: 11px;
   color: #35352c;
 }
 
@@ -456,9 +504,9 @@
 .folha-sem-linhas {
   border: 1px dashed #1c1c17;
   border-radius: 8px;
-  padding: 22px 16px;
+  padding: 14px 12px;
   text-align: center;
-  font-size: 13px;
+  font-size: 12px;
   color: #35352c;
 }
 
@@ -480,7 +528,7 @@
 
 .folha-bloco-nome {
   font-family: 'Archivo', sans-serif;
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 700;
   color: #1c1c17;
 }
@@ -489,7 +537,7 @@
    numa página, então cada página carrega pelo menos um destes: quem separar
    as folhas continua sabendo de que dia cada uma é. */
 .folha-bloco-selo {
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 0.3px;
   color: #4a4838;
   white-space: nowrap;
@@ -498,38 +546,38 @@
 .folha-bloco-dados {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 16px;
-  font-size: 12.5px;
+  gap: 2px 12px;
+  font-size: 11px;
   color: #35352c;
-  margin-top: 3px;
+  margin-top: 1px;
 }
 
 .folha-bloco-secao {
-  margin-top: 11px;
+  margin-top: 5px;
 }
 
 .folha-bloco-linha {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: 12.5px;
+  font-size: 11px;
   font-weight: 700;
   color: #35352c;
 }
 
 .folha-bloco-obs {
-  font-size: 12.5px;
+  font-size: 11px;
   color: #35352c;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .folha-bloco-rodape {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 12px;
+  font-size: 11px;
   color: #4a4838;
-  margin-top: 9px;
+  margin-top: 4px;
 }
 
 .folha-produto {
@@ -563,9 +611,17 @@
    global: mais larga que o ideal, ainda perfeitamente legível. Degradação,
    não quebra. */
 
+/* MARGEM DE PÁGINA — 10mm, não 12mm.
+
+   O primeiro lugar onde se procura espaço numa folha que não cabe, e o mais
+   barato: 2mm de cada lado não custam legibilidade nenhuma. 10mm continua
+   acima da margem não-imprimível de qualquer laser ou jato de tinta doméstico
+   (5mm nas laterais, 5–10mm no pé), então a folha não sai cortada em
+   impressora nenhuma. O pé fica em 12mm porque é por ele que a folha é
+   segurada, e a linha de assinatura não pode encostar na borda. */
 @page folha {
   size: A4 portrait;
-  margin: 12mm 12mm 14mm;
+  margin: 10mm 10mm 12mm;
 }
 
 @media print {
@@ -652,5 +708,22 @@
   .folha-topo {
     break-after: avoid;
     page-break-after: avoid;
+  }
+
+  /* O CABEÇALHO DE UM BLOCO NÃO FICA ÓRFÃO NO PÉ DA PÁGINA. Vale para o bloco
+     que PODE quebrar (`.folha-bloco--unico`): o nome do fornecedor sozinho no
+     fim de uma página, com os itens na seguinte, é a mesma confusão que
+     `break-inside: avoid` evita nos blocos do romaneio. */
+  .folha-bloco-topo,
+  .folha-bloco-dados,
+  .folha-bloco-obs,
+  .folha-tabela thead {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .folha-bloco-topo {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 }

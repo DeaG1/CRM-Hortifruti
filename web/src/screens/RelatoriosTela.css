@@ -462,7 +462,7 @@
 @media print {
   @page {
     size: A4 landscape;
-    margin: 12mm;
+    margin: 10mm;
   }
 
   body {
@@ -480,7 +480,12 @@
      altura de uma tela e o relatorio sai cortado na primeira pagina — foi o
      que aconteceu em producao: a previa dizia "1 pagina" e a tabela parava no
      meio. `.shell` estava de fora desta lista; `max-height` idem.
-     RomaneioEntregas.css ja fazia certo, e por isso imprimia inteiro. */
+     RomaneioEntregas.css ja fazia certo, e por isso imprimia inteiro.
+
+     O `padding: 0` chegou depois, e por medicao: `.shell-conteudo` tem
+     `padding: 26px 30px 60px` (Shell.css), e os 86px verticais disso — 23mm,
+     um DECIMO da altura util de uma A4 deitada — saiam impressos em branco em
+     toda folha de relatorio. FolhaImpressa.css ja zerava; aqui faltava. */
   .shell,
   .shell-main,
   .shell-conteudo {
@@ -488,11 +493,161 @@
     overflow: visible !important;
     height: auto !important;
     max-height: none !important;
+    padding: 0 !important;
   }
 
   .relatorios-tabela,
   .relatorios-painel,
   .relatorios-cartao {
     box-shadow: none !important;
+  }
+
+  /* ------------------------------------------------- a folha compactada
+
+     O relatorio impresso e um documento de mesa, nao uma tela: nao precisa de
+     area de clique, nem de respiro entre cartoes, nem de canto arredondado.
+     Tudo aqui e ESPACO — recheio, margem, entrelinha — menos duas linhas de
+     corpo de letra no fim, que param no piso de 12px (9pt, corpo de jornal).
+
+     A ENTRELINHA primeiro, porque e a maior: `index.css` declara
+     `:root { font: 18px/145% }`, e entrelinha em porcentagem herda como
+     COMPRIMENTO — 26,1px fixos em cada linha da tabela, quase o dobro do que
+     a letra de 12,5px pede. Mesma cicatriz de FolhaImpressa.css. */
+  .relatorios-tela {
+    line-height: 1.3;
+  }
+
+  .relatorios-topo {
+    margin-bottom: 8px;
+  }
+
+  .relatorios-abas {
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .relatorios-aba {
+    padding: 3px 9px;
+    font-size: 10px;
+  }
+
+  .relatorios-legenda {
+    margin-bottom: 7px;
+    font-size: 11px;
+  }
+
+  /* QUATRO CARTOES EM UMA FILA, e nao dois por dois. A area util de uma A4
+     deitada e 1032px, abaixo do `max-width: 1100px` do bloco responsivo — o
+     papel entrava no layout de TABLET sem ninguem pedir, e os quatro
+     indicadores ocupavam duas filas (~250px) em vez de uma (~90px). */
+  .relatorios-cartoes {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .relatorios-duas-colunas {
+    grid-template-columns: 1fr 1.3fr;
+    gap: 8px;
+  }
+
+  .relatorios-cartao {
+    padding: 7px 10px;
+    border-radius: 6px;
+  }
+
+  .relatorios-cartao-label {
+    font-size: 10px;
+  }
+
+  .relatorios-cartao-valor {
+    font-size: 15px;
+    margin-top: 1px;
+  }
+
+  .relatorios-cartao-sub {
+    font-size: 9.5px;
+  }
+
+  /* `overflow: hidden` existe para o canto arredondado recortar a primeira e
+     a ultima linha. No papel nao ha canto arredondado, e um bloco com
+     `overflow: hidden` e um contexto de formatacao proprio — exatamente o
+     tipo de caixa que o paginador tem dificuldade de fragmentar. */
+  .relatorios-tabela {
+    border-radius: 0;
+    overflow: visible;
+  }
+
+  .relatorios-linha {
+    padding: 3px 8px;
+    font-size: 12px;
+    gap: 6px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .relatorios-linha--cabecalho {
+    padding: 3px 8px;
+    font-size: 9.5px;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .relatorios-sub-linha {
+    font-size: 9.5px;
+  }
+
+  .relatorios-selo {
+    padding: 0 7px;
+    font-size: 10px;
+  }
+
+  .relatorios-painel {
+    padding: 10px 12px;
+    border-radius: 6px;
+  }
+
+  .relatorios-painel-titulo {
+    font-size: 12.5px;
+  }
+
+  .relatorios-painel-sub {
+    font-size: 10px;
+    margin-bottom: 7px;
+  }
+
+  .relatorios-status-linha {
+    padding: 4px 0;
+    gap: 8px;
+  }
+
+  .relatorios-status-contagem {
+    font-size: 12.5px;
+  }
+
+  .relatorios-motivo-linha {
+    margin-bottom: 7px;
+  }
+
+  .relatorios-motivo-cabecalho {
+    margin-bottom: 2px;
+  }
+
+  .relatorios-motivo-nome {
+    font-size: 11.5px;
+  }
+
+  .relatorios-nota {
+    margin-top: 6px;
+    font-size: 10px;
+  }
+
+  .relatorios-nota--incompleto {
+    padding: 4px 8px;
+    margin-top: 5px;
+  }
+
+  .relatorios-tabela-vazia {
+    padding: 12px 10px;
   }
 }

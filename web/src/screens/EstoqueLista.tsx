@@ -7,7 +7,6 @@ import {
   chaveEstoque,
   posicaoEstoque,
   avisoSaidasSemData,
-  totalEstoqueKg,
   situacaoSaldo,
   SELO_SITUACAO,
   AVISO_SITUACAO,
@@ -485,8 +484,6 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
   // O total ENTRE linhas — e o único lugar desta tela onde o quilo é
   // obrigatório: somar 45 UN com 10 CX e 30 KG não dá número nenhum. Ele diz
   // quantas linhas ficaram de fora, para não afirmar um depósito que ignora
-  // em silêncio a mercadoria que não converte. Ver `totalEstoqueKg`.
-  const totalKg = totalEstoqueKg(linhas)
   const totalSemConversao = linhas.reduce((s, l) => s + (l.itens_sem_conversao || 0), 0)
   // Só interessa quando se está olhando para trás: em hoje, a saída sem data
   // de entrega não tem nada de estranho — ela já é o saldo de agora.
@@ -605,34 +602,6 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
                 </div>
               </div>
 
-              {/* O total de todas as linhas junto. Ele é EM QUILOS e não pode
-                  ser outra coisa: aqui as unidades se misturam de verdade. E
-                  ele nunca é afirmado sozinho — o subtítulo diz sempre quantas
-                  linhas entraram e quantas ficaram de fora. */}
-              <div className="estoque-stat">
-                <div className="estoque-stat-label">EM ESTOQUE (TOTAL EM KG)</div>
-                <div className="estoque-stat-valor">
-                  {totalKg.disponivel ? (
-                    totalKg.linhasDeFora > 0 ? (
-                      <span className="estoque-incompleto" title={totalKg.aviso}>
-                        {fmtQtd(totalKg.saldo)} kg*
-                      </span>
-                    ) : (
-                      `${fmtQtd(totalKg.saldo)} kg`
-                    )
-                  ) : (
-                    // Travessão, nunca "0 kg": nenhuma linha pôde ser somada,
-                    // e zero afirmaria um depósito vazio que ninguém mediu.
-                    <span className="estoque-incompleto" title={totalKg.aviso}>—*</span>
-                  )}
-                </div>
-                <div className="estoque-stat-sub">
-                  {totalKg.linhasDeFora > 0
-                    ? `${totalKg.linhasSomadas} de ${linhas.length} linha(s) somadas — `
-                      + `${totalKg.linhasDeFora} sem peso médio`
-                    : `${totalKg.linhasSomadas} linha(s) somadas`}
-                </div>
-              </div>
             </div>
 
             <div className={posicao.historica ? 'estoque-tabela estoque-tabela--historica' : 'estoque-tabela'}>
@@ -933,8 +902,14 @@ export function EstoqueLista({ onSessaoExpirada }: EstoqueListaProps) {
                 role="note"
                 aria-label="Linhas fora do total em quilos"
               >
-                <strong>*</strong> {totalKg.aviso} Cadastre o peso médio da embalagem em Produtos
-                para que essas linhas entrem no total.
+                {/* O aviso vinha do cartão de total em quilos, removido a pedido do
+                    dono: com os produtos dele lançados em unidade e sem peso médio,
+                    aquele total só sabia dizer "0 kg*". A marca `*` continua nas
+                    linhas, então a nota passou a se explicar sozinha, sem citar um
+                    total que não existe mais. */}
+                <strong>*</strong> {totalSemConversao} linha(s) em unidade diferente de KG sem peso
+                médio cadastrado no produto: não há como mostrar o equivalente em quilos delas.
+                Cadastre o peso médio da embalagem em Produtos.
               </div>
             )}
           </>

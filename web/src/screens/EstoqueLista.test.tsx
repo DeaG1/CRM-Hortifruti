@@ -497,13 +497,17 @@ describe('EstoqueLista — linha sem peso medio cadastrado', () => {
     expect(secundaria.className).toContain('estoque-incompleto')
   })
 
-  it('mostra a nota de rodape dizendo que a linha ficou fora do TOTAL, nao que a quantidade falta', async () => {
+  // O cartao de total em quilos foi removido a pedido do dono (com produtos em
+  // unidade e sem peso medio, ele so sabia dizer "0 kg*"). A marca `*` continua
+  // nas linhas, entao a nota tem de se explicar SEM citar um total inexistente.
+  it('a nota do asterisco se explica sozinha, sem citar o total removido', async () => {
     mockRotas([semPeso()])
     render(<EstoqueLista />)
     const nota = await screen.findByRole('note', { name: 'Linhas fora do total em quilos' })
     expect(nota).toHaveTextContent(/sem peso médio cadastrado/i)
-    expect(nota).toHaveTextContent(/continua exata na tabela/i)
+    expect(nota).toHaveTextContent(/equivalente em quilos/i)
     expect(nota).toHaveTextContent(/Cadastre o peso médio da embalagem em Produtos/i)
+    expect(nota).not.toHaveTextContent(/no total|do total/i)
   })
 
   it('perda gravada em quilos numa linha em CX marca perda e saldo, e nao vai a vermelho', async () => {
@@ -531,74 +535,6 @@ describe('EstoqueLista — linha sem peso medio cadastrado', () => {
     expect(container.querySelectorAll('.estoque-incompleto')).toHaveLength(0)
     expect(screen.queryByRole('note', { name: 'Linhas fora do total em quilos' })).not.toBeInTheDocument()
     expect(screen.queryByRole('note', { name: 'Perda fora da unidade da linha' })).not.toBeInTheDocument()
-  })
-})
-
-describe('EstoqueLista — o total ENTRE linhas continua em quilos, e diz quantas ficaram fora', () => {
-  const cartaoTotal = (container: HTMLElement) =>
-    within(secaoSaldo(container)).getByText('EM ESTOQUE (TOTAL EM KG)').parentElement!
-
-  it('todas as linhas convertem: o total sai limpo', async () => {
-    mockRotas([
-      linha({ produto_id: 'p-1', nome: 'Tomate', un: 'KG', saldo: 55 }),
-      linha({
-        produto_id: 'p-2', nome: 'Melancia', un: 'CX', saldo: 10, peso_medio: 15,
-        em_kg: { entrou: 150, perda: 1, saiu: 0, saldo: 149 },
-      }),
-    ])
-    const { container } = render(<EstoqueLista />)
-    await screen.findByText('Tomate')
-    const cartao = cartaoTotal(container)
-    expect(cartao).toHaveTextContent('204 kg')      // 55 + 149
-    expect(cartao).toHaveTextContent('2 linha(s) somadas')
-    expect(cartao.textContent).not.toContain('*')
-  })
-
-  it('parte das linhas fora: o total sai marcado e DIZ quantas ficaram de fora', async () => {
-    mockRotas([
-      linha({ produto_id: 'p-1', nome: 'Tomate', un: 'KG', saldo: 55 }),
-      linha({
-        produto_id: 'p-2', nome: 'Alface Hidro', un: 'UN', saldo: 45,
-        em_kg: null, itens_sem_conversao: 1,
-      }),
-    ])
-    const { container } = render(<EstoqueLista />)
-    await screen.findByText('Tomate')
-    const cartao = cartaoTotal(container)
-    expect(cartao).toHaveTextContent('55 kg*')
-    expect(cartao).toHaveTextContent('1 de 2 linha(s) somadas — 1 sem peso médio')
-  })
-
-  it('nenhuma linha converte: travessao, nunca "0 kg" — o caso real das 138 unidades', async () => {
-    // As quatro linhas que o dono lancou. Somadas em quilos nao dao numero
-    // nenhum, e a tela diz isso em vez de afirmar um deposito vazio.
-    const un = (id: string, nome: string, qtd: number) => linha({
-      produto_id: id, nome, un: 'UN', peso_medio: 0,
-      entrou: qtd, perda: 0, saiu: 0, saldo: qtd,
-      em_kg: null, itens_sem_conversao: 1,
-    })
-    mockRotas([
-      un('p-1', 'Alface Hidro', 45), un('p-2', 'Alface Roxa', 45),
-      un('p-3', 'Escarola', 18), un('p-4', 'Rucula', 30),
-    ])
-    const { container } = render(<EstoqueLista />)
-    await screen.findByText('Alface Hidro')
-    // As quantidades, que sao o que importa, estao todas la e sao exatas:
-    // ENTROU e EM ESTOQUE de cada uma das quatro linhas.
-    expect(screen.getAllByText('45 UN')).toHaveLength(4)
-    expect(screen.getAllByText('18 UN')).toHaveLength(2)
-    expect(screen.getAllByText('30 UN')).toHaveLength(2)
-    // Somando as quatro: 138 unidades de mercadoria real, que a tela exibia
-    // como quatro zeros com asterisco.
-    expect(45 + 45 + 18 + 30).toBe(138)
-    // E o total nao afirma zero.
-    const cartao = cartaoTotal(container)
-    expect(cartao).toHaveTextContent('—*')
-    expect(cartao.textContent).not.toContain('0 kg')
-    expect(cartao).toHaveTextContent('0 de 4 linha(s) somadas — 4 sem peso médio')
-    // Os itens com estoque continuam sendo contados: quatro, nao zero.
-    expect(within(secaoSaldo(container)).getByText('ITENS COM ESTOQUE').parentElement!)
-      .toHaveTextContent('4')
   })
 })
 

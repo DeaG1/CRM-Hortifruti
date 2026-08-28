@@ -793,7 +793,7 @@ export function ModalSaida({ saidaId, onSalvo, onExcluido, onFechar, onSessaoExp
                             realidade e um alarme falso — o certo e nao avisar
                             (ou dizer que o saldo daquele produto nao e
                             conhecido), nunca acusar excesso. E o mesmo
-                            criterio de `totalEstoqueKg` em derive/estoque.ts,
+                            criterio de conversao em derive/estoque.ts,
                             que ja resolve exatamente esta soma e conta quantas
                             linhas ficaram de fora.
 

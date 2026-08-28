@@ -291,7 +291,7 @@ entradas.get('/', async (c) => {
   // grande em buscarEstoque pra o raciocinio completo.
   //
   // peso_total sai SEMPRE EM KG. `entrada_itens.un` aceita
-  // 'KG','CX','UN','DZ','MC' (produtos.un, migration 009) e por muito tempo
+  // 'KG','CX','UN','BDJA','MC' (produtos.un, 009 + 018) e por muito tempo
   // esta soma era `sum(i.qtd)` cru: 30 KG + 12 CX viravam "42", um numero
   // sem significado fisico que ainda por cima alimenta
   // `precoMedio = valor / qtd` em web/src/derive/relatorios.ts

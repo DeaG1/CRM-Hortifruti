@@ -335,10 +335,10 @@ describe('ciclo CRUD completo', () => {
     const resPut = await pedir(`/api/produtos/${criado.id}`, comoAdmin({
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ un: 'DZ' }),
+      body: JSON.stringify({ un: 'BDJA' }),
     }))
     expect(resPut.status).toBe(200)
-    expect((await resPut.json()).un).toBe('DZ')
+    expect((await resPut.json()).un).toBe('BDJA')
 
     const resDelete = await pedir(`/api/produtos/${criado.id}`, comoAdmin({ method: 'DELETE' }))
     expect(resDelete.status).toBe(200)

@@ -158,7 +158,7 @@ describe('quantidadeRomaneio — na unidade lançada, com a unidade colada', () 
     expect(quantidadeRomaneio(45, 'UN')).toBe('45 UN')
     expect(quantidadeRomaneio(10, 'CX')).toBe('10 CX')
     expect(quantidadeRomaneio(30, 'KG')).toBe('30 KG')
-    expect(quantidadeRomaneio(6, 'DZ')).toBe('6 DZ')
+    expect(quantidadeRomaneio(6, 'BDJA')).toBe('6 BDJA')
     expect(quantidadeRomaneio(12, 'MC')).toBe('12 MC')
   })
 

@@ -236,7 +236,7 @@ saidas.use('*', exigirSessao)
 //
 // Por muito tempo esta soma era `sum(i.qtd)` cru sobre saida_itens, cuja
 // coluna `un` aceita as mesmas unidades de produtos.un ('KG','CX','UN',
-// 'DZ','MC', migration 009): 30 KG + 12 CX viravam "42", um numero sem
+// 'BDJA','MC', migrations 009 + 018): 30 KG + 12 CX viravam "42", um numero sem
 // significado fisico. O defeito virou URGENTE quando entradas.ts foi
 // corrigido: `diasEstoque` (web/src/derive/financeiro.ts) calcula
 // `qEnt - qPer - qSai` com qEnt vindo de entradas.peso_total e qSai deste
@@ -319,7 +319,7 @@ interface LinhaUltimoPreco {
  * ---- chave (produto, unidade), nao so produto ----
  *
  * `saida_itens.preco` e preco POR UNIDADE da linha (`saida_itens.un`, que
- * aceita 'KG','CX','UN','DZ','MC' — migration 009). "R$ 30,00" de uma caixa
+ * aceita 'KG','CX','UN','BDJA','MC' — 009 + 018). "R$ 30,00" de uma caixa
  * e "R$ 30,00" de um quilo sao numeros diferentes; devolver so o ultimo
  * preco do produto, sem dizer de que unidade ele e, entregaria ao front um
  * numero que ele nao tem como aplicar sem risco de trocar preco de caixa

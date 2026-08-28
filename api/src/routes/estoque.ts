@@ -261,7 +261,7 @@ interface LinhaMovimentacao {
  *   saida_itens.qtd    -> unidade do ITEM  (saida_itens.un)    -> CONVERTE
  *   saida_itens.perda_kg -> KG por contrato                    -> nao converte
  *
- * `un` nessas tres tabelas aceita 'KG','CX','UN','DZ','MC' (migration 009).
+ * `un` nessas tres tabelas aceita 'KG','CX','UN','BDJA','MC' (009 + 018).
  * A regra de conversao e a MESMA das outras tres ocorrencias dela no projeto
  * (entradas.ts/peso_total, saidas.ts/peso e relatorios.ts/produtos), de
  * proposito — nao existe uma quarta variante: lancamento em 'KG' conta

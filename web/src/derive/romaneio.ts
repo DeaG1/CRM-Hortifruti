@@ -90,7 +90,8 @@ export interface LinhaRomaneio {
   cliente_rota: string | null
   item_id: string
   produto: string
-  /** A unidade em que o item foi LANÇADO ('KG','CX','UN','DZ','MC'). */
+  /** A unidade em que o item foi LANÇADO ('KG','CX','UN','BDJA','MC'
+   * — ver `UNIDADES` em derive/produtos.ts, a lista única). */
   un: string
   qtd: number
   /** Preço por unidade da linha. `0` significa "ninguém preencheu" neste

@@ -31,7 +31,8 @@ import { dataBrCurta } from './pagamento'
 /** Uma linha da resposta de `GET /api/saidas/ultimos-precos/:clienteId`. */
 export interface PrecoLembrado {
   produto_id: string
-  /** Unidade em que aquela venda foi lançada ('KG','CX','UN','DZ','MC'). */
+  /** Unidade em que aquela venda foi lançada ('KG','CX','UN','BDJA','MC'
+   * — ver `UNIDADES` em derive/produtos.ts, a lista única). */
   un: string
   /** Preço por unidade cobrado naquela venda. A API nunca devolve 0 aqui. */
   preco: number

@@ -144,7 +144,7 @@ export const perdas = new Hono<{
 perdas.use('*', exigirSessao)
 
 // `qtd_kg`: a MESMA perda em quilos. `perdas.qtd` esta na unidade da propria
-// perda (`perdas.un`, que aceita 'KG','CX','UN','DZ','MC' — migration 009), e
+// perda (`perdas.un`, que aceita 'KG','CX','UN','BDJA','MC' — 009 + 018), e
 // quem consome esta listagem SOMA varias perdas e as compara com numeros que
 // ja estao em kg: o indice de perdas do painel (web/src/derive/dashboard.ts,
 // indiceDePerdas — perda das entradas em kg + perda de deposito, sobre o kg

@@ -6,6 +6,7 @@ import {
   MEMORIA_VAZIA, aplicarMemoriaNaLinha, aplicarMemoriaNasLinhas, montarMemoriaPreco,
   notaUltimoPreco, type MemoriaPreco, type PrecoLembrado,
 } from '../derive/memoriaPreco'
+import { UNIDADES } from '../derive/produtos'
 import './ModalSaida.css'
 
 export type StatusSaida = 'Pendente' | 'Em rota' | 'Entregue' | 'Cancelado' | 'Devolvido'
@@ -105,8 +106,6 @@ const SAIDA_NOVA = {
 }
 
 type Rascunho = typeof SAIDA_NOVA
-
-const UNIDADES = ['KG', 'CX', 'UN', 'DZ', 'MC'] as const
 
 /** Chave estavel de UI para cada linha de item — nao vai pro corpo do
  * request. `produto_id` sozinho nao serve de key (o mesmo produto pode

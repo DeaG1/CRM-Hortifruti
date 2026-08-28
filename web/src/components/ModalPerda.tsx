@@ -1,11 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { api, ErroApi } from '../api/client'
+import { UNIDADES } from '../derive/produtos'
 import './ModalPerda.css'
-
-/** Unidades aceitas — mesmo enum de `produtos.un` (produtos_un_check, migration
- * 009). `perdas.un` nao tem CHECK no banco, mas usar a mesma lista aqui
- * mantem a UI consistente com o cadastro de produtos. */
-export const UNIDADES = ['KG', 'CX', 'UN', 'DZ', 'MC'] as const
 
 /** Motivos aceitos — exatamente o CHECK de `perdas.motivo`
  * (db/migrations/009_entidades_fase1.sql:168). */

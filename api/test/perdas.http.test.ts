@@ -490,8 +490,8 @@ describe('conversao para KG (GET /)', () => {
     // `left join produtos`, nao inner: a linha nao convertivel continua
     // aparecendo na tela de Perdas (com "4 CX"), marcada; o que ela nao faz e
     // entrar num total em quilos.
-    const linha = await criarELer(umaPerda({ un: 'DZ', qtd: 3, produto_id: produtoCxSemPeso }))
-    expect(linha.un).toBe('DZ')
+    const linha = await criarELer(umaPerda({ un: 'BDJA', qtd: 3, produto_id: produtoCxSemPeso }))
+    expect(linha.un).toBe('BDJA')
     expect(linha.qtd).toBe(3)
     expect(linha.qtd_kg).toBeNull()
   })

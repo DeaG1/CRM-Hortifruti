@@ -3,12 +3,8 @@ import { api, ErroApi } from '../api/client'
 import { perdaColetaPct, qtdEmKg, somarQtdEmKg } from '../derive/coleta'
 import { statusIndiceDePerdas } from '../derive/dashboard'
 import type { Health } from '../derive/clientes'
+import { UNIDADES } from '../derive/produtos'
 import './ModalEntrada.css'
-
-/** Unidades aceitas — mesmo enum de `produtos.un` (produtos_un_check, migration
- * 009). `entrada_itens.un` nao tem CHECK no banco, mas usar a mesma lista aqui
- * mantem a UI consistente com o cadastro de produtos. */
-export const UNIDADES = ['KG', 'CX', 'UN', 'DZ', 'MC'] as const
 
 export interface Produto {
   id: string

@@ -83,7 +83,7 @@ export interface Entrada {
  * Uma perda de depósito, como GET /api/perdas devolve — ver
  * api/src/routes/perdas.ts.
  *
- * `qtd` (a quantidade na unidade da PRÓPRIA perda, 'CX', 'DZ'…) NÃO está
+ * `qtd` (a quantidade na unidade da PRÓPRIA perda, 'CX', 'BDJA'…) NÃO está
  * declarada aqui de propósito, embora a API a envie: este módulo soma perdas
  * com números que já estão em quilos, e declarar o campo cru convidaria de
  * volta exatamente o defeito que esta versão corrigiu — 4 caixas de alface

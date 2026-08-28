@@ -737,7 +737,7 @@ describe('PATCH /:id/pag — atalho de pagamento sem reenviar itens', () => {
 
 /**
  * `peso` de GET / sai em KG, nao na soma crua das qtd. `saida_itens.un`
- * aceita as mesmas unidades de produtos.un ('KG','CX','UN','DZ','MC') e somar
+ * aceita as mesmas unidades de produtos.un ('KG','CX','UN','BDJA','MC') e somar
  * tudo junto produzia um numero sem significado fisico (30 KG + 12 CX = "42")
  * que alimenta `qtdEntregueKg` na aba Pedidos do relatorio (uma coluna que ja
  * se chamava "Kg") e, o mais grave, o lado direito da subtracao

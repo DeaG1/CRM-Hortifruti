@@ -349,7 +349,7 @@ describe('conversao numerica (paraJson)', () => {
 
 /**
  * peso_total de GET / sai em KG, nao na soma crua das qtd. `entrada_itens.un`
- * aceita 'KG','CX','UN','DZ','MC' e somar tudo junto produzia um numero sem
+ * aceita 'KG','CX','UN','BDJA','MC' e somar tudo junto produzia um numero sem
  * significado fisico (30 KG + 12 CX = "42") que ainda alimenta
  * `precoMedio = valor / qtd` no relatorio de compras. A regra e a mesma de
  * api/src/routes/estoque.ts (paraJson/equivalente_kg): 'KG' conta qtd, o

@@ -51,7 +51,7 @@ import { exigirSessao, exigirAdmin, type Vars } from '../middleware/sessao'
  * compra_qtd, venda_qtd e perda_deposito_qtd somavam `qtd` cru agrupando só
  * por `produto_id`, sem olhar a unidade de cada lançamento. `entrada_itens.un`,
  * `saida_itens.un` e `perdas.un` aceitam as mesmas unidades de `produtos.un`
- * ('KG','CX','UN','DZ','MC', migration 009): um produto comprado ora em caixa
+ * ('KG','CX','UN','BDJA','MC', migrations 009 + 018): um produto comprado ora em caixa
  * ora em quilo tinha os dois somados no mesmo total, e
  * `cm = compra_valor / compra_qtd` (derivarRelatorioProdutos) dividia reais
  * por "caixas mais quilos" — o MESMO defeito de preço médio que

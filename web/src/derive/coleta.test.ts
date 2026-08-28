@@ -11,7 +11,7 @@ describe('qtdEmKg', () => {
 
   it('outra unidade converte pelo peso medio da embalagem', () => {
     expect(qtdEmKg('CX', 4, 8)).toBe(32)
-    expect(qtdEmKg('DZ', 3, 1.5)).toBe(4.5)
+    expect(qtdEmKg('BDJA', 3, 1.5)).toBe(4.5)
   })
 
   it('outra unidade SEM peso medio nao converte: null, nunca 1 nem 0', () => {

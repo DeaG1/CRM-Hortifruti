@@ -236,12 +236,11 @@ function Folha({ folha }: { folha: FolhaEntrada }) {
         resumo={folha.resumo}
       />
 
-      {/* `--unico` porque esta folha tem UM bloco, e ele é a folha inteira:
-          não há bloco seguinte de quem separá-lo, e proibir a quebra só faria
-          o navegador jogar tudo para a página 2 e deixar a primeira com o
-          cabeçalho e mais nada. Ver `.folha-bloco--unico` em
-          FolhaImpressa.css. */}
-      <section className="folha-bloco folha-bloco--unico">
+      {/* Um bloco só, e ele é a folha inteira. A classe `--unico`, que existia
+          para soltar ESTE bloco da proibição de quebra, saiu: a proibição
+          deixou de valer para qualquer bloco (ver o @media print de
+          FolhaImpressa.css). A exceção virou o caso geral. */}
+      <section className="folha-bloco">
         <div className="folha-bloco-topo">
           <div className="folha-bloco-nome">{folha.fornecedor}</div>
           {/* A data repetida junto do fornecedor: quem arquiva a folha

@@ -194,6 +194,31 @@ export function TopoDaFolha({ titulo, data, resumo, alerta }: {
 }
 
 /**
+ * EMPARELHA OS ITENS PARA A FOLHA DE DUAS COLUNAS — item 0 e 1 na primeira
+ * linha impressa, 2 e 3 na segunda, e assim por diante. A última linha vem com
+ * `undefined` do lado direito quando a lista tem tamanho ímpar.
+ *
+ * A ORDEM É ALTERNADA (esquerda, direita, esquerda…), e não "desce a coluna
+ * esquerda inteira e continua na direita". Conferir carga é UMA passada de
+ * cima a baixo: cada linha impressa é uma linha de leitura com dois itens, e o
+ * fim da folha é o fim da lista. A ordem por coluna inteira exigiria que o
+ * leitor soubesse ONDE a coluna esquerda acaba — e essa marca não existe na
+ * última página, onde a lista termina no meio — e, para ficar correta em mais
+ * de uma página, precisaria que o navegador recalculasse a divisão página a
+ * página (`column-count`), que é justamente o que não repete os rótulos de
+ * coluna na página 2. Ver o comentário de `.folha-tabela--duas`.
+ *
+ * Fica aqui, e não em `derive/`, porque não é regra de negócio nenhuma: é a
+ * forma da folha. Nenhum dado é somado, filtrado ou reordenado — os itens
+ * saem na mesma ordem em que entraram, só que dois por linha.
+ */
+export function emPares<T>(itens: readonly T[]): [T, T | undefined][] {
+  const pares: [T, T | undefined][] = []
+  for (let i = 0; i < itens.length; i += 2) pares.push([itens[i], itens[i + 1]])
+  return pares
+}
+
+/**
  * O quadradinho de marcar. É uma caixa DESENHADA COM BORDA, não um caractere:
  * caractere depende da fonte instalada na máquina que imprime e some em
  * impressora monocromática antiga.

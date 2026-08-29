@@ -343,8 +343,10 @@
   background: #f6efd8;
 }
 
-/* Um bloco que não pode ser cortado ao meio pela quebra de página: um cliente
-   do romaneio, o cabeçalho de uma entrada. Ver o @media print.
+/* Um bloco da folha: um cliente do romaneio, a coleta da conferência. Ele
+   PODE ser cortado pela quebra de página — o que não pode é começar com o
+   cabeçalho sozinho no pé de uma folha nem terminar com duas linhas soltas na
+   seguinte. Ver o @media print, que é onde essa distinção mora.
 
    A CAIXA CONTINUA, MAGRA. Ela é o que diz "isto é UMA entrega, deste
    cliente" para quem lê a folha de longe, e trocá-la por uma régua fina
@@ -358,22 +360,120 @@
   margin-bottom: 8px;
 }
 
-/* O BLOCO QUE É A FOLHA INTEIRA — a conferência de carga tem uma coleta só.
-   `break-inside: avoid` existe para não separar um cliente do romaneio do
-   cliente seguinte; num bloco único não há de quem separar, e o efeito
-   passa a ser só destrutivo: o navegador empurra o bloco inteiro para a
-   página 2 e deixa a primeira com o cabeçalho e mais nada. Medido: 17 itens
-   saíam em 2 páginas com a primeira quase vazia, 19 itens em 3. */
-.folha-bloco--unico {
-  break-inside: auto;
-  page-break-inside: auto;
-}
-
 .folha-tabela {
   width: 100%;
   border-collapse: collapse;
   margin-top: 3px;
   font-size: 12px;
+}
+
+/* ================================================ A LISTA EM DUAS COLUNAS
+
+   O DESENHO DO DONO: a folha dividida ao meio por uma linha vertical, com
+   PRODUTO | QTD dos dois lados. Um item é texto curto — "Alface Crespa
+   45 UN" —, e numa A4 retrato de 190mm úteis ele desperdiça metade da
+   largura em branco. Em duas colunas cabe o dobro de itens por página.
+
+   ISTO É UMA TABELA DE SEIS COLUNAS, NÃO DUAS TABELAS NEM `column-count`.
+   A escolha decide três coisas de uma vez:
+
+   1. UM ITEM NUNCA É PARTIDO ENTRE AS COLUNAS. O nome e a quantidade são
+      duas células da MESMA `<tr>`; não existe regra de CSS que separe
+      horizontalmente as células de uma linha. Com `column-count` a garantia
+      seria uma promessa (`break-inside: avoid` respeitado pelo navegador);
+      aqui ela é estrutural.
+
+   2. OS RÓTULOS SAEM NOS DOIS LADOS, EM TODA PÁGINA. São seis `<th>` num
+      `<thead>` só, e `thead { display: table-header-group }` (ver o @media
+      print) repete o cabeçalho inteiro a cada página. `column-count` não
+      repete rótulo nenhum: a coluna da direita da segunda folha sairia sem
+      cabeçalho, que é justamente o que o desenho pede para não acontecer.
+
+   3. A QUEBRA DE PÁGINA CONTINUA SENDO A DE TABELA — a mesma que o resto
+      deste arquivo já governa, e que o conserto da página em branco
+      depende. Um container multicol dentro de um contexto paginado é outra
+      máquina de fragmentação, e trocá-la logo depois de consertar um defeito
+      de paginação é como se ganha o defeito seguinte.
+
+   ORDEM DE LEITURA: ALTERNADA (esquerda, direita, esquerda…), não coluna
+   inteira. Conferir carga é UMA passada de cima a baixo: cada linha impressa
+   é uma linha de leitura com dois itens, e o fim da folha é o fim da lista.
+   Descer a coluna esquerda inteira e voltar ao topo exigiria que o leitor
+   soubesse ONDE a coluna esquerda acaba — marca que não existe na última
+   página, onde a lista termina no meio —, e só ficaria correto se o
+   navegador recalculasse a divisão página a página, que é de novo multicol,
+   com o cabeçalho perdido junto.
+
+   `table-layout: fixed` NÃO É DETALHE: é o que faz as duas metades terem a
+   mesma largura e a régua cair no meio da folha, como no desenho. Em layout
+   automático a largura de cada coluna sai do conteúdo — um lado com nomes
+   longos empurraria a régua para fora do centro, e ela mudaria de lugar a
+   cada página. Em layout fixo as duas colunas de PRODUTO, que são as únicas
+   sem largura declarada, dividem o que sobra em partes iguais.
+
+   QUEM USA ISTO, E QUEM NÃO USA — a diferença não é a natureza da folha, é a
+   COLUNA DE ESCREVER À MÃO. Um item do romaneio é ✓ + nome + quantidade: em
+   meia folha (359px) sobram ~190px para o nome, e nenhum nome do catálogo
+   quebra. A contagem física e a conferência de carga carregam também um
+   `.folha-branco` de 92px (e, no padrão, uma coluna a mais: "Últ. mov." numa,
+   "Perda coleta" na outra). Em meia folha sobrariam ~120px para o nome.
+
+   MEDIDO, e não estimado — as duas foram transformadas em duas colunas e
+   impressas em PDF pelo Chrome:
+
+     conferência de carga  10 itens: 1 página →  3     30: 2 → 4
+                           20 itens: 1 página →  3     50: 2 → 6
+                           80 itens: 3 páginas → 9
+                           100% dos nomes de produto quebrados em duas linhas
+                           (o `.folha-branco` de 92px não entra numa célula de
+                           76px: a tabela transborda a largura da página)
+
+     contagem física       10, 20, 30 itens: 1 página → 1 página
+                           40, 60 itens: 2 → 2      90 itens: 3 → 3
+                           75 dos 90 nomes quebrados em duas linhas — a linha
+                           dobra de altura e come exatamente o que a segunda
+                           coluna economizaria
+
+   Ou seja: nas duas folhas de escrever à mão, duas colunas não economizam
+   nada e uma delas fica inutilizável. Encolher o espaço de escrever até caber
+   é o que não se faz — ele é o motivo de a folha existir (e2e9968). Por isso
+   duas colunas valem só para o romaneio, e mesmo lá só quando os campos de
+   preço estão desligados.
+
+   Os relatórios (Financeiro/Relatórios) ficam de fora por outra razão: as
+   linhas deles têm de 7 a 9 colunas (`.relatorios-grid-*`) e já saem em A4
+   PAISAGEM. Meia largura ali não é uma lista curta espremida, é uma tabela
+   larga cortada ao meio. */
+.folha-tabela--duas {
+  table-layout: fixed;
+}
+
+/* A RÉGUA DO MEIO — regra fina, não caixa. É uma borda ESQUERDA na primeira
+   célula da metade direita: com `border-collapse: collapse` ela vira uma
+   linha contínua que desce do cabeçalho até a última linha, sem moldura em
+   volta de nada. */
+.folha-tabela--duas .folha-col-corte {
+  border-left: 1px solid #1c1c17;
+  padding-left: 10px;
+}
+
+/* Metade da largura pede colunas mais magras — sem tocar no piso do corpo de
+   letra (12px) nem no quadradinho (15px = 4mm), que é o que se lê e o que se
+   risca. O que encolhe é o espaço vazio: 118px de coluna de quantidade
+   guardam "120 BDJA" com folga de sobra; 76px guardam a mesma coisa. */
+.folha-tabela--duas .folha-col-qtd {
+  width: 76px;
+}
+
+.folha-tabela--duas .folha-col-check {
+  width: 24px;
+}
+
+/* Nome de produto que não cabe QUEBRA em duas linhas — não é cortado nem
+   escapa por cima da régua. `table-layout: fixed` não protege sozinho:
+   uma palavra única mais larga que a coluna transbordaria. */
+.folha-tabela--duas td {
+  overflow-wrap: anywhere;
 }
 
 .folha-tabela th {
@@ -533,9 +633,15 @@
   color: #1c1c17;
 }
 
-/* A data repetida em cada bloco. `break-inside: avoid` mantém o bloco inteiro
-   numa página, então cada página carrega pelo menos um destes: quem separar
-   as folhas continua sabendo de que dia cada uma é. */
+/* A data repetida em cada bloco: quem separar as folhas continua sabendo de
+   que dia cada uma é, sem voltar ao topo do documento.
+
+   Ela sai uma vez por cliente, não uma vez por página — e sempre foi assim.
+   Um cliente maior que uma página nunca coube inteiro numa, então as páginas
+   do meio dele já saíam sem a data antes desta mudança. O que mudou é que
+   agora ISSO É RARO em vez de ser o caso comum: com duas colunas cabem ~52
+   itens por página, e o cliente que atravessa uma folha inteira virou
+   exceção. */
 .folha-bloco-selo {
   font-size: 10px;
   letter-spacing: 0.3px;
@@ -682,17 +788,80 @@
     border-color: #000 !important;
   }
 
-  /* UM BLOCO NÃO É CORTADO AO MEIO. Meia parada numa página e metade na
-     seguinte é como se erra uma caixa: quem confere confere o que vê, vira a
-     folha e não volta. `break-inside` é o nome atual; `page-break-inside`
-     fica para navegador antigo. (Um bloco com mais itens do que cabe numa
-     página inteira quebra assim mesmo — não há como evitar; por isso as
-     linhas de item também pedem para não ser cortadas.) */
-  .folha-bloco,
+  /* ======================================= O QUE SE PROTEGE DA QUEBRA, E O
+     QUE NÃO SE PROTEGE MAIS.
+
+     ANTES: `.folha-bloco { break-inside: avoid }` — "um cliente não é cortado
+     ao meio". A intenção é certa e o efeito era pior que o defeito que
+     evitava. `break-inside: avoid` não diz "aperte para caber": diz "se não
+     couber no que resta da página, EMPURRE O BLOCO INTEIRO para a próxima".
+     Um cliente de 44 itens não cabe em página nenhuma — nem numa página
+     vazia. Então ele era empurrado uma vez, quebrava do mesmo jeito na página
+     seguinte, e a primeira folha saía com o título e a data e mais nada.
+     MEDIDO no romaneio real do dono (2 clientes, 65 itens): 4 páginas, a
+     primeira com 38 glifos — "ROMANEIO DE ENTREGAS" e "sábado, 29/08/2026".
+
+     A regra protegia o bloco INTEIRO, que é o que não se consegue prometer.
+     O que de fato incomoda quem lê são duas coisas menores, e essas dá para
+     prometer sempre:
+
+       1. o cabeçalho do cliente sozinho no pé da página, com os itens na
+          folha seguinte;
+       2. uma ou duas linhas soltas de um cliente numa página.
+
+     É isso que as três regras abaixo protegem. O bloco voltou a poder ser
+     partido — e como pode ser partido, ele agora sempre COMEÇA na primeira
+     página que tiver espaço para o seu cabeçalho e as três primeiras linhas.
+
+     `.folha-bloco--unico`, que a conferência de carga usava para escapar da
+     regra antiga (e2e9968), deixou de existir: a exceção virou o caso geral. */
+
+  /* Uma LINHA de item não é cortada ao meio, nem entre páginas nem entre as
+     duas colunas — e a linha de apoio (`Pedido #… / Total`, a observação)
+     também não. */
   .folha-item,
-  .folha-nao-quebrar {
+  .folha-nao-quebrar,
+  .folha-bloco-topo {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* 1. CABEÇALHO DE CLIENTE ÓRFÃO. `break-after: avoid` é o "não quebre
+     DEPOIS de mim": a corrente vai do nome do cliente até a terceira linha de
+     item, e nenhuma quebra é permitida no meio dela. O nome, o endereço, o
+     número do pedido, os rótulos das colunas e as três primeiras linhas
+     descem juntos para a página seguinte, ou ficam juntos onde estão.
+
+     As três primeiras: `tr:nth-child(-n+2)` proíbe a quebra depois da 1ª e da
+     2ª linha, o que prende a 3ª junto. `orphans`/`widows` seriam o nome certo
+     para isto, mas eles valem para LINHAS DE TEXTO dentro de um bloco, não
+     para linhas de tabela — em tabela quem faz o mesmo trabalho é
+     `break-before`/`break-after` contado com `:nth-child`. Eles ficam
+     declarados assim mesmo, no bloco, porque a observação e o endereço SÃO
+     texto corrido e se beneficiam. */
+  .folha-bloco {
+    orphans: 2;
+    widows: 2;
+  }
+
+  .folha-bloco-topo,
+  .folha-bloco-dados,
+  .folha-bloco-linha,
+  .folha-bloco-obs,
+  .folha-tabela thead,
+  .folha-tabela tbody tr:nth-child(-n + 2) {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* 2. UMA OU DUAS LINHAS SOLTAS NO FIM. O espelho da regra acima: proibir a
+     quebra ANTES da penúltima e da última linha prende as três últimas
+     juntas. Sem isto, um cliente de 20 itens vira 18 numa folha e 2 na
+     outra — e duas linhas sozinhas numa página são lidas como esquecimento,
+     não como continuação. */
+  .folha-tabela tbody tr:nth-last-child(-n + 2) {
+    break-before: avoid;
+    page-break-before: avoid;
   }
 
   /* Cabeçalho da tabela repetido quando uma tabela longa atravessa a página —
@@ -710,20 +879,4 @@
     page-break-after: avoid;
   }
 
-  /* O CABEÇALHO DE UM BLOCO NÃO FICA ÓRFÃO NO PÉ DA PÁGINA. Vale para o bloco
-     que PODE quebrar (`.folha-bloco--unico`): o nome do fornecedor sozinho no
-     fim de uma página, com os itens na seguinte, é a mesma confusão que
-     `break-inside: avoid` evita nos blocos do romaneio. */
-  .folha-bloco-topo,
-  .folha-bloco-dados,
-  .folha-bloco-obs,
-  .folha-tabela thead {
-    break-after: avoid;
-    page-break-after: avoid;
-  }
-
-  .folha-bloco-topo {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
 }

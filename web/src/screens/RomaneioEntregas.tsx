@@ -4,11 +4,12 @@ import {
   montarRomaneio, resumoRomaneio, diaVizinho, dataPorExtensoRomaneio,
   CAMPOS_ROMANEIO, CAMPOS_FIXOS_ROMANEIO,
   type CampoRomaneio, type CamposRomaneio, type Romaneio, type RespostaRomaneio,
+  type ItemRomaneio,
 } from '../derive/romaneio'
 import { camposSalvosRomaneio, salvarCamposRomaneio } from '../preferenciaRomaneio'
 import {
   useModoFolha, BarraDaFolha, PainelDeCampos, TopoDaFolha,
-  CaixaDeMarcar, LinhaAssinatura,
+  CaixaDeMarcar, LinhaAssinatura, emPares,
 } from '../components/FolhaImpressa'
 
 /**
@@ -257,6 +258,22 @@ function Folha({ romaneio }: { romaneio: Romaneio }) {
   const { campos } = romaneio
   const dataFolha = romaneio.dataPorExtenso ?? romaneio.data
 
+  /**
+   * DUAS COLUNAS SÓ QUANDO O ITEM CABE EM MEIA FOLHA.
+   *
+   * Um item do romaneio é texto curto — "Alface Crespa · 45 UN" — e sozinho
+   * numa A4 retrato desperdiça metade da largura. Em duas colunas cabe o
+   * dobro por página, que é o desenho que o dono mandou.
+   *
+   * Ligar preço unitário ou total do item põe duas colunas numéricas de 110px
+   * dentro de cada metade, e aí o nome do produto ficaria com menos de 90px:
+   * "Batata Inglesa Lavada" quebraria em três linhas e a folha ficaria mais
+   * ALTA que a de uma coluna só. Não há corpo de letra que resolva isso sem
+   * descer do piso de 12px, que é a linha que não se cruza (e2e9968) — então
+   * a folha volta para uma coluna, que é a resposta honesta: não coube.
+   */
+  const duasColunas = !campos.precoUnitario && !campos.totalItem
+
   return (
     <div className="folha">
       <TopoDaFolha
@@ -294,32 +311,66 @@ function Folha({ romaneio }: { romaneio: Romaneio }) {
               )}
               {p.obs && <div className="folha-nao-quebrar folha-bloco-obs">Obs.: {p.obs}</div>}
 
-              <table className="folha-tabela">
-                <thead>
-                  <tr>
-                    <th className="folha-col-check" scope="col"><span aria-hidden="true">✓</span></th>
-                    <th scope="col">PRODUTO</th>
-                    <th className="folha-col-qtd" scope="col">QUANTIDADE</th>
-                    {campos.precoUnitario && <th className="folha-col-num" scope="col">PREÇO UN.</th>}
-                    {campos.totalItem && <th className="folha-col-num" scope="col">TOTAL</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {p.itens.map(i => (
-                    <tr key={i.id} className="folha-item">
-                      <td className="folha-col-check"><CaixaDeMarcar /></td>
-                      <td className="folha-produto">{i.produto}</td>
-                      <td className="folha-col-qtd">{i.quantidade}</td>
-                      {campos.precoUnitario && (
-                        <td className="folha-col-num">{i.precoUnitario ?? '—'}</td>
-                      )}
-                      {campos.totalItem && (
-                        <td className="folha-col-num">{i.total ?? '—'}</td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {duasColunas
+                ? (
+                  <table className="folha-tabela folha-tabela--duas">
+                    <thead>
+                      {/* Os rótulos saem NOS DOIS LADOS, como no desenho — e
+                          `thead` é o que os repete em toda página. */}
+                      <tr>
+                        <RotulosDeItem />
+                        <RotulosDeItem corte />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {emPares(p.itens).map(([a, b]) => (
+                        <tr key={a.id} className="folha-item">
+                          <CelulasDeItem item={a} />
+                          {/* A metade direita vazia da última linha ímpar sai
+                              SEM quadradinho: um quadradinho é um item a
+                              conferir, e ali não há item nenhum. */}
+                          {b
+                            ? <CelulasDeItem item={b} corte />
+                            : (
+                              <>
+                                <td className="folha-col-check folha-col-corte" />
+                                <td />
+                                <td className="folha-col-qtd" />
+                              </>
+                            )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )
+                : (
+                  <table className="folha-tabela">
+                    <thead>
+                      <tr>
+                        <th className="folha-col-check" scope="col"><span aria-hidden="true">✓</span></th>
+                        <th scope="col">PRODUTO</th>
+                        <th className="folha-col-qtd" scope="col">QUANTIDADE</th>
+                        {campos.precoUnitario && <th className="folha-col-num" scope="col">PREÇO UN.</th>}
+                        {campos.totalItem && <th className="folha-col-num" scope="col">TOTAL</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {p.itens.map(i => (
+                        <tr key={i.id} className="folha-item">
+                          <td className="folha-col-check"><CaixaDeMarcar /></td>
+                          <td className="folha-produto">{i.produto}</td>
+                          <td className="folha-col-qtd">{i.quantidade}</td>
+                          {campos.precoUnitario && (
+                            <td className="folha-col-num">{i.precoUnitario ?? '—'}</td>
+                          )}
+                          {campos.totalItem && (
+                            <td className="folha-col-num">{i.total ?? '—'}</td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
             </div>
           ))}
 
@@ -336,5 +387,42 @@ function Folha({ romaneio }: { romaneio: Romaneio }) {
         <span>Saída às<LinhaAssinatura curta /></span>
       </div>
     </div>
+  )
+}
+
+/**
+ * Os rótulos de UMA metade da folha de duas colunas. Saem duas vezes na mesma
+ * `<tr>` do `<thead>` — é isso que põe PRODUTO e QTD nos dois lados, como no
+ * desenho, e `display: table-header-group` (@media print) os repete em toda
+ * página.
+ *
+ * "QTD" e não "QUANTIDADE": em meia folha a coluna tem 76px, e o rótulo longo
+ * quebraria em duas linhas no cabeçalho. É a abreviação do próprio desenho.
+ */
+function RotulosDeItem({ corte }: { corte?: boolean }) {
+  return (
+    <>
+      <th
+        className={corte ? 'folha-col-check folha-col-corte' : 'folha-col-check'}
+        scope="col"
+      >
+        <span aria-hidden="true">✓</span>
+      </th>
+      <th scope="col">PRODUTO</th>
+      <th className="folha-col-qtd" scope="col">QTD</th>
+    </>
+  )
+}
+
+/** As três células de um item numa metade da folha de duas colunas. */
+function CelulasDeItem({ item, corte }: { item: ItemRomaneio; corte?: boolean }) {
+  return (
+    <>
+      <td className={corte ? 'folha-col-check folha-col-corte' : 'folha-col-check'}>
+        <CaixaDeMarcar />
+      </td>
+      <td className="folha-produto">{item.produto}</td>
+      <td className="folha-col-qtd">{item.quantidade}</td>
+    </>
   )
 }

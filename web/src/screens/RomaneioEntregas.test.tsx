@@ -13,6 +13,24 @@ vi.mock('../api/client', async (importOriginal) => {
 
 const mockGet = api.get as unknown as ReturnType<typeof vi.fn>
 
+/**
+ * A MEDIÇÃO DA FOLHA DE ENTREGA, controlada.
+ *
+ * `medirCorpoQueCabe` lê alturas do DOM, e o jsdom não faz layout: no ambiente
+ * de teste ele mediria zero para tudo. O padrão (12) é justamente o que a
+ * função real devolve quando não há layout — "não encolhe nada" —, e cada
+ * teste que precisa de uma folha grande enfileira as medições que quer.
+ *
+ * Quem prova que a medição de verdade funciona é a impressão em PDF pelo
+ * Chrome; o que se prova aqui é o que a TELA faz com o resultado dela.
+ */
+const medicao = vi.hoisted(() => ({ fila: [] as number[], padrao: 12 }))
+vi.mock('../components/medicaoDaFolha', () => ({
+  medirCorpoQueCabe: () => (medicao.fila.length > 0
+    ? medicao.fila.shift() as number
+    : medicao.padrao),
+}))
+
 /** O mesmo "hoje" que o componente calcula (componentes LOCAIS, não UTC). */
 function hojeIsoLocal(): string {
   const n = new Date()
@@ -63,6 +81,8 @@ function folha(container: HTMLElement): HTMLElement {
 beforeEach(() => {
   mockGet.mockReset()
   window.localStorage.clear()
+  medicao.fila = []
+  medicao.padrao = 12
 })
 
 afterEach(() => {
@@ -551,5 +571,371 @@ describe('RomaneioEntregas — isolação de falha', () => {
     await screen.findByText('Mercado Boa Safra')
     fireEvent.click(screen.getByRole('button', { name: '← Voltar para a lista' }))
     expect(onVoltar).toHaveBeenCalled()
+  })
+})
+
+// ==================================================================
+// A FOLHA DE ENTREGA — a via que o CLIENTE confere e assina
+// ==================================================================
+
+/** Um pedido com dois itens e cabeçalho de pagamento pendente. */
+function pedidoDeEntrega(over: Record<string, unknown> = {}) {
+  return [
+    linha({
+      saida_id: 'p1', numero: '#1001', item_id: 'i1', produto: 'Alface Crespa',
+      un: 'CX', qtd: 10, preco: 4, pag: 'Pendente', venc: '2036-09-07',
+      forma_pag: 'Boleto', ...over,
+    }),
+    linha({
+      saida_id: 'p1', numero: '#1001', item_id: 'i2', produto: 'Melancia',
+      un: 'UN', qtd: 3, preco: 20, pag: 'Pendente', venc: '2036-09-07',
+      forma_pag: 'Boleto', ...over,
+    }),
+  ]
+}
+
+/** Abre a tela e troca para a folha de entrega. */
+async function irParaEntrega() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Folha de entrega' }))
+  return screen.findByText('FOLHA DE ENTREGA')
+}
+
+describe('RomaneioEntregas — o botão da folha de entrega', () => {
+  it('existe ao lado do romaneio, e o romaneio continua sendo o padrão', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    montar()
+    await screen.findByText('ROMANEIO DE ENTREGAS')
+    expect(screen.getByRole('button', { name: 'Romaneio do dia' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Folha de entrega' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Imprimir romaneio' })).toBeTruthy()
+  })
+
+  it('EXISTE TAMBÉM COM A LISTA VAZIA — a lição de 8cad53e', async () => {
+    // Um dia sem entrega não quer dizer "não há folha de entrega": quer dizer
+    // que este dia está vazio. Esconder o botão aí é escondê-lo de quem foi
+    // procurar — e quem não acha conclui que a funcionalidade não existe.
+    mockDias({})
+    montar()
+    await screen.findByText(/Nenhuma entrega marcada/)
+    expect(screen.getByRole('button', { name: 'Folha de entrega' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Romaneio do dia' })).toBeTruthy()
+  })
+
+  it('com o dia vazio o botão de IMPRIMIR não é oferecido — não há o que mandar ao papel', async () => {
+    mockDias({})
+    montar()
+    await screen.findByText(/Nenhuma entrega marcada/)
+    fireEvent.click(screen.getByRole('button', { name: 'Folha de entrega' }))
+    await screen.findByText(/Nenhum pedido para imprimir/)
+    expect(screen.queryByRole('button', { name: 'Imprimir folha de entrega' })).toBeNull()
+  })
+
+  it('o vazio explica que pedido cancelado ou devolvido não tem folha', async () => {
+    mockDias({})
+    montar()
+    await screen.findByText(/Nenhuma entrega marcada/)
+    fireEvent.click(screen.getByRole('button', { name: 'Folha de entrega' }))
+    const vazio = await screen.findByText(/Nenhum pedido para imprimir/)
+    expect(vazio.parentElement?.textContent).toContain('cancelado')
+    expect(vazio.parentElement?.textContent).toContain('devolvido')
+  })
+
+  it('trocar de folha troca o rótulo do botão de imprimir', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    montar()
+    await irParaEntrega()
+    expect(screen.getByRole('button', { name: 'Imprimir folha de entrega' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Imprimir romaneio' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Romaneio do dia' }))
+    await screen.findByText('ROMANEIO DE ENTREGAS')
+    expect(screen.getByRole('button', { name: 'Imprimir romaneio' })).toBeTruthy()
+  })
+
+  it('imprime com window.print, como as outras folhas', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    montar()
+    await irParaEntrega()
+    const espiao = vi.spyOn(window, 'print').mockImplementation(() => {})
+    fireEvent.click(screen.getByRole('button', { name: 'Imprimir folha de entrega' }))
+    expect(espiao).toHaveBeenCalledTimes(1)
+  })
+
+  it('só UMA folha vai para o papel de cada vez — o romaneio sai da tela', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await irParaEntrega()
+    expect(container.querySelectorAll('.folha')).toHaveLength(1)
+    expect(container.querySelector('.folha-entrega')).not.toBeNull()
+    expect(within(folha(container)).queryByText('ROMANEIO DE ENTREGAS')).toBeNull()
+  })
+
+  it('o painel de campos é do ROMANEIO e some na folha de entrega', async () => {
+    // Valor não é opcional numa via que o cliente assina reconhecendo quanto
+    // recebeu: não há o que escolher aqui.
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await screen.findByText('ROMANEIO DE ENTREGAS')
+    expect(container.querySelector('.folha-campos')).not.toBeNull()
+    await irParaEntrega()
+    expect(container.querySelector('.folha-campos')).toBeNull()
+  })
+
+  it('todo controle continua marcado para não sair no papel', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await irParaEntrega()
+    for (const botao of container.querySelectorAll('button')) {
+      expect(botao.closest('[data-no-print]')).not.toBeNull()
+    }
+    expect(container.querySelector('#entrega-pedido')?.closest('[data-no-print]')).not.toBeNull()
+  })
+})
+
+describe('RomaneioEntregas — o que a folha de entrega diz', () => {
+  it('traz cliente, endereço, telefone, número do pedido e data da entrega', async () => {
+    mockDias({ '2026-08-28': pedidoDeEntrega() })
+    const { container } = montar()
+    fireEvent.change(screen.getByLabelText('Entregas de'), { target: { value: '2026-08-28' } })
+    await irParaEntrega()
+
+    const texto = folha(container).textContent ?? ''
+    expect(texto).toContain('Mercado Boa Safra')
+    expect(texto).toContain('Rua das Flores, 120')
+    expect(texto).toContain('(43) 99999-1111')
+    expect(texto).toContain('Pedido #1001')
+    expect(container.querySelector('.folha-data')?.textContent).toBe('sexta-feira, 28/08/2026')
+  })
+
+  it('cada item tem quadradinho, produto, quantidade NA UNIDADE LANÇADA, preço e total', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await irParaEntrega()
+
+    const texto = folha(container).textContent ?? ''
+    expect(texto).toContain('Alface Crespa')
+    expect(texto).toContain('10 CX')
+    expect(texto).toContain('3 UN')
+    expect(texto).not.toMatch(/\bkg\b/)
+    expect(texto).toContain('R$ 4,00')
+    expect(texto).toContain('R$ 40,00')
+    expect(texto).toContain('R$ 20,00')
+    expect(texto).toContain('R$ 60,00')
+    expect(container.querySelectorAll('.folha-check')).toHaveLength(2)
+  })
+
+  it('o total do pedido sai no rodapé — é o que o cliente assina', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await irParaEntrega()
+    const total = container.querySelector('.folha-entrega-total')
+    expect(total?.textContent).toContain('TOTAL DO PEDIDO')
+    expect(total?.textContent).toContain('R$ 100,00')
+  })
+
+  it('a situação de pagamento vira INSTRUÇÃO: o motorista decide na porta', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await irParaEntrega()
+    const pag = container.querySelector('.folha-entrega-pagamento')
+    expect(pag?.textContent).toContain('RECEBER NA ENTREGA')
+    expect(pag?.textContent).toContain('Pendente')
+    expect(pag?.textContent).toContain('vence em 07/09/2036')
+    expect(pag?.textContent).toContain('Boleto')
+  })
+
+  it('pedido já pago manda NÃO receber', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega({ pag: 'Pago', forma_pag: 'PIX', venc: null }) })
+    const { container } = montar()
+    await irParaEntrega()
+    const pag = container.querySelector('.folha-entrega-pagamento')
+    expect(pag?.textContent).toContain('NÃO RECEBER')
+    expect(pag?.textContent).toContain('PIX')
+  })
+
+  it('tem linha de assinatura, nome legível e data', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await irParaEntrega()
+    const recibo = container.querySelector('.folha-entrega-recibo')
+    expect(recibo?.textContent).toContain('Recebi e conferi')
+    expect(recibo?.textContent).toContain('Assinatura')
+    expect(recibo?.textContent).toContain('Nome legível')
+    expect(recibo?.textContent).toContain('Data')
+    expect(recibo?.querySelectorAll('.folha-linha-assinatura')).toHaveLength(3)
+  })
+
+  it('A ROTA NÃO SAI: é logística interna, o cliente não tem o que fazer com ela', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await irParaEntrega()
+    const texto = folha(container).textContent ?? ''
+    expect(texto).not.toContain('Sul A')
+    expect(texto).not.toContain('Rota')
+  })
+
+  it('STATUS, PERDA e MOTIVO também não saem — são gestão', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega({ status: 'Em rota' }) })
+    const { container } = montar()
+    await irParaEntrega()
+    const texto = folha(container).textContent ?? ''
+    expect(texto).not.toContain('Em rota')
+    expect(texto).not.toContain('Perda')
+    expect(texto).not.toContain('Motivo')
+  })
+
+  it('item sem preço sai com travessão, nunca "R$ 0,00"', async () => {
+    mockDias({ [HOJE]: [linha({ saida_id: 'p1', item_id: 'i1', qtd: 10, preco: 0 })] })
+    const { container } = montar()
+    await irParaEntrega()
+    const texto = folha(container).textContent ?? ''
+    expect(texto).toContain('—')
+    expect(texto).not.toContain('R$ 0,00')
+  })
+})
+
+describe('RomaneioEntregas — escolher DE QUAL pedido é a folha', () => {
+  const doisPedidos = () => mockDias({
+    [HOJE]: [
+      ...pedidoDeEntrega(),
+      linha({
+        saida_id: 'p2', numero: '#1002', item_id: 'i9', produto: 'Rúcula',
+        cliente_id: 'c2', cliente_nome: 'Hortifruti Zé',
+        cliente_endereco: 'Av. Central, 9', cliente_tel: '(43) 98888-2222',
+      }),
+    ],
+  })
+
+  it('o seletor lista os pedidos do dia, com número, cliente e contagem', async () => {
+    doisPedidos()
+    montar()
+    await irParaEntrega()
+    const seletor = screen.getByLabelText<HTMLSelectElement>('Pedido')
+    const rotulos = [...seletor.options].map(o => o.textContent)
+    expect(rotulos).toEqual([
+      '#1001 · Mercado Boa Safra (2 itens)',
+      '#1002 · Hortifruti Zé (1 item)',
+    ])
+  })
+
+  it('abre no primeiro pedido do dia, sem obrigar a escolher', async () => {
+    doisPedidos()
+    const { container } = montar()
+    await irParaEntrega()
+    expect(folha(container).textContent).toContain('Mercado Boa Safra')
+    expect(folha(container).textContent).not.toContain('Hortifruti Zé')
+  })
+
+  it('trocar de pedido troca a folha inteira — UM pedido por folha', async () => {
+    doisPedidos()
+    const { container } = montar()
+    await irParaEntrega()
+    fireEvent.change(screen.getByLabelText('Pedido'), { target: { value: 'p2' } })
+
+    await waitFor(() => {
+      expect(folha(container).textContent).toContain('Hortifruti Zé')
+    })
+    expect(folha(container).textContent).toContain('Rúcula')
+    expect(folha(container).textContent).not.toContain('Alface Crespa')
+    expect(folha(container).textContent).not.toContain('Mercado Boa Safra')
+  })
+
+  it('trocar de dia cai no primeiro pedido do dia novo, sem carregar a escolha velha', async () => {
+    mockDias({
+      [HOJE]: pedidoDeEntrega(),
+      '2026-08-24': [linha({
+        saida_id: 'pX', numero: '#0900', item_id: 'iX', produto: 'Cenoura',
+        cliente_id: 'c9', cliente_nome: 'Padaria Estrela',
+      })],
+    })
+    const { container } = montar()
+    await irParaEntrega()
+    fireEvent.change(screen.getByLabelText('Entregas de'), { target: { value: '2026-08-24' } })
+
+    await waitFor(() => {
+      expect(folha(container).textContent).toContain('Padaria Estrela')
+    })
+    // continua na folha de entrega: trocar o dia não devolve ao romaneio
+    expect(screen.getByRole('button', { name: 'Imprimir folha de entrega' })).toBeTruthy()
+  })
+})
+
+describe('RomaneioEntregas — uma folha só, e o que isso custa', () => {
+  it('no volume do dia a dia a folha NÃO encolhe: sai no tamanho confortável', async () => {
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await irParaEntrega()
+    expect(container.querySelector('.folha-entrega')?.getAttribute('data-corpo')).toBe('12')
+    // sem `zoom`: uma folha no tamanho normal não carrega estilo nenhum
+    expect(container.querySelector('.folha-entrega')?.getAttribute('style')).toBeNull()
+    expect(screen.queryByText(/a letra encolheu/)).toBeNull()
+  })
+
+  it('quando não cabe, a letra encolhe — e a folha diz em quanto', async () => {
+    // Uma coluna não coube (9), duas couberam no mesmo 9: fica com duas.
+    medicao.fila = [9, 9]
+    medicao.padrao = 9
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await irParaEntrega()
+
+    await waitFor(() => {
+      expect(container.querySelector('.folha-entrega')?.getAttribute('data-corpo')).toBe('9')
+    })
+    expect(container.querySelector<HTMLElement>('.folha-entrega')?.style.zoom).toBe('0.75')
+    const aviso = screen.getByText(/a letra encolheu/)
+    expect(aviso.textContent).toContain('12px')
+    expect(aviso.textContent).toContain('9px')
+  })
+
+  it('DUAS COLUNAS antes de encolher a letra — e só quando uma não coube', async () => {
+    medicao.fila = [7, 11]
+    medicao.padrao = 11
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await irParaEntrega()
+
+    await waitFor(() => {
+      expect(container.querySelector('.folha-tabela--duas')).not.toBeNull()
+    })
+    expect(container.querySelector('.folha-entrega')?.getAttribute('data-corpo')).toBe('11')
+  })
+
+  it('abaixo do piso de legibilidade a tela DIZ o número, e imprime assim mesmo', async () => {
+    medicao.fila = [3, 5]
+    medicao.padrao = 5
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await irParaEntrega()
+
+    const aviso = await screen.findByText(/deixa de ser conferível/)
+    expect(aviso.textContent).toContain('5px')
+    expect(aviso.textContent).toContain('Dividir o pedido')
+    // o botão continua lá: a instrução do dono foi "tem que caber de alguma
+    // forma", e o código obedece — o que ele ganha é o número, não um bloqueio.
+    expect(screen.getByRole('button', { name: 'Imprimir folha de entrega' })).toBeTruthy()
+    expect(container.querySelector('.folha-entrega')).not.toBeNull()
+  })
+
+  it('o aviso de tamanho é da TELA, não do papel', async () => {
+    medicao.fila = [8, 8]
+    medicao.padrao = 8
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    const { container } = montar()
+    await irParaEntrega()
+    const aviso = await screen.findByText(/a letra encolheu/)
+    expect(aviso.closest('[data-no-print]')).not.toBeNull()
+    expect(within(folha(container)).queryByText(/a letra encolheu/)).toBeNull()
+  })
+
+  it('a caixa de medição não fica para trás no documento', async () => {
+    medicao.fila = [9, 9]
+    medicao.padrao = 9
+    mockDias({ [HOJE]: pedidoDeEntrega() })
+    montar()
+    await irParaEntrega()
+    await waitFor(() => {
+      expect(document.querySelectorAll('.folha-medindo')).toHaveLength(0)
+    })
   })
 })

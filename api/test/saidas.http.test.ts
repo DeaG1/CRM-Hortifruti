@@ -1118,12 +1118,21 @@ describe('GET /romaneio/:data', () => {
     status: string,
     clienteAlvo: string | null,
     itens: { produto: string; un: string; qtd: number; preco: number }[],
-    extra: { rota?: string; obs?: string } = {},
+    // `pag`/`venc`/`forma_pag` sao o cabecalho de pagamento que a FOLHA DE
+    // ENTREGA le (a via que o cliente assina): e por eles que o motorista sabe,
+    // na porta, se recolhe dinheiro. Os defaults reproduzem uma venda a
+    // receber sem vencimento, que e como a coluna nasce.
+    extra: {
+      rota?: string; obs?: string
+      pag?: string; venc?: string | null; forma?: string
+    } = {},
   ) {
     const [s] = await admin`
-      insert into saidas (tenant_id, cliente_id, numero, data_pedido, entrega, status, rota, obs)
+      insert into saidas (tenant_id, cliente_id, numero, data_pedido, entrega, status, rota, obs,
+                          pag, venc, forma_pag)
       values (${tenantRom}, ${clienteAlvo}, ${numero}, '2026-08-20', ${entrega}, ${status},
-              ${extra.rota ?? ''}, ${extra.obs ?? ''})
+              ${extra.rota ?? ''}, ${extra.obs ?? ''},
+              ${extra.pag ?? 'Pendente'}, ${extra.venc ?? null}, ${extra.forma ?? ''})
       returning id`
     for (const it of itens) {
       await admin`
@@ -1184,12 +1193,13 @@ describe('GET /romaneio/:data', () => {
     ], { rota: 'Sul A', obs: 'Entregar pelos fundos' })
     await semearEntrega('#1002', '2026-08-28', 'Em rota', clienteZe, [
       { produto: produtoAlface, un: 'KG', qtd: 12.5, preco: 8 },
-    ], { rota: 'Norte B' })
+    ], { rota: 'Norte B', pag: 'Pendente', venc: '2026-09-07', forma: 'Boleto' })
     // Mesmo cliente, segundo pedido no MESMO dia — a folha tem de juntar os
     // dois no mesmo bloco (o agrupamento acontece em derive/romaneio.ts).
+    // Este ja foi PAGO: e o outro rodape possivel da folha de entrega.
     await semearEntrega('#1003', '2026-08-28', 'Entregue', clienteBoaSafra, [
       { produto: produtoAlface, un: 'MC', qtd: 6, preco: 3 },
-    ], { rota: 'Sul A' })
+    ], { rota: 'Sul A', pag: 'Pago', forma: 'PIX' })
 
     // 27/08 — vespera, para provar que nao vaza para o dia seguinte.
     await semearEntrega('#0900', '2026-08-27', 'Entregue', clienteZe, [
@@ -1364,6 +1374,54 @@ describe('GET /romaneio/:data', () => {
     expect(b.corpo.itens).toEqual(a.corpo.itens)
     const numeros = (a.corpo.itens as { numero: string }[]).map(i => i.numero)
     expect(numeros).toEqual([...numeros].sort())
+  })
+
+  /**
+   * O CABECALHO DE PAGAMENTO — os tres campos que a FOLHA DE ENTREGA le.
+   *
+   * O romaneio nao os imprime; quem os usa e a via que o cliente assina, para
+   * dizer ao motorista se ele recolhe dinheiro na porta. Eles viajam nesta
+   * rota porque ja vem de graca no join do cabecalho, e uma segunda ida ao
+   * banco so para saber se o pedido esta pago seria um round-trip por folha.
+   */
+  it('cada item traz pag, venc e forma_pag do pedido', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    const item = (corpo.itens as Record<string, unknown>[]).find(i => i.numero === '#1002')!
+    expect(item.pag).toBe('Pendente')
+    expect(item.venc).toBe('2026-09-07')
+    expect(item.forma_pag).toBe('Boleto')
+  })
+
+  it('pedido pago vem marcado como pago, com a forma — o motorista nao cobra de novo', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    const item = (corpo.itens as Record<string, unknown>[]).find(i => i.numero === '#1003')!
+    expect(item.pag).toBe('Pago')
+    expect(item.forma_pag).toBe('PIX')
+  })
+
+  it('o COLABORADOR recebe o cabecalho de pagamento — e ele quem entrega e cobra', async () => {
+    // A folha de entrega e a via que o cliente assina, e quem a leva e o
+    // colaborador. Se ele nao recebesse `pag`/`venc`/`forma_pag`, a folha dele
+    // sairia sem dizer se o pedido ja foi pago — que e a unica coisa nela que
+    // muda o que ele FAZ na porta.
+    const { corpo } = await romaneio('2026-08-28', comoRomColab())
+    const item = (corpo.itens as Record<string, unknown>[]).find(i => i.numero === '#1002')!
+    expect(item.pag).toBe('Pendente')
+    expect(item.venc).toBe('2026-09-07')
+    expect(item.forma_pag).toBe('Boleto')
+  })
+
+  it('venc sai como AAAA-MM-DD, nunca o timestamp cru do driver', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    for (const i of corpo.itens as { venc: unknown }[]) {
+      if (i.venc !== null) expect(i.venc).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    }
+  })
+
+  it('pedido sem vencimento tem venc NULO — nunca uma data inventada', async () => {
+    const { corpo } = await romaneio('2026-08-28')
+    const item = (corpo.itens as Record<string, unknown>[]).find(i => i.numero === '#1001')!
+    expect(item.venc).toBeNull()
   })
 
   it('nenhum tenant_id vaza no corpo', async () => {

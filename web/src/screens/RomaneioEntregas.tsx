@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ErroApi } from '../api/client'
 import {
   montarRomaneio, resumoRomaneio, diaVizinho, dataPorExtensoRomaneio,
@@ -6,11 +6,16 @@ import {
   type CampoRomaneio, type CamposRomaneio, type Romaneio, type RespostaRomaneio,
   type ItemRomaneio,
 } from '../derive/romaneio'
+import {
+  montarFolhaEntrega, pedidosDoDia, rotuloDoPedido, avisoDeLegibilidade,
+  CORPO_CONFORTAVEL, type FolhaEntrega,
+} from '../derive/folhaEntrega'
 import { camposSalvosRomaneio, salvarCamposRomaneio } from '../preferenciaRomaneio'
 import {
   useModoFolha, BarraDaFolha, PainelDeCampos, TopoDaFolha,
   CaixaDeMarcar, LinhaAssinatura, emPares,
 } from '../components/FolhaImpressa'
+import { FolhaEntregaCliente } from './FolhaEntregaCliente'
 
 /**
  * O ROMANEIO DE ENTREGAS — a tela que produz a folha de conferência do
@@ -51,6 +56,24 @@ import {
  * bloco de cliente) porque romaneio do dia errado na mão do motorista é pior
  * que romaneio nenhum: um ele confere e descobre, o outro ele segue
  * confiante.
+ *
+ * ---- DUAS FOLHAS SAEM DAQUI, PARA DUAS PESSOAS DIFERENTES ----
+ *
+ * O ROMANEIO é do motorista: todas as entregas do dia, agrupadas por cliente,
+ * para conferir o caminhão antes de sair. É a folha original desta tela e não
+ * mudou.
+ *
+ * A FOLHA DE ENTREGA (screens/FolhaEntregaCliente.tsx) é do CLIENTE: UM
+ * pedido, com valores, que ele confere na porta e assina reconhecendo o que
+ * recebeu. Ela mora nesta tela, e não numa nova, pelas mesmas três razões que
+ * puseram o romaneio aqui — é a mesma matéria (as entregas do dia SÃO as
+ * saídas), a permissão já está certa e imprimir é uma AÇÃO sobre esta lista.
+ * E por uma quarta: as duas saem da MESMA resposta da API. O dono escolhe o
+ * dia uma vez; imprimir a via de um cliente não custa uma segunda ida ao
+ * banco.
+ *
+ * O que troca entre as duas é UM BOTÃO na barra. Não é navegação: é escolher
+ * PARA QUEM se está imprimindo.
  */
 
 /** Data de hoje em 'AAAA-MM-DD', componentes LOCAIS (não UTC) — o mesmo
@@ -67,6 +90,9 @@ interface RomaneioEntregasProps {
   onVoltar: () => void
   onSessaoExpirada: () => void
 }
+
+/** Qual das duas folhas do dia está na tela — ver o cabeçalho do arquivo. */
+type ModoDeFolha = 'romaneio' | 'entrega'
 
 export function RomaneioEntregas({ onVoltar, onSessaoExpirada }: RomaneioEntregasProps) {
   // Uma vez por montagem: "hoje" não pode mudar debaixo do usuário enquanto
@@ -86,6 +112,20 @@ export function RomaneioEntregas({ onVoltar, onSessaoExpirada }: RomaneioEntrega
   const [resposta, setResposta] = useState<RespostaRomaneio | null>(null)
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
+
+  /** Qual das duas folhas está na tela. O romaneio é o padrão: é a folha do
+   * dia inteiro, a que se imprime uma vez por manhã; a de entrega é por
+   * pedido, e quem a quer sabe qual pedido quer. */
+  const [modo, setModo] = useState<ModoDeFolha>('romaneio')
+  /** O pedido ESCOLHIDO À MÃO. `null` significa "nenhuma escolha ainda", e não
+   * "nenhum pedido": a folha cai no primeiro do dia sozinha (ver
+   * `pedidoEscolhido`). Guardar a escolha e não o pedido resolvido é o que faz
+   * a troca de dia não carregar uma escolha que já não existe. */
+  const [pedidoEscolhidoId, setPedidoEscolhidoId] = useState<string | null>(null)
+  /** O corpo de letra em que a folha de entrega coube — medido pelo próprio
+   * componente da folha. É por ele que a tela conta ao dono que a letra
+   * encolheu, e quando ela encolheu demais. */
+  const [corpoDaEntrega, setCorpoDaEntrega] = useState(CORPO_CONFORTAVEL)
 
   const dataPorExtenso = dataPorExtensoRomaneio(data)
 
@@ -147,12 +187,51 @@ export function RomaneioEntregas({ onVoltar, onSessaoExpirada }: RomaneioEntrega
 
   const temEntregas = !!romaneio && romaneio.grupos.length > 0
 
+  /**
+   * OS PEDIDOS DO DIA, para o seletor da folha de entrega. Saem da MESMA
+   * resposta que o romaneio: um dia carregado, duas folhas possíveis.
+   */
+  const pedidos = useMemo(() => pedidosDoDia(resposta), [resposta])
+
+  /**
+   * O pedido que a folha mostra: o escolhido à mão, se ele ainda existir neste
+   * dia, senão o primeiro.
+   *
+   * A queda para o primeiro é o que faz trocar de dia funcionar sem efeito
+   * nenhum: a escolha antiga simplesmente não é encontrada na lista nova, e a
+   * folha passa a ser a do primeiro pedido do dia novo. Um `useEffect` que
+   * "limpasse a seleção" faria a mesma coisa com um render a mais e um
+   * intervalo em que a tela mostra a folha do dia errado.
+   */
+  const pedidoEscolhido = pedidos.find(p => p.id === pedidoEscolhidoId) ?? pedidos[0] ?? null
+
+  /** Mesma isolação de falha do romaneio: a folha de entrega pode não montar,
+   * e a tela continua de pé com o controle de dia e a escolha de pedido. */
+  const entrega = useMemo<{ folha: FolhaEntrega | null; falhou: boolean }>(() => {
+    if (!resposta || !pedidoEscolhido) return { folha: null, falhou: false }
+    try {
+      return { folha: montarFolhaEntrega(resposta, pedidoEscolhido.id, hoje), falhou: false }
+    } catch {
+      return { folha: null, falhou: true }
+    }
+  }, [resposta, pedidoEscolhido, hoje])
+
+  // Estável de propósito: entra numa dependência de efeito dentro da folha, e
+  // uma função nova a cada render remediria a folha inteira toda vez.
+  const aoMedirCorpo = useCallback((corpo: number) => setCorpoDaEntrega(corpo), [])
+
+  const avisoDoTamanho = entrega.folha
+    ? avisoDeLegibilidade(corpoDaEntrega, entrega.folha.totalItens)
+    : ''
+
+  const podeImprimir = modo === 'romaneio' ? temEntregas : !!entrega.folha
+
   return (
     <div className="folha-tela">
       <BarraDaFolha
         onVoltar={onVoltar}
-        aoImprimir={temEntregas ? () => window.print() : null}
-        rotuloImprimir="Imprimir romaneio"
+        aoImprimir={podeImprimir ? () => window.print() : null}
+        rotuloImprimir={modo === 'romaneio' ? 'Imprimir romaneio' : 'Imprimir folha de entrega'}
       >
         <div className="folha-controle">
           <button
@@ -185,22 +264,68 @@ export function RomaneioEntregas({ onVoltar, onSessaoExpirada }: RomaneioEntrega
             </button>
           )}
         </div>
+
+        {/* OS DOIS BOTÕES DE FOLHA — e eles existem SEMPRE, inclusive num dia
+            sem entrega nenhuma e enquanto o dia carrega. É a lição de 8cad53e:
+            botão que some no caso vazio é botão que o dono procura, não acha, e
+            conclui que a funcionalidade não existe. O que some com a folha
+            vazia é o de IMPRIMIR, que aí não teria o que mandar ao papel. */}
+        <div className="folha-abas" role="group" aria-label="Qual folha imprimir">
+          <button
+            type="button"
+            className={modo === 'romaneio' ? 'folha-aba folha-aba--ativa' : 'folha-aba'}
+            aria-pressed={modo === 'romaneio'}
+            onClick={() => setModo('romaneio')}
+          >
+            Romaneio do dia
+          </button>
+          <button
+            type="button"
+            className={modo === 'entrega' ? 'folha-aba folha-aba--ativa' : 'folha-aba'}
+            aria-pressed={modo === 'entrega'}
+            onClick={() => setModo('entrega')}
+          >
+            Folha de entrega
+          </button>
+        </div>
+
+        {modo === 'entrega' && pedidos.length > 0 && (
+          <div className="folha-controle">
+            <label className="folha-controle-rotulo" htmlFor="entrega-pedido">Pedido</label>
+            <select
+              id="entrega-pedido"
+              className="folha-controle-campo"
+              value={pedidoEscolhido?.id ?? ''}
+              onChange={e => setPedidoEscolhidoId(e.target.value)}
+            >
+              {pedidos.map(p => (
+                <option key={p.id} value={p.id}>{rotuloDoPedido(p)}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </BarraDaFolha>
 
-      <PainelDeCampos
-        defs={CAMPOS_ROMANEIO}
-        campos={campos}
-        aoAlternar={alternarCampo}
-        fixos={CAMPOS_FIXOS_ROMANEIO}
-        naoGravou={preferenciaNaoGravou}
-        nota={
-          <>
-            Os três campos de <strong>Preços</strong> vêm desmarcados de propósito: a folha leva
-            vários clientes juntos, e um cliente lê o preço do outro se ela ficar à vista. A escolha
-            fica gravada neste navegador para a próxima impressão.
-          </>
-        }
-      />
+      {/* O painel é do ROMANEIO: são os campos DELE que ele liga e desliga. A
+          folha de entrega não tem painel de propósito — o que sai nela é
+          decisão fechada (ver derive/folhaEntrega.ts), e valor não é opcional
+          numa via que o cliente assina reconhecendo quanto recebeu. */}
+      {modo === 'romaneio' && (
+        <PainelDeCampos
+          defs={CAMPOS_ROMANEIO}
+          campos={campos}
+          aoAlternar={alternarCampo}
+          fixos={CAMPOS_FIXOS_ROMANEIO}
+          naoGravou={preferenciaNaoGravou}
+          nota={
+            <>
+              Os três campos de <strong>Preços</strong> vêm desmarcados de propósito: a folha leva
+              vários clientes juntos, e um cliente lê o preço do outro se ela ficar à vista. A
+              escolha fica gravada neste navegador para a próxima impressão.
+            </>
+          }
+        />
+      )}
 
       {romaneio && romaneio.avisoSemData && (
         // Só na tela (data-no-print): é trabalho do escritório, não do
@@ -211,7 +336,7 @@ export function RomaneioEntregas({ onVoltar, onSessaoExpirada }: RomaneioEntrega
         </p>
       )}
 
-      {montagemFalhou && (
+      {(montagemFalhou || entrega.falhou) && (
         <p className="folha-estado-aviso" role="status" data-no-print="1">
           Não foi possível montar a folha deste dia. O controle de data e a escolha de campos
           continuam funcionando — troque o dia ou recarregue a tela.
@@ -245,7 +370,32 @@ export function RomaneioEntregas({ onVoltar, onSessaoExpirada }: RomaneioEntrega
         </div>
       )}
 
-      {romaneio && temEntregas && <Folha romaneio={romaneio} />}
+      {/* O AVISO DE TAMANHO — a informação que o dono precisa ter mesmo tendo
+          pedido para a folha nunca passar de uma página.
+          `data-no-print`: é conversa com quem manda imprimir, não com o cliente
+          que assina. Ver `avisoDeLegibilidade`. */}
+      {modo === 'entrega' && avisoDoTamanho && (
+        <p className="folha-aviso" role="status" data-no-print="1">{avisoDoTamanho}</p>
+      )}
+
+      {modo === 'romaneio' && romaneio && temEntregas && <Folha romaneio={romaneio} />}
+
+      {modo === 'entrega' && entrega.folha && (
+        <FolhaEntregaCliente folha={entrega.folha} aoMedirCorpo={aoMedirCorpo} />
+      )}
+
+      {modo === 'entrega' && !carregando && !erro && !entrega.folha && dataPorExtenso && (
+        <div className="estado-vazio folha-vazio" data-no-print="1">
+          <div className="folha-vazio-titulo">
+            Nenhum pedido para imprimir em {romaneio?.dataPorExtenso ?? dataPorExtenso}.
+          </div>
+          <div className="folha-vazio-sub">
+            A folha de entrega sai de <strong>um pedido</strong> do dia escolhido. Pedido
+            cancelado ou devolvido não entra: a folha é o recibo do que o cliente recebeu, e
+            nenhum dos dois foi entregue. Use ◀ e ▶ para ver outro dia.
+          </div>
+        </div>
+      )}
     </div>
   )
 }

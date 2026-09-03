@@ -144,6 +144,49 @@
   cursor: pointer;
 }
 
+/* ------------------------------------------- QUAL FOLHA (romaneio/entrega)
+
+   Saídas produz DUAS folhas do mesmo dia, para duas pessoas diferentes: o
+   romaneio, que o motorista leva para conferir o caminhão, e a folha de
+   entrega, que o cliente confere e assina na porta. Elas moram na mesma tela
+   porque saem do mesmo dado (as entregas daquele dia) — trocar entre as duas
+   é escolher para quem se está imprimindo, não navegar para outro lugar.
+
+   Os dois botões ficam SEMPRE na tela, inclusive num dia sem entrega nenhuma:
+   é a mesma lição de 8cad53e. Botão que some no dia vazio é botão que o dono
+   procura, não acha, e conclui que a funcionalidade não existe. */
+.folha-abas {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid #e6e2d4;
+  border-radius: 9px;
+  padding: 4px 5px;
+}
+
+.folha-aba {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #4a4838;
+  cursor: pointer;
+}
+
+.folha-aba:hover {
+  background: #f1eee2;
+}
+
+.folha-aba--ativa {
+  background: #eef4e8;
+  border-color: #cfe0c2;
+  color: #3f6b33;
+  font-weight: 700;
+}
+
 /* --------------------------------------------------- escolha de campos */
 
 .folha-campos {
@@ -690,12 +733,186 @@
   font-weight: 600;
 }
 
+/* ==================================== O QUE É SÓ DA FOLHA DE ENTREGA
+
+   A via que o CLIENTE confere e assina. Ela usa a mesma casca das outras três
+   (topo, tabela, quadradinho, linha de assinatura) e só acrescenta o pé: o
+   total do pedido, o bloco de pagamento e o recibo.
+
+   VALOR ENTRA POR PADRÃO AQUI, ao contrário do romaneio. Lá preço vem
+   desmarcado porque a folha leva vários clientes juntos e um lê o preço do
+   outro; aqui o cliente é UM, o preço é o dele, e é o que sustenta a cobrança
+   numa divergência — assinatura sem valor reconhece "recebi caixas", não
+   "recebi R$ 1.240,00 em mercadoria". */
+
+/* ------------------- AS DUAS COLUNAS DA FOLHA DE ENTREGA, COM PREÇO E TOTAL
+
+   O romaneio ganhou duas colunas em 201e289, mas SÓ com os campos de preço
+   desligados: com eles, duas colunas numéricas de 110px por metade deixariam
+   o nome do produto com menos de 90px. Esta folha carrega preço e total
+   SEMPRE, então a pergunta foi refeita — e medida de novo, em Chrome
+   headless, no pedido real de 44 itens do dono (altura útil 1031,8px):
+
+     uma coluna    12px = 1593px   11px = 1468   10px = 1348    9px = 1227
+     duas colunas  12px = 1132px   11px =  876   10px =  749    9px =  681
+
+   Em uma coluna o pedido dele precisa descer a 7px para caber numa folha; em
+   duas, cabe com 11px. É a diferença entre uma folha que se confere e uma que
+   não se lê — e por isso duas colunas vêm ANTES de encolher a letra.
+
+   O QUE FEZ CABER foram estas quatro linhas. Com as larguras do romaneio
+   (quantidade 76px e valor 110px) a tabela TRANSBORDA a página: medido, 810px
+   de tabela numa folha de 718px. As colunas numéricas encolhem para 70px e —
+   isto é o detalhe que evita o defeito caro — deixam de ser `nowrap`: um
+   "R$ 1.234,56" mede 79px e, sem quebrar, escaparia POR CIMA da coluna
+   vizinha numa folha que o cliente assina. Quebrando, ele vira duas linhas
+   dentro da própria célula, que é feio e correto, e não custa altura nenhuma
+   porque a linha já tem duas por causa do nome do produto.
+
+   O recheio de 3px (contra 4px e 5px) devolve 30px por metade ao nome do
+   produto — 93px em vez de 63px, que é a diferença entre quebrar em duas
+   linhas e quebrar em três. */
+.folha-entrega .folha-tabela--duas .folha-col-check {
+  width: 22px;
+}
+
+.folha-entrega .folha-tabela--duas .folha-col-qtd {
+  width: 66px;
+  white-space: normal;
+}
+
+.folha-entrega .folha-tabela--duas .folha-col-num {
+  width: 70px;
+  white-space: normal;
+}
+
+.folha-entrega .folha-tabela--duas td,
+.folha-entrega .folha-tabela--duas th {
+  padding: 3px;
+}
+
+/* O total do pedido: régua grossa em cima e o número maior que tudo que vem
+   antes. É o único número da folha que uma pessoa confere de longe, e é o que
+   ela está assinando. */
+.folha-entrega-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 2px solid #1c1c17;
+  margin-top: 5px;
+  padding-top: 5px;
+  font-family: 'Archivo', sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+}
+
+.folha-entrega-total-valor {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+}
+
+/* O BLOCO DE PAGAMENTO — moldura preta, como `.folha-alerta`, e pelo mesmo
+   motivo: em impressora monocromática a cor não sobrevive, a moldura sim.
+
+   Ele existe porque o MOTORISTA DECIDE NA PORTA se recolhe dinheiro. Uma folha
+   que não diz se o pedido já foi pago transforma essa decisão num telefonema,
+   e o telefonema que não acontece vira mercadoria entregue sem cobrança. */
+.folha-entrega-pagamento {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  border: 2px solid #1c1c17;
+  border-radius: 6px;
+  padding: 4px 9px;
+  margin-top: 7px;
+}
+
+.folha-entrega-aviso {
+  font-family: 'Archivo', sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  color: #1c1c17;
+}
+
+.folha-entrega-situacao {
+  font-size: 11px;
+  color: #35352c;
+}
+
+.folha-entrega-recibo {
+  margin-top: 8px;
+}
+
+.folha-entrega-declaracao {
+  font-size: 11px;
+  color: #35352c;
+}
+
+/* Assinatura, nome legível e data. NOME LEGÍVEL não é redundância com a
+   assinatura: assinatura é rubrica, e rubrica não diz quem recebeu — o nome
+   escrito é o que permite achar a pessoa quando a divergência aparece três
+   dias depois. */
+.folha-entrega-recibo .folha-rodape {
+  margin-top: 3px;
+  padding-top: 9px;
+}
+
 /* ---------------------------------------------------------- responsivo */
 
 @media (max-width: 760px) {
   .folha-campos-grade {
     grid-template-columns: 1fr;
   }
+}
+
+/* ======================================= A CAIXA DE MEDIÇÃO (folha de entrega)
+
+   A folha de entrega precisa caber em UMA página sempre, e para isso ela se
+   mede antes de imprimir (screens/FolhaEntregaCliente.tsx). Esta é a caixa
+   onde a medição acontece.
+
+   ELA VIVE FORA DO `@media print` DE PROPÓSITO, e é aí que está o ponto: as
+   regras de `@media print` não valem na tela, então uma folha medida na tela é
+   medida com 1000px de largura e 16px de recheio, quando o papel lhe dá 190mm
+   e recheio nenhum. Medir assim é medir a coisa errada — sobra largura, o nome
+   do produto não quebra, e a folha que "cabia" sai em duas páginas.
+
+   Então esta caixa REPETE, na tela, a geometria que o papel impõe: a largura
+   útil da A4 retrato com as margens de `@page folha` (210 − 10 − 10 = 190mm) e
+   a folha sem borda, sem canto e sem recheio, exatamente como o `@media print`
+   logo abaixo a deixa.
+
+   AS DUAS MUDAM JUNTAS. Se alguém mexer no recheio da folha impressa ali
+   embaixo e esquecer daqui, nada quebra visivelmente: a medição continua
+   rodando e passa a errar em silêncio, que é a pior forma de errar num
+   mecanismo cujo resultado é "uma página" ou "duas". Por isso as duas ficam
+   coladas neste arquivo, e não uma em cada ponta.
+
+   `visibility: hidden` e não `display: none`: elemento sem `display` não tem
+   layout, e sem layout não há altura para medir. Fora da vista à esquerda
+   (`position: fixed` + `left`) para não empurrar nada nem criar barra de
+   rolagem. */
+.folha-medindo {
+  position: fixed;
+  top: 0;
+  left: -20000px;
+  width: 190mm;
+  max-width: none;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.folha-medindo .folha {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  background: #fff;
 }
 
 /* ============================================================= IMPRESSÃO

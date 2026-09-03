@@ -421,6 +421,12 @@ interface LinhaRomaneioCrua {
   un: string
   qtd: string | number
   preco: string | number
+  /** Cabecalho de pagamento da saida — lido pela FOLHA DE ENTREGA (a via que o
+   * cliente assina), nao pelo romaneio. `venc` e coluna `date`, entao vem como
+   * objeto Date do driver e sai normalizado por dataParaTexto. */
+  pag: string
+  venc: unknown
+  forma_pag: string
 }
 
 /** Linha de `numeros` + `count(*) over ()` da consulta das saidas sem data de
@@ -505,6 +511,13 @@ interface LinhaSemDataCrua {
  * produto: `GET /api/produtos`, idem. Preco do item: e o preco que ele mesmo
  * digita ao lancar a venda. Esta rota junta o que ja era dele; nao abre nada.
  *
+ * `pag`/`venc`/`forma_pag` entraram depois, para a FOLHA DE ENTREGA (a via que
+ * o cliente confere e assina — web/src/derive/folhaEntrega.ts), e nao mudam
+ * essa conta: sao tres colunas do cabecalho de `saidas`, que GET / ja devolve
+ * inteiro (`select s.*`) para a tela de Saidas, dele. E ele PRECISA das tres:
+ * quem entrega decide NA PORTA se recolhe dinheiro, e e so por esses campos
+ * que a folha diz "receber na entrega" ou "ja pago".
+ *
  * Roda dentro de withTenant como toda consulta de negocio — fora dele a RLS
  * nao acha `app.tenant_id` e devolve zero linhas EM SILENCIO, o que aqui
  * significaria um romaneio vazio num dia cheio de entregas.
@@ -528,6 +541,7 @@ saidas.get('/romaneio/:data', async (c) => {
     // para testa-la sem banco.
     const itens = await tx<LinhaRomaneioCrua[]>`
       select s.id as saida_id, s.numero, s.status, s.obs, s.rota,
+             s.pag, s.venc, s.forma_pag,
              s.cliente_id,
              c.nome     as cliente_nome,
              c.endereco as cliente_endereco,
@@ -575,6 +589,9 @@ saidas.get('/romaneio/:data', async (c) => {
       un: l.un,
       qtd: Number(l.qtd),
       preco: Number(l.preco),
+      pag: l.pag,
+      venc: dataParaTexto(l.venc),
+      forma_pag: l.forma_pag,
     })),
     sem_data_entrega: {
       total: Number(resultado.semData[0]?.total ?? 0),

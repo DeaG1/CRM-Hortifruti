@@ -25,6 +25,11 @@ function linha(over: Partial<LinhaRomaneio> = {}): LinhaRomaneio {
     un: 'UN',
     qtd: 45,
     preco: 2.5,
+    // O cabeçalho de pagamento viaja na mesma linha, para a FOLHA DE ENTREGA
+    // (derive/folhaEntrega.ts). O romaneio não o imprime — ver `LinhaRomaneio`.
+    pag: 'Pendente',
+    venc: null,
+    forma_pag: '',
     ...over,
   }
 }

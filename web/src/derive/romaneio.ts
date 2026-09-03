@@ -97,6 +97,24 @@ export interface LinhaRomaneio {
   /** Preço por unidade da linha. `0` significa "ninguém preencheu" neste
    * projeto (ver `preco > 0` em GET /ultimos-precos, api/src/routes/saidas.ts). */
   preco: number
+  /**
+   * ---- OS TRÊS CAMPOS DE PAGAMENTO, E POR QUE ELES VIAJAM AQUI ----
+   *
+   * O ROMANEIO NÃO OS IMPRIME. Quem os lê é a FOLHA DE ENTREGA
+   * (derive/folhaEntrega.ts), que sai da MESMA resposta: o dono escolhe o dia,
+   * a tela já tem as entregas dele na mão, e imprimir a via de um cliente não
+   * pode custar uma segunda ida ao banco só para descobrir se aquele pedido já
+   * foi pago.
+   *
+   * Eles estão no cabeçalho da saída, então o join já os repete de graça em
+   * toda linha do mesmo `saida_id` — não há consulta a mais nem coluna nova.
+   *
+   * `venc` é uma coluna `date` e chega como 'AAAA-MM-DD' (a API normaliza com
+   * `dataParaTexto`); `null` quando a venda não tem vencimento.
+   */
+  pag: string
+  venc: string | null
+  forma_pag: string
 }
 
 /** Quantas saídas não pertencem a dia nenhum, e quais — ver `avisoSemDataEntrega`. */
